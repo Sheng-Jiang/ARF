@@ -1,0 +1,17 @@
+data/*.db
+data/snapshots/*.parquet
+reports/*.md
+reports/*.html
+reports/*.parquet
+.DS_Store
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+.coverage
+htmlcov/
+.pytest_cache/
+.ruff_cache/

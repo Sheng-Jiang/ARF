@@ -1,0 +1,420 @@
+# ARF Seed Universe
+# Edit this file to change layer assignments, pure-play estimates, or add/remove tickers.
+# Fields:
+#   ticker: exchange ticker (use primary listing)
+#   name: display name (English + Chinese where applicable)
+#   leg: US | China | Europe-ref | Pre-IPO
+#   layer: L1 (Energy) | L2 (Chips) | L3 (Infra) | L4 (Models) | L5 (Apps)
+#   pure_play_pct: estimated % of revenue tied to AI workloads (0-100)
+#   primary_exchange: exchange code for fetcher routing
+#   policy_premium: true if state-directed valuation premium applies
+#   notes: free-text context
+
+# ── US Leg ──────────────────────────────────────────────────────────────────
+- ticker: NVDA
+  name: NVIDIA
+  leg: US
+  layer: L2
+  pure_play_pct: 90
+  primary_exchange: NASDAQ
+  policy_premium: false
+  notes: "Data Center segment dominant"
+
+- ticker: AMD
+  name: AMD
+  leg: US
+  layer: L2
+  pure_play_pct: 50
+  primary_exchange: NASDAQ
+  policy_premium: false
+  notes: "MI series scaling; non-AI client/embedded still material"
+
+- ticker: INTC
+  name: Intel
+  leg: US
+  layer: L2
+  pure_play_pct: 25
+  primary_exchange: NASDAQ
+  policy_premium: false
+  notes: "AI relatively small share"
+
+- ticker: AVGO
+  name: Broadcom
+  leg: US
+  layer: L2
+  pure_play_pct: 55
+  primary_exchange: NASDAQ
+  policy_premium: false
+  notes: "AI ASICs growing fast; legacy semis half"
+
+- ticker: MRVL
+  name: Marvell Technology
+  leg: US
+  layer: L2
+  pure_play_pct: 70
+  primary_exchange: NASDAQ
+  policy_premium: false
+  notes: "Datacenter optical/custom silicon"
+
+- ticker: MSFT
+  name: Microsoft
+  leg: US
+  layer: L5
+  pure_play_pct: 35
+  primary_exchange: NASDAQ
+  policy_premium: false
+  notes: "Azure AI growing; majority still classical SaaS"
+
+- ticker: CRM
+  name: Salesforce
+  leg: US
+  layer: L5
+  pure_play_pct: 30
+  primary_exchange: NYSE
+  policy_premium: false
+  notes: "Agentforce push"
+
+- ticker: PLTR
+  name: Palantir
+  leg: US
+  layer: L5
+  pure_play_pct: 80
+  primary_exchange: NYSE
+  policy_premium: false
+  notes: "AIP-driven growth narrative"
+
+- ticker: EQIX
+  name: Equinix
+  leg: US
+  layer: L3
+  pure_play_pct: 30
+  primary_exchange: NASDAQ
+  policy_premium: false
+  notes: "AI portion of colo growing"
+
+- ticker: DLR
+  name: Digital Realty
+  leg: US
+  layer: L3
+  pure_play_pct: 35
+  primary_exchange: NYSE
+  policy_premium: false
+  notes: "Hyperscale AI mix higher"
+
+- ticker: ANET
+  name: Arista Networks
+  leg: US
+  layer: L3
+  pure_play_pct: 70
+  primary_exchange: NYSE
+  policy_premium: false
+  notes: "AI back-end ethernet"
+
+- ticker: CSCO
+  name: Cisco
+  leg: US
+  layer: L3
+  pure_play_pct: 20
+  primary_exchange: NASDAQ
+  policy_premium: false
+  notes: "AI a small part of revenue"
+
+- ticker: NEE
+  name: NextEra Energy
+  leg: US
+  layer: L1
+  pure_play_pct: 25
+  primary_exchange: NYSE
+  policy_premium: false
+  notes: "Data-center load tailwind"
+
+- ticker: WMB
+  name: Williams Companies
+  leg: US
+  layer: L1
+  pure_play_pct: 30
+  primary_exchange: NYSE
+  policy_premium: false
+  notes: "Gas pipelines feeding DC clusters"
+
+- ticker: COHR
+  name: Coherent
+  leg: US
+  layer: L3
+  pure_play_pct: 60
+  primary_exchange: NYSE
+  policy_premium: false
+  notes: "Datacom optics"
+
+- ticker: LITE
+  name: Lumentum
+  leg: US
+  layer: L3
+  pure_play_pct: 80
+  primary_exchange: NASDAQ
+  policy_premium: false
+  notes: "AI optics + OCS pure play"
+
+# ── China Leg ────────────────────────────────────────────────────────────────
+- ticker: "300308.SZ"
+  name: "中际旭创 InnoLight"
+  leg: China
+  layer: L3
+  pure_play_pct: 95
+  primary_exchange: SZSE
+  policy_premium: false
+  notes: "Pure-play optical modules"
+
+- ticker: "300502.SZ"
+  name: "新易盛 Eoptolink"
+  leg: China
+  layer: L3
+  pure_play_pct: 95
+  primary_exchange: SZSE
+  policy_premium: false
+  notes: "Pure-play optical modules"
+
+- ticker: "300394.SZ"
+  name: "天孚通信 TFC"
+  leg: China
+  layer: L3
+  pure_play_pct: 90
+  primary_exchange: SZSE
+  policy_premium: false
+  notes: "Optical components for AI clusters"
+
+- ticker: "688498.SH"
+  name: "源杰科技"
+  leg: China
+  layer: L2
+  pure_play_pct: 90
+  primary_exchange: SSE
+  policy_premium: false
+  notes: "Optical chips (laser diodes)"
+
+- ticker: "002281.SZ"
+  name: "光迅科技 Accelink"
+  leg: China
+  layer: L3
+  pure_play_pct: 60
+  primary_exchange: SZSE
+  policy_premium: false
+  notes: "Telecom + datacom"
+
+- ticker: "688256.SH"
+  name: "寒武纪 Cambricon"
+  leg: China
+  layer: L2
+  pure_play_pct: 95
+  primary_exchange: SSE
+  policy_premium: true
+  notes: "AI accelerators, national-champion premium"
+
+- ticker: "688981.SH"
+  name: "中芯国际 SMIC"
+  leg: China
+  layer: L2
+  pure_play_pct: 50
+  primary_exchange: SSE
+  policy_premium: true
+  notes: "Foundry; AI part of mix. Prefer A-share over 0981.HK"
+
+- ticker: "000977.SZ"
+  name: "浪潮 Inspur"
+  leg: China
+  layer: L3
+  pure_play_pct: 60
+  primary_exchange: SZSE
+  policy_premium: false
+  notes: "AI servers"
+
+- ticker: GDS
+  name: "GDS Holdings"
+  leg: China
+  layer: L3
+  pure_play_pct: 50
+  primary_exchange: NASDAQ
+  policy_premium: false
+  notes: "Hyperscale IDC"
+
+- ticker: VNET
+  name: "VNET Group"
+  leg: China
+  layer: L3
+  pure_play_pct: 40
+  primary_exchange: NASDAQ
+  policy_premium: false
+  notes: "IDC"
+
+- ticker: "300750.SZ"
+  name: "宁德时代 CATL"
+  leg: China
+  layer: L1
+  pure_play_pct: 20
+  primary_exchange: SZSE
+  policy_premium: false
+  notes: "BESS into DC power; small share"
+
+- ticker: BIDU
+  name: Baidu
+  leg: China
+  layer: L5
+  pure_play_pct: 35
+  primary_exchange: NASDAQ
+  policy_premium: false
+  notes: "AI cloud + ERNIE"
+
+- ticker: BABA
+  name: Alibaba
+  leg: China
+  layer: L5
+  pure_play_pct: 30
+  primary_exchange: NYSE
+  policy_premium: false
+  notes: "Cloud Intelligence including AI"
+
+- ticker: "0700.HK"
+  name: "腾讯 Tencent"
+  leg: China
+  layer: L5
+  pure_play_pct: 20
+  primary_exchange: HKEX
+  policy_premium: false
+  notes: "Hunyuan + WeChat AI"
+
+- ticker: "9868.HK"
+  name: "小鹏汽车 XPeng"
+  leg: China
+  layer: L5
+  pure_play_pct: 60
+  primary_exchange: HKEX
+  policy_premium: false
+  notes: "Physical AI / autonomous driving"
+
+- ticker: "2513.HK"
+  name: "智谱华章 Zhipu"
+  leg: China
+  layer: L4
+  pure_play_pct: 95
+  primary_exchange: HKEX
+  policy_premium: false
+  notes: "Pure-play foundation model; IPO Jan 2026"
+
+# ── Pre-IPO Sub-Universe (manual tier only, no numeric ARF) ──────────────────
+- ticker: ANTHROPIC
+  name: Anthropic
+  leg: Pre-IPO
+  layer: L4
+  pure_play_pct: 100
+  primary_exchange: Private
+  policy_premium: false
+  notes: "Last round ~$900B talks; ~$45B annualized ARR (Apr 2026)"
+
+- ticker: OPENAI
+  name: OpenAI
+  leg: Pre-IPO
+  layer: L4
+  pure_play_pct: 100
+  primary_exchange: Private
+  policy_premium: false
+  notes: "$852B Mar 2026 round; S-1 filed confidentially May 22, 2026"
+
+- ticker: BYTEDANCE
+  name: "字节跳动 ByteDance"
+  leg: Pre-IPO
+  layer: L5
+  pure_play_pct: 40
+  primary_exchange: Private
+  policy_premium: true
+  notes: "TikTok + Doubao (Skylark) models"
+
+- ticker: MOONSHOT
+  name: "月之暗面 Moonshot AI"
+  leg: Pre-IPO
+  layer: L4
+  pure_play_pct: 100
+  primary_exchange: Private
+  policy_premium: false
+  notes: "Kimi model"
+
+- ticker: HUAWEI
+  name: "华为 Huawei"
+  leg: Pre-IPO
+  layer: L2
+  pure_play_pct: 25
+  primary_exchange: Private
+  policy_premium: true
+  notes: "Ascend chips + HarmonyOS; state-aligned"
+
+# ── Europe Chokepoint Reference (display only, not scored in v1) ─────────────
+- ticker: ASML
+  name: ASML
+  leg: Europe-ref
+  layer: L2
+  pure_play_pct: 70
+  primary_exchange: NASDAQ
+  policy_premium: false
+  notes: "EUV chokepoint"
+
+- ticker: ARM
+  name: Arm Holdings
+  leg: Europe-ref
+  layer: L2
+  pure_play_pct: 40
+  primary_exchange: NASDAQ
+  policy_premium: false
+  notes: "IP licensing; UK-domiciled"
+
+- ticker: "SMEGY"
+  name: Siemens Energy
+  leg: Europe-ref
+  layer: L1
+  pure_play_pct: 15
+  primary_exchange: OTC
+  policy_premium: false
+  notes: "Grid + DC power"
+
+- ticker: "SBGSF"
+  name: Schneider Electric
+  leg: Europe-ref
+  layer: L1
+  pure_play_pct: 20
+  primary_exchange: OTC
+  policy_premium: false
+  notes: "Power management"
+
+- ticker: STM
+  name: STMicroelectronics
+  leg: Europe-ref
+  layer: L2
+  pure_play_pct: 15
+  primary_exchange: NYSE
+  policy_premium: false
+  notes: ""
+
+- ticker: IFNNY
+  name: Infineon
+  leg: Europe-ref
+  layer: L2
+  pure_play_pct: 15
+  primary_exchange: OTC
+  policy_premium: false
+  notes: ""
+
+- ticker: SAP
+  name: SAP
+  leg: Europe-ref
+  layer: L5
+  pure_play_pct: 20
+  primary_exchange: NYSE
+  policy_premium: false
+  notes: ""
+
+- ticker: ABB
+  name: ABB
+  leg: Europe-ref
+  layer: L1
+  pure_play_pct: 10
+  primary_exchange: NYSE
+  policy_premium: false
+  notes: "Robotics + industrial AI adjacency"

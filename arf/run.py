@@ -1,0 +1,192 @@
+"""ARF pipeline entry point.
+
+Usage:
+    python -m arf.run --as-of 2026-05-28
+"""
+import argparse
+import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import date
+from pathlib import Path
+
+import pandas as pd
+from rich.console import Console
+
+from arf.config import UniverseEntry, load_universe
+from arf.db import init_db, query_thermometer_series, upsert_snapshot
+from arf.fetchers.base import StockData
+from arf.fetchers.china import fetch_china
+from arf.fetchers.us import fetch_us
+from arf.reporting import write_report
+from arf.scoring import compute_arf
+
+log = logging.getLogger(__name__)
+console = Console()
+
+
+def _stock_data_to_dict(sd: StockData) -> dict:
+    return {
+        "ticker": sd.ticker,
+        "as_of_date": sd.as_of_date,
+        "price": sd.price,
+        "market_cap_usd": sd.market_cap_usd,
+        "ev_usd": sd.ev_usd,
+        "revenue_ttm": sd.revenue_ttm,
+        "revenue_yoy_growth": sd.revenue_yoy_growth,
+        "gross_margin": sd.gross_margin,
+        "roe": sd.roe,
+        "free_cash_flow": sd.free_cash_flow,
+        "net_income_excl_nr": sd.net_income_excl_nonrecurring,
+        "forward_pe": sd.forward_pe,
+        "eps_2yr_cagr": sd.eps_2yr_cagr,
+        "revenue_3yr_cagr": sd.revenue_3yr_cagr,
+        "ps_ratio": sd.ps_ratio,
+        "ev_sales": sd.ev_sales,
+        "ev_sales_5yr_percentile": sd.ev_sales_5yr_percentile,
+        "currency": sd.currency,
+        "fx_rate_usd": sd.fx_rate_usd,
+        "data_source": sd.data_source,
+    }
+
+
+def _fetch_one(entry: UniverseEntry, as_of: date) -> StockData:
+    """Fetch a single ticker; return a null StockData on failure."""
+    try:
+        if entry.leg == "US":
+            return fetch_us(entry, as_of)
+        elif entry.leg == "China":
+            return fetch_china(entry, as_of)
+        else:
+            # Pre-IPO and Europe-ref: return null data
+            return StockData(ticker=entry.ticker, as_of_date=as_of,
+                             data_source="manual")
+    except Exception as exc:
+        log.warning("Fetch failed for %s: %s — row will have null market data", entry.ticker, exc)
+        return StockData(ticker=entry.ticker, as_of_date=as_of, data_source="error")
+
+
+def fetch_all(universe: list[UniverseEntry], as_of: date) -> list[StockData]:
+    results: list[StockData] = []
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures = {pool.submit(_fetch_one, entry, as_of): entry for entry in universe}
+        for future in as_completed(futures):
+            entry = futures[future]
+            try:
+                results.append(future.result())
+            except Exception as exc:
+                log.warning("Unexpected error for %s: %s", entry.ticker, exc)
+                results.append(StockData(ticker=entry.ticker, as_of_date=as_of))
+    return results
+
+
+def _build_scoring_df(
+    stocks: list[StockData],
+    universe: list[UniverseEntry],
+) -> pd.DataFrame:
+    entry_map = {e.ticker: e for e in universe}
+    rows = []
+    for sd in stocks:
+        d = _stock_data_to_dict(sd)
+        e = entry_map.get(sd.ticker)
+        if e:
+            d["leg"] = e.leg
+            d["layer"] = e.layer
+            d["name"] = e.name
+            d["pure_play_pct"] = e.pure_play_pct
+            d["policy_premium"] = e.policy_premium
+        else:
+            d["leg"] = "Unknown"
+            d["layer"] = None
+            d["name"] = sd.ticker
+            d["pure_play_pct"] = 0.0
+            d["policy_premium"] = False
+        # Alias revenue_yoy_growth as revenue_ntm_growth for e_score
+        d["revenue_ntm_growth"] = d.get("revenue_yoy_growth")
+        rows.append(d)
+    return pd.DataFrame(rows)
+
+
+def run_pipeline(
+    as_of: date,
+    data_dir: Path = Path("data"),
+    report_dir: Path = Path("reports"),
+    universe_path: Path = Path("config/universe.yaml"),
+) -> pd.DataFrame:
+    """Run the full ARF pipeline for a given as-of date."""
+    console.print(f"[bold]ARF pipeline[/bold] — as of {as_of}")
+
+    universe = load_universe(universe_path)
+    console.print(f"Loaded {len(universe)} universe entries")
+
+    console.print("Fetching market data…")
+    stocks = fetch_all(universe, as_of)
+    console.print(f"Fetched {len(stocks)} stocks ({sum(1 for s in stocks if s.price is not None)} with price data)")
+
+    df = _build_scoring_df(stocks, universe)
+    df = compute_arf(df)
+
+    # Persist to DuckDB
+    db_path = data_dir / "arf.db"
+    conn = init_db(db_path)
+    upsert_snapshot(conn, df, as_of)
+    console.print(f"Snapshot saved to {db_path}")
+
+    # Write parquet
+    snap_dir = data_dir / "snapshots"
+    snap_dir.mkdir(parents=True, exist_ok=True)
+    parquet_path = snap_dir / f"arf_{as_of}.parquet"
+    df.to_parquet(parquet_path, index=False)
+    console.print(f"Parquet written: {parquet_path}")
+
+    # Render reports
+    thermo = query_thermometer_series(conn)
+    conn.close()
+    write_report(df, thermo, as_of, report_dir)
+    console.print(f"Reports written to {report_dir}/")
+
+    _print_calibration_summary(df)
+    return df
+
+
+def _print_calibration_summary(df: pd.DataFrame) -> None:
+    console.print("\n[bold]Calibration check[/bold]")
+    targets = {
+        "NVDA": "D2–D4 (high E, not bubbly)",
+        "PLTR": "D1 (US froth flag)",
+        "CSCO": "D6–D10 (low AI, not bubbly)",
+        "688256.SH": "D1 China (Cambricon froth)",
+    }
+    scored = df[df["arf"].notna()]
+    for ticker, expectation in targets.items():
+        row = scored[scored["ticker"] == ticker]
+        if row.empty:
+            console.print(f"  {ticker}: [yellow]not found[/yellow]")
+        else:
+            r = row.iloc[0]
+            froth = "★" if r.get("froth_flag") else ""
+            console.print(
+                f"  {ticker}: D{r['decile']} ARF={r['arf']:.1f} "
+                f"E={r['e_score']:.1f} V={r['v_score']:.1f} {froth}  "
+                f"(expected: {expectation})"
+            )
+
+
+def main() -> None:
+    logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
+    parser = argparse.ArgumentParser(description="Run the ARF pipeline")
+    parser.add_argument("--as-of", required=True, type=date.fromisoformat,
+                        help="Snapshot date (YYYY-MM-DD)")
+    parser.add_argument("--data-dir", type=Path, default=Path("data"))
+    parser.add_argument("--report-dir", type=Path, default=Path("reports"))
+    parser.add_argument("--universe", type=Path, default=Path("config/universe.yaml"))
+    args = parser.parse_args()
+    run_pipeline(
+        as_of=args.as_of,
+        data_dir=args.data_dir,
+        report_dir=args.report_dir,
+        universe_path=args.universe,
+    )
+
+
+if __name__ == "__main__":
+    main()
