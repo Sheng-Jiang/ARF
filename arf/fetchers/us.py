@@ -1,11 +1,10 @@
-"""US stock fetcher: yfinance primary, stockanalysis.com for EV/S 5yr percentile."""
+"""US stock fetcher: yfinance primary, historical P/S for EV/S percentile."""
 import logging
 import math
 from datetime import date
 
-import requests
+import pandas as pd
 import yfinance as yf
-from bs4 import BeautifulSoup
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from arf.config import UniverseEntry
@@ -13,17 +12,9 @@ from arf.fetchers.base import StockData
 
 log = logging.getLogger(__name__)
 
-_SA_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0 Safari/537.36"
-    )
-}
-
 
 def _safe(val: object) -> float | None:
-    """Return float or None; suppress NaN."""
+    """Return float or None; suppress NaN and Inf."""
     if val is None:
         return None
     try:
@@ -33,42 +24,96 @@ def _safe(val: object) -> float | None:
         return None
 
 
+def _to_naive(ts: pd.Timestamp) -> pd.Timestamp:
+    return ts.tz_localize(None) if ts.tzinfo is not None else ts
+
+
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
-def _yf_info(ticker: str) -> dict:
+def _yf_fetch(ticker: str) -> tuple[dict, yf.Ticker]:
+    """Fetch yfinance info dict and return it alongside the Ticker object."""
     t = yf.Ticker(ticker)
-    return t.info or {}
+    return t.info or {}, t
 
 
-def _ev_sales_percentile_from_stockanalysis(ticker: str) -> float | None:
-    """Scrape 5-year EV/Revenue history from stockanalysis.com and return current percentile."""
-    url = f"https://stockanalysis.com/stocks/{ticker.lower()}/financials/ratios/"
+def _eps_forward_growth(info: dict) -> float | None:
+    """Compute 1yr forward EPS growth from forwardEps / trailingEps.
+
+    Falls back to earningsGrowth if trailing EPS is unavailable or negative
+    (e.g., loss-making companies where the ratio is undefined).
+    """
+    trailing = _safe(info.get("trailingEps"))
+    forward = _safe(info.get("forwardEps"))
+    if trailing is not None and forward is not None and trailing > 0:
+        return (forward / trailing) - 1.0
+    return _safe(info.get("earningsGrowth"))
+
+
+def _ev_sales_5yr_percentile(t: yf.Ticker, info: dict) -> float | None:
+    """Compute EV/Sales 5yr percentile from yfinance historical data.
+
+    Uses historical P/S (price × shares / annual revenue) as a proxy for EV/Sales,
+    since historical debt/cash data is not available from the yfinance free tier.
+    Compares the current EV/Sales (enterpriseToRevenue) against the resulting
+    distribution to produce a 0–100 percentile rank.
+    """
+    current_ev_sales = _safe(info.get("enterpriseToRevenue"))
+    shares = _safe(info.get("sharesOutstanding"))
+    if current_ev_sales is None or not shares:
+        return None
     try:
-        resp = requests.get(url, headers=_SA_HEADERS, timeout=15)
-        resp.raise_for_status()
-        soup = BeautifulSoup(resp.text, "lxml")
-        # Look for EV/Revenue row in the ratios table
-        for row in soup.find_all("tr"):
-            cells = row.find_all("td")
-            if not cells:
+        income = t.income_stmt
+        if income is None or income.empty or "Total Revenue" not in income.index:
+            return None
+        rev_series = income.loc["Total Revenue"].dropna().sort_index(ascending=False)
+        if len(rev_series) == 0:
+            return None
+
+        hist = t.history(period="5y", interval="3mo")
+        if hist.empty or len(hist) < 4:
+            return None
+
+        # Build (date, revenue) pairs with timezone-naive dates
+        rev_pairs = [
+            (_to_naive(pd.Timestamp(d)), float(v))
+            for d, v in zip(rev_series.index, rev_series.values, strict=False)
+            if v and not math.isnan(float(v)) and float(v) > 0
+        ]
+        if not rev_pairs:
+            return None
+
+        historical_ps: list[float] = []
+        for dt, row in hist.iterrows():
+            price = _safe(row["Close"])
+            if price is None:
                 continue
-            label = cells[0].get_text(strip=True).lower()
-            if "ev/revenue" in label or "ev / revenue" in label:
-                values = [_safe(c.get_text(strip=True).replace(",", "")) for c in cells[1:]]
-                values = [v for v in values if v is not None and v > 0]
-                if len(values) >= 2:
-                    current = values[0]
-                    pct = sum(1 for v in values if v <= current) / len(values) * 100
-                    return pct
+            mktcap = price * shares
+            dt_naive = _to_naive(pd.Timestamp(dt))
+            # Use the most recent annual revenue report within 90 days after this quarter
+            rev = None
+            for rd, rv in rev_pairs:
+                if rd <= dt_naive + pd.Timedelta(days=90):
+                    rev = rv
+                    break
+            if rev is None:
+                rev = rev_pairs[-1][1]  # oldest available as last resort
+            if rev > 0:
+                historical_ps.append(mktcap / rev)
+
+        if len(historical_ps) < 4:
+            return None
+
+        return sum(1 for v in historical_ps if v <= current_ev_sales) / len(historical_ps) * 100
+
     except Exception as exc:
-        log.debug("stockanalysis scrape failed for %s: %s", ticker, exc)
-    return None
+        log.debug("EV/S percentile failed for %s: %s", info.get("symbol", "?"), exc)
+        return None
 
 
 def fetch_us(entry: UniverseEntry, as_of: date) -> StockData:
     """Fetch market data and fundamentals for a US-listed stock."""
     result = StockData(ticker=entry.ticker, as_of_date=as_of, currency="USD", fx_rate_usd=1.0)
     try:
-        info = _yf_info(entry.ticker)
+        info, t = _yf_fetch(entry.ticker)
         if not info:
             log.warning("yfinance returned empty info for %s", entry.ticker)
             return result
@@ -87,24 +132,23 @@ def fetch_us(entry: UniverseEntry, as_of: date) -> StockData:
         result.roe = _safe(info.get("returnOnEquity"))
         result.roic = _safe(info.get("returnOnAssets"))
         result.forward_pe = _safe(info.get("forwardPE"))
-        result.eps_2yr_cagr = _safe(info.get("earningsGrowth"))
+        result.eps_2yr_cagr = _eps_forward_growth(info)
         result.revenue_3yr_cagr = _safe(info.get("revenueGrowth"))
         result.revenue_ntm = _safe(info.get("totalRevenue"))
         result.ps_ratio = _safe(info.get("priceToSalesTrailing12Months"))
         result.ev_sales = _safe(info.get("enterpriseToRevenue"))
         result.data_source = "yfinance"
 
-        # EV/Sales 5yr percentile from stockanalysis.com
-        ev_pct = _ev_sales_percentile_from_stockanalysis(entry.ticker)
-        if ev_pct is not None:
-            result.ev_sales_5yr_percentile = ev_pct
-            result.data_source = "yfinance+stockanalysis"
-
         # Per-share FCF → absolute (yfinance sometimes returns per-share)
         if (result.free_cash_flow is not None
                 and result.shares_outstanding is not None
                 and abs(result.free_cash_flow) < 1e6):
             result.free_cash_flow = result.free_cash_flow * result.shares_outstanding
+
+        # EV/Sales 5yr percentile from historical yfinance data
+        ev_pct = _ev_sales_5yr_percentile(t, info)
+        if ev_pct is not None:
+            result.ev_sales_5yr_percentile = ev_pct
 
     except Exception as exc:
         log.warning("fetch_us failed for %s: %s", entry.ticker, exc)

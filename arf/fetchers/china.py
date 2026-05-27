@@ -134,7 +134,12 @@ def _fetch_hk_or_adr(entry: UniverseEntry, as_of: date) -> StockData:
         result.roe = _safe(info.get("returnOnEquity"))
         result.free_cash_flow = _safe(info.get("freeCashflow"))
         result.forward_pe = _safe(info.get("forwardPE"))
-        result.eps_2yr_cagr = _safe(info.get("earningsGrowth"))
+        trailing = _safe(info.get("trailingEps"))
+        forward = _safe(info.get("forwardEps"))
+        if trailing is not None and forward is not None and trailing > 0:
+            result.eps_2yr_cagr = (forward / trailing) - 1.0
+        else:
+            result.eps_2yr_cagr = _safe(info.get("earningsGrowth"))
         result.ps_ratio = _safe(info.get("priceToSalesTrailing12Months"))
         result.ev_sales = _safe(info.get("enterpriseToRevenue"))
         result.data_source = "yfinance"

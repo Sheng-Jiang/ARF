@@ -1,4 +1,4 @@
-"""Integration tests for the US fetcher — hit real yfinance and stockanalysis.com."""
+"""Integration tests for the US fetcher — hit real yfinance."""
 import pytest
 
 from arf.config import UniverseEntry
@@ -19,13 +19,38 @@ class TestFetchUS:
         assert result.roe is not None, "NVDA roe should be non-null"
         assert result.ticker == "NVDA"
 
+    def test_fetch_nvda_eps_growth_populated(self, today):
+        entry = UniverseEntry(
+            ticker="NVDA", name="NVIDIA", leg="US", layer="L2",
+            pure_play_pct=90, primary_exchange="NASDAQ", policy_premium=False,
+        )
+        result = fetch_us(entry, today)
+        assert result.eps_2yr_cagr is not None, (
+            "NVDA eps_2yr_cagr should be non-null (computed from forwardEps/trailingEps)"
+        )
+        assert result.eps_2yr_cagr > 0, (
+            f"NVDA eps_2yr_cagr={result.eps_2yr_cagr:.2f} should be positive"
+        )
+
+    def test_fetch_nvda_ev_sales_percentile_populated(self, today):
+        entry = UniverseEntry(
+            ticker="NVDA", name="NVIDIA", leg="US", layer="L2",
+            pure_play_pct=90, primary_exchange="NASDAQ", policy_premium=False,
+        )
+        result = fetch_us(entry, today)
+        assert result.ev_sales_5yr_percentile is not None, (
+            "NVDA ev_sales_5yr_percentile should be non-null (computed from yfinance history)"
+        )
+        assert 0 <= result.ev_sales_5yr_percentile <= 100, (
+            f"ev_sales_5yr_percentile={result.ev_sales_5yr_percentile} should be 0–100"
+        )
+
     def test_fetch_handles_bad_ticker_gracefully(self, today):
         entry = UniverseEntry(
             ticker="ZZZZZZ_BAD", name="Bad Ticker", leg="US", layer="L2",
             pure_play_pct=0, primary_exchange="NASDAQ", policy_premium=False,
         )
         result = fetch_us(entry, today)
-        # Must not raise; price should be None
         assert result is not None
         assert result.price is None
 
