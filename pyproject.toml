@@ -9,7 +9,7 @@ requires-python = ">=3.11"
 dependencies = [
     "duckdb>=1.1",
     "yfinance>=0.2.50",
-    "akshare>=1.14",
+    "baostock>=0.8.8",
     "pandas>=2.2",
     "numpy>=1.26",
     "scipy>=1.13",

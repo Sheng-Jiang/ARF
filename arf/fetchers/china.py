@@ -1,10 +1,10 @@
-"""China/HK stock fetcher: AkShare primary, yfinance for HK/ADR tickers."""
+"""China/HK stock fetcher: Baostock for A-shares, yfinance for HK/ADR."""
 import logging
 import math
-from datetime import date
+import threading
+from datetime import date, timedelta
 
-import akshare as ak
-import pandas as pd
+import baostock as bs
 import yfinance as yf
 from tenacity import retry, stop_after_attempt, wait_exponential
 
@@ -12,6 +12,12 @@ from arf.config import UniverseEntry
 from arf.fetchers.base import StockData
 
 log = logging.getLogger(__name__)
+
+# Baostock uses a global singleton connection — serialise all calls.
+_bs_lock = threading.Lock()
+
+_FX_CNY_TO_USD = 7.20
+_FX_HKD_TO_USD = 7.78
 
 
 def _safe(val: object) -> float | None:
@@ -28,27 +34,158 @@ def _is_a_share(ticker: str) -> bool:
     return ticker.endswith(".SZ") or ticker.endswith(".SH")
 
 
-def _is_hk(ticker: str) -> bool:
-    return ticker.endswith(".HK")
+def _bs_code(ticker: str) -> str:
+    """'300308.SZ' → 'sz.300308', '688256.SH' → 'sh.688256'."""
+    code, exchange = ticker.split(".")
+    return f"sh.{code}" if exchange == "SH" else f"sz.{code}"
 
 
-def _a_share_code(ticker: str) -> str:
-    """Convert '300308.SZ' → '300308'."""
-    return ticker.split(".")[0]
+def _bs_rows(rs) -> list[dict]:
+    """Drain a baostock ResultData into a list of field dicts."""
+    rows = []
+    while rs.error_code == "0" and rs.next():
+        rows.append(dict(zip(rs.fields, rs.get_row_data(), strict=False)))
+    return rows
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
-def _fetch_akshare_spot(code: str) -> dict:
-    """Fetch real-time quote for an A-share stock."""
-    df = ak.stock_individual_info_em(symbol=code)
-    return {row["item"]: row["value"] for _, row in df.iterrows()}
+def _pct_to_decimal(val: float | None) -> float | None:
+    """Convert a baostock percentage value (e.g. 15.3) to a decimal (0.153).
+
+    Baostock returns ratios as percentages for most financial indicators.
+    Guard against values already in decimal form (<= 1 in absolute value).
+    """
+    if val is None:
+        return None
+    return val / 100.0 if abs(val) > 1 else val
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
-def _fetch_akshare_financials(code: str) -> pd.DataFrame:
-    """Fetch key financial indicators for an A-share stock."""
-    return ak.stock_financial_abstract_ths(symbol=code, indicator="按年度")
+def _fetch_a_share(entry: UniverseEntry, as_of: date) -> StockData:
+    """Fetch A-share data from Baostock (works outside China, no API token needed)."""
+    result = StockData(ticker=entry.ticker, as_of_date=as_of, currency="CNY",
+                       fx_rate_usd=_FX_CNY_TO_USD)
+    code = _bs_code(entry.ticker)
 
+    with _bs_lock:
+        lg = bs.login()
+        if lg.error_code != "0":
+            log.warning("baostock login failed for %s: %s", entry.ticker, lg.error_msg)
+            return result
+        try:
+            _populate_a_share(result, code, as_of)
+        except Exception as exc:
+            log.warning("baostock fetch failed for %s: %s", entry.ticker, exc)
+        finally:
+            bs.logout()
+
+    return result
+
+
+def _populate_a_share(result: StockData, code: str, as_of: date) -> None:
+    end_str = str(as_of)
+    # Look back up to 10 calendar days to skip weekends / holidays
+    start_str = str(as_of - timedelta(days=10))
+
+    # ── 1. Price and valuation ratios ────────────────────────────────────────
+    rs = bs.query_history_k_data_plus(
+        code, "date,close,peTTM,psTTM",
+        start_date=start_str, end_date=end_str,
+        frequency="d", adjustflag="3",
+    )
+    daily = _bs_rows(rs)
+    if daily:
+        row = daily[-1]  # most recent trading day
+        result.price = _safe(row.get("close"))
+        pe = _safe(row.get("peTTM"))
+        if pe and pe > 0:
+            result.forward_pe = pe  # TTM P/E as proxy for forward P/E
+        result.ps_ratio = _safe(row.get("psTTM"))
+
+    # ── 2. EV/Sales 5yr percentile from daily P/S history ───────────────────
+    # psTTM is only available at daily frequency in Baostock (not weekly/monthly).
+    if result.ps_ratio is not None:
+        five_yr_start = str(date(as_of.year - 5, as_of.month, 1))
+        rs_hist = bs.query_history_k_data_plus(
+            code, "date,psTTM",
+            start_date=five_yr_start, end_date=end_str,
+            frequency="d", adjustflag="3",
+        )
+        ps_hist = [_safe(r.get("psTTM")) for r in _bs_rows(rs_hist)]
+        ps_hist = [v for v in ps_hist if v is not None and v > 0]
+        if len(ps_hist) >= 60:  # at least ~3 months of daily trading days
+            curr = result.ps_ratio
+            result.ev_sales_5yr_percentile = (
+                sum(1 for v in ps_hist if v <= curr) / len(ps_hist) * 100
+            )
+
+    # ── 3. Quarterly profit data ──────────────────────────────────────────────
+    # Step back through recent quarters until we find a populated report.
+    profit_row: dict | None = None
+    year, quarter = as_of.year, (as_of.month - 1) // 3 + 1
+    for _ in range(6):
+        rs_p = bs.query_profit_data(code=code, year=year, quarter=quarter)
+        rows_p = _bs_rows(rs_p)
+        if rows_p:
+            profit_row = rows_p[0]
+            break
+        quarter -= 1
+        if quarter == 0:
+            quarter, year = 4, year - 1
+
+    if profit_row:
+        result.gross_margin = _pct_to_decimal(_safe(profit_row.get("gpMargin")))
+        result.roe = _pct_to_decimal(_safe(profit_row.get("roeAvg")))
+        result.revenue_ttm = _safe(profit_row.get("MBRevenue"))
+        # netProfit is the closest Baostock provides to 扣非 at the free tier
+        result.net_income_excl_nonrecurring = _safe(profit_row.get("netProfit"))
+        # Market cap from price × total shares
+        total_shares = _safe(profit_row.get("totalShare"))
+        if result.price and total_shares:
+            result.market_cap_usd = result.price * total_shares / _FX_CNY_TO_USD
+
+    # ── 4. Revenue YoY growth ─────────────────────────────────────────────────
+    if profit_row and result.revenue_ttm:
+        year_cur, quarter_cur = as_of.year, (as_of.month - 1) // 3 + 1
+        rs_prior = bs.query_profit_data(code=code, year=year_cur - 1, quarter=quarter_cur)
+        rows_prior = _bs_rows(rs_prior)
+        if rows_prior:
+            rev_prior = _safe(rows_prior[0].get("MBRevenue"))
+            if rev_prior and rev_prior > 0:
+                result.revenue_yoy_growth = (result.revenue_ttm - rev_prior) / rev_prior
+
+    # ── 5. EPS / net-income growth (for PEG component of V_score) ────────────
+    year_g, quarter_g = as_of.year, (as_of.month - 1) // 3 + 1
+    for _ in range(6):
+        rs_g = bs.query_growth_data(code=code, year=year_g, quarter=quarter_g)
+        rows_g = _bs_rows(rs_g)
+        if rows_g:
+            # YOYNI = net income YoY (%), used as eps_2yr_cagr proxy
+            yoy_ni = _pct_to_decimal(_safe(rows_g[0].get("YOYNI")))
+            if yoy_ni is not None:
+                result.eps_2yr_cagr = yoy_ni
+            break
+        quarter_g -= 1
+        if quarter_g == 0:
+            quarter_g, year_g = 4, year_g - 1
+
+    # ── 6. Operating cash flow proxy for free_cash_flow ──────────────────────
+    year_cf, quarter_cf = as_of.year, (as_of.month - 1) // 3 + 1
+    for _ in range(6):
+        rs_cf = bs.query_cash_flow_data(code=code, year=year_cf, quarter=quarter_cf)
+        rows_cf = _bs_rows(rs_cf)
+        if rows_cf:
+            # CFOToOR = operating cash flow / revenue (ratio)
+            cfo_ratio = _pct_to_decimal(_safe(rows_cf[0].get("CFOToOR")))
+            if cfo_ratio is not None and result.revenue_ttm:
+                result.free_cash_flow = cfo_ratio * result.revenue_ttm
+            break
+        quarter_cf -= 1
+        if quarter_cf == 0:
+            quarter_cf, year_cf = 4, year_cf - 1
+
+    result.data_source = "baostock"
+
+
+# ── HK / ADR path (unchanged) ─────────────────────────────────────────────────
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
 def _yf_info(ticker: str) -> dict:
@@ -56,70 +193,17 @@ def _yf_info(ticker: str) -> dict:
     return t.info or {}
 
 
-def _fetch_a_share(entry: UniverseEntry, as_of: date) -> StockData:
-    code = _a_share_code(entry.ticker)
-    result = StockData(ticker=entry.ticker, as_of_date=as_of, currency="CNY")
-
-    try:
-        spot = _fetch_akshare_spot(code)
-        result.price = _safe(spot.get("最新") or spot.get("股价") or spot.get("现价"))
-        market_cap_cny = _safe(spot.get("总市值"))
-        if market_cap_cny is not None:
-            result.market_cap_usd = market_cap_cny / 7.20
-        ps_val = _safe(spot.get("市销率") or spot.get("PS"))
-        if ps_val is not None:
-            result.ps_ratio = ps_val
-        pe_val = _safe(spot.get("市盈率-动态") or spot.get("市盈率TTM") or spot.get("PE"))
-        if pe_val and pe_val > 0:
-            result.forward_pe = pe_val
-        result.data_source = "akshare"
-    except Exception as exc:
-        log.debug("akshare spot failed for %s: %s", code, exc)
-
-    try:
-        fin = _fetch_akshare_financials(code)
-        if not fin.empty:
-            latest = fin.iloc[0]
-            # Revenue and growth
-            rev_col = next((c for c in fin.columns if "营业收入" in c or "总收入" in c), None)
-            if rev_col:
-                result.revenue_ttm = _safe(latest.get(rev_col))
-            # 扣非净利润 (after non-recurring items)
-            kuofei_col = next(
-                (c for c in fin.columns if "扣非" in c or "非经常" in c), None
-            )
-            if kuofei_col:
-                result.net_income_excl_nonrecurring = _safe(latest.get(kuofei_col))
-            # ROE (使用扣非 if available)
-            roe_col = next((c for c in fin.columns if "净资产收益率" in c or "ROE" in c), None)
-            if roe_col:
-                roe_val = _safe(latest.get(roe_col))
-                if roe_val is not None:
-                    result.roe = roe_val / 100.0 if roe_val > 1 else roe_val
-            # Gross margin
-            gm_col = next((c for c in fin.columns if "毛利率" in c), None)
-            if gm_col:
-                gm = _safe(latest.get(gm_col))
-                if gm is not None:
-                    result.gross_margin = gm / 100.0 if gm > 1 else gm
-    except Exception as exc:
-        log.debug("akshare financials failed for %s: %s", code, exc)
-
-    return result
-
-
 def _fetch_hk_or_adr(entry: UniverseEntry, as_of: date) -> StockData:
     """Fetch HK-listed or ADR via yfinance."""
     result = StockData(ticker=entry.ticker, as_of_date=as_of)
     try:
-        # yfinance uses e.g. "0700.HK"
-        yf_ticker = entry.ticker if "." in entry.ticker else entry.ticker
-        info = _yf_info(yf_ticker)
+        info = _yf_info(entry.ticker)
         if not info:
             return result
 
-        result.currency = info.get("currency", "HKD" if _is_hk(entry.ticker) else "USD")
-        fx = 7.78 if result.currency == "HKD" else (7.20 if result.currency == "CNY" else 1.0)
+        currency = info.get("currency", "HKD" if entry.ticker.endswith(".HK") else "USD")
+        result.currency = currency
+        fx = _FX_HKD_TO_USD if currency == "HKD" else (_FX_CNY_TO_USD if currency == "CNY" else 1.0)
         result.fx_rate_usd = fx
 
         result.price = _safe(info.get("currentPrice") or info.get("regularMarketPrice"))
@@ -149,8 +233,7 @@ def _fetch_hk_or_adr(entry: UniverseEntry, as_of: date) -> StockData:
 
 
 def fetch_china(entry: UniverseEntry, as_of: date) -> StockData:
-    """Fetch data for a China-leg stock (A-share, HK, or ADR)."""
+    """Fetch data for a China-leg stock (A-share via Baostock, HK/ADR via yfinance)."""
     if _is_a_share(entry.ticker):
         return _fetch_a_share(entry, as_of)
-    else:
-        return _fetch_hk_or_adr(entry, as_of)
+    return _fetch_hk_or_adr(entry, as_of)
