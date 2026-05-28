@@ -1,21 +1,42 @@
-"""ARF Dashboard — home page: KPI overview for the selected snapshot date."""
+"""ARF 仪表盘 — 首页：所选快照日期的核心指标概览。"""
 import streamlit as st
 
 from webapp.data import load_snapshot
 from webapp.ui import render_sidebar
 
 st.set_page_config(
-    page_title="ARF Dashboard",
+    page_title="ARF 仪表盘",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-st.title("AI Relevance Factor Dashboard")
+st.title("AI相关性因子（ARF）仪表盘")
 st.caption(
-    "Measures how much AI narrative is bending each stock's valuation. "
-    "D1 = most stretched, D10 = cheapest relative to AI exposure."
+    "衡量AI叙事对股票估值的扭曲程度。D1 = 估值拉伸最大，D10 = 相对于AI敞口最为低估。"
 )
+
+with st.expander("📖 如何解读ARF分数", expanded=False):
+    st.markdown("""
+**ARF（AI Relevance Factor，AI相关性因子）** 将每只股票的AI叙事泡沫程度量化为0–100分，由两个维度合成：
+
+| 维度 | 含义 | 权重逻辑 |
+|------|------|----------|
+| **E分（AI曝光度）** | 公司在AI产业链中的位置、纯AI业务占比、毛利率水平、AI营收增速 | 越高 = AI核心受益标的 |
+| **V分（估值拉伸）** | DCF反推隐含增长溢价、PEG类比、EV/Sales五年百分位，扣除ROE质量加成 | 越高 = 估值偏离基本面越严重 |
+
+**合成公式：ARF = √(E分 × V分)**，在同一板块内做百分位排名，再分为10个十分位（D1–D10）。
+
+**分数解读：**
+- 🔴 **D1（最高分）**：AI叙事泡沫最集中 — 高AI曝光 + 高估值拉伸，风险最高
+- 🟠 **D2–D3**：估值明显偏高，但尚有一定基本面支撑
+- ⚪ **D4–D7**：中性区间，AI参与度与估值基本匹配
+- 🟢 **D8–D10**：相对于AI敞口，估值处于合理或低估区间
+
+**★ 泡沫预警**：同时满足 D1 + ROE < WACC + P/S > 25 三重条件，为极端高估的强烈信号。
+
+> **注意**：ARF是相对排名指标，衡量的是板块内部的相对估值拉伸，而非绝对高估。D1股票不代表必然下跌，但意味着其定价中包含了最高比例的AI叙事溢价。
+""")
 
 as_of = render_sidebar()
 if as_of is None:
@@ -34,20 +55,20 @@ total = len(scored_df)
 scored = int(scored_df["arf"].notna().sum())
 
 c1, c2, c3, c4, c5 = st.columns(5)
-c1.metric("🇺🇸 US D1 names", d1_us, help="Stocks with highest valuation stretch in the US leg")
-c2.metric("🇺🇸 US froth flags ★", froth_us, help="D1 + ROE < WACC + P/S > 25")
-c3.metric("🇨🇳 China D1 names", d1_china)
-c4.metric("🇨🇳 China froth flags ★", froth_china)
-c5.metric("Stocks scored", f"{scored}/{total}")
+c1.metric("🇺🇸 美股 D1 数量", d1_us, help="美股中估值拉伸最大的股票数量")
+c2.metric("🇺🇸 美股泡沫预警 ★", froth_us, help="D1 + ROE < WACC + P/S > 25")
+c3.metric("🇨🇳 中股 D1 数量", d1_china, help="中股中估值拉伸最大的股票数量")
+c4.metric("🇨🇳 中股泡沫预警 ★", froth_china, help="D1 + ROE < WACC + P/S > 25")
+c5.metric("已评分股票数", f"{scored}/{total}")
 
-st.markdown(f"**Snapshot:** {as_of} — Navigate via the sidebar to explore each leg in detail.")
+st.markdown(f"**快照日期：** {as_of} — 使用左侧边栏切换日期，点击页面导航查看各板块详情。")
 
 st.divider()
 
 col_us, col_cn = st.columns(2)
 
 with col_us:
-    st.subheader("🇺🇸 US Leg — top 5")
+    st.subheader("🇺🇸 美股 — ARF前5名")
     if len(us):
         top = us.sort_values("arf", ascending=False).head(5)[
             ["ticker", "name", "decile", "arf", "froth_flag"]
@@ -62,7 +83,7 @@ with col_us:
         )
 
 with col_cn:
-    st.subheader("🇨🇳 China Leg — top 5")
+    st.subheader("🇨🇳 中股 — ARF前5名")
     if len(china):
         top = china.sort_values("arf", ascending=False).head(5)[
             ["ticker", "name", "decile", "arf", "froth_flag"]

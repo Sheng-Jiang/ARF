@@ -12,11 +12,11 @@ def render_sidebar() -> date | None:
     """Render date selector + refresh button; return selected date."""
     dates = list_dates()
     if not dates:
-        st.sidebar.warning("No snapshots found. Run the pipeline first.")
+        st.sidebar.warning("未找到快照数据，请先运行数据管道。")
         return None
     date_strs = [str(d) for d in dates]
-    sel = st.sidebar.selectbox("Snapshot date", date_strs, key="selected_date_str")
-    if st.sidebar.button("Refresh data"):
+    sel = st.sidebar.selectbox("快照日期", date_strs, key="selected_date_str")
+    if st.sidebar.button("刷新数据"):
         refresh_data()
         st.rerun()
     return date.fromisoformat(sel)
@@ -45,17 +45,17 @@ def _build_display_df(df: pd.DataFrame) -> pd.DataFrame:
     for _, r in df.sort_values("arf", ascending=False, na_position="last").iterrows():
         d = r.get("decile")
         rows.append({
-            "Ticker": r.get("ticker", ""),
-            "Name": r.get("name", ""),
-            "Layer": r.get("layer", ""),
+            "代码": r.get("ticker", ""),
+            "公司": r.get("name", ""),
+            "层级": r.get("layer", ""),
             "D": int(d) if pd.notna(d) else None,
             "ARF": _fmt_num(r.get("arf")),
             "E": _fmt_num(r.get("e_score")),
             "V": _fmt_num(r.get("v_score")),
             "★": "★" if r.get("froth_flag") else "",
-            "Fwd P/E": _fmt_num(r.get("forward_pe")),
+            "预期P/E": _fmt_num(r.get("forward_pe")),
             "P/S": _fmt_num(r.get("ps_ratio")),
-            "Rev YoY": _fmt_pct(r.get("revenue_yoy_growth")),
+            "营收同比": _fmt_pct(r.get("revenue_yoy_growth")),
             "ROE": _fmt_pct(r.get("roe")),
             "_decile": d,
             "_froth": bool(r.get("froth_flag")),
@@ -121,7 +121,7 @@ def scatter_plot(df: pd.DataFrame, leg_name: str) -> go.Figure:
         return (
             f"<b>{row['ticker']}</b> — {row.get('name', '')}<br>"
             f"ARF {_fmt_num(row.get('arf'))}  D{d}  {'★' if row.get('froth_flag') else ''}<br>"
-            f"E {_fmt_num(row.get('e_score'))}  V {_fmt_num(row.get('v_score'))}<br>"
+            f"E分 {_fmt_num(row.get('e_score'))}  V分 {_fmt_num(row.get('v_score'))}<br>"
             f"P/S {ps}  ROE {roe}"
         )
 
@@ -143,10 +143,18 @@ def scatter_plot(df: pd.DataFrame, leg_name: str) -> go.Figure:
     ))
     fig.add_hline(y=50, line_dash="dot", line_color="gray", opacity=0.4)
     fig.add_vline(x=50, line_dash="dot", line_color="gray", opacity=0.4)
+
+    quadrant_style = dict(xref="x", yref="y", showarrow=False,
+                          font=dict(size=10, color="rgba(120,120,120,0.6)"))
+    fig.add_annotation(x=90, y=90, text="高风险泡沫区", **quadrant_style)
+    fig.add_annotation(x=90, y=8,  text="基本面支撑区", **quadrant_style)
+    fig.add_annotation(x=8,  y=90, text="非AI高估区",  **quadrant_style)
+    fig.add_annotation(x=8,  y=8,  text="低参与低估值", **quadrant_style)
+
     fig.update_layout(
-        title=f"{leg_name} — AI Exposure (E) vs Valuation Stretch (V)",
-        xaxis_title="E-score — AI Exposure →",
-        yaxis_title="V-score — Valuation Stretch →",
+        title=f"{leg_name} — AI曝光度（E）vs 估值拉伸（V）",
+        xaxis_title="E分 — AI曝光度 →",
+        yaxis_title="V分 — 估值拉伸 →",
         xaxis=dict(range=[-5, 105]),
         yaxis=dict(range=[-5, 105]),
         height=480,
