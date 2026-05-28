@@ -1,0 +1,19 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends gcc && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY pyproject.toml ./
+COPY arf/ ./arf/
+COPY config/ ./config/
+
+RUN pip install --no-cache-dir -e ".[cloud]"
+
+ENV OUTPUT_TARGET=gcs
+ENV TRIGGER_SOURCE=scheduler
+
+# AS_OF is supplied per-execution by Cloud Scheduler or by manual override.
+# When unset, the pipeline defaults to today UTC.
+ENTRYPOINT ["python", "-m", "arf.run"]

@@ -5,6 +5,8 @@ Usage:
 """
 import argparse
 import logging
+import os
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
 from pathlib import Path
@@ -12,8 +14,16 @@ from pathlib import Path
 import pandas as pd
 from rich.console import Console
 
+from arf import storage
 from arf.config import UniverseEntry, load_universe
-from arf.db import init_db, query_thermometer_series, upsert_snapshot
+from arf.db import (
+    finish_run,
+    init_db,
+    query_thermometer_series,
+    record_fetch_outcomes,
+    start_run,
+    upsert_snapshot,
+)
 from arf.fetchers.base import StockData
 from arf.fetchers.china import fetch_china
 from arf.fetchers.us import fetch_us
@@ -106,46 +116,108 @@ def _build_scoring_df(
     return pd.DataFrame(rows)
 
 
+def _outcome_for(sd: StockData) -> str:
+    if sd.data_source == "error":
+        return "error"
+    if sd.data_source == "manual":
+        # Pre-IPO and Europe-ref entries — no market fetch attempted.
+        return "skipped"
+    if sd.price is None:
+        return "partial"
+    return "ok"
+
+
 def run_pipeline(
     as_of: date,
     data_dir: Path = Path("data"),
     report_dir: Path = Path("reports"),
     universe_path: Path = Path("config/universe.yaml"),
+    trigger_source: str = "manual",
 ) -> pd.DataFrame:
-    """Run the full ARF pipeline for a given as-of date."""
-    console.print(f"[bold]ARF pipeline[/bold] — as of {as_of}")
+    """Run the full ARF pipeline for a given as-of date.
+
+    If env OUTPUT_TARGET=gcs, downloads the existing arf.db from
+    `gs://$GCS_BUCKET/$GCS_DB_OBJECT` before running, and uploads the updated DB
+    plus the snapshot parquet + markdown report when finished.
+    """
+    console.print(f"[bold]ARF pipeline[/bold] — as of {as_of} (trigger: {trigger_source})")
+
+    db_path = data_dir / "arf.db"
+    if storage.is_gcs_mode():
+        storage.download_db_if_present(db_path)
 
     universe = load_universe(universe_path)
     console.print(f"Loaded {len(universe)} universe entries")
 
-    console.print("Fetching market data…")
-    stocks = fetch_all(universe, as_of)
-    console.print(f"Fetched {len(stocks)} stocks ({sum(1 for s in stocks if s.price is not None)} with price data)")
-
-    df = _build_scoring_df(stocks, universe)
-    df = compute_arf(df)
-
-    # Persist to DuckDB
-    db_path = data_dir / "arf.db"
     conn = init_db(db_path)
-    upsert_snapshot(conn, df, as_of)
-    console.print(f"Snapshot saved to {db_path}")
+    run_id = uuid.uuid4().hex
+    start_run(conn, run_id=run_id, as_of_date=as_of, trigger_source=trigger_source)
 
-    # Write parquet
-    snap_dir = data_dir / "snapshots"
-    snap_dir.mkdir(parents=True, exist_ok=True)
-    parquet_path = snap_dir / f"arf_{as_of}.parquet"
-    df.to_parquet(parquet_path, index=False)
-    console.print(f"Parquet written: {parquet_path}")
+    try:
+        console.print("Fetching market data…")
+        stocks = fetch_all(universe, as_of)
+        outcomes = [(s.ticker, _outcome_for(s), s.data_source or None) for s in stocks]
+        ok = sum(1 for _, st, _ in outcomes if st == "ok")
+        failed = sum(1 for _, st, _ in outcomes if st == "error")
+        console.print(
+            f"Fetched {len(stocks)} stocks "
+            f"({sum(1 for s in stocks if s.price is not None)} with price data)"
+        )
 
-    # Render reports
-    thermo = query_thermometer_series(conn)
-    conn.close()
-    write_report(df, thermo, as_of, report_dir)
-    console.print(f"Reports written to {report_dir}/")
+        df = _build_scoring_df(stocks, universe)
+        df = compute_arf(df)
 
-    _print_calibration_summary(df)
-    return df
+        upsert_snapshot(conn, df, as_of)
+        record_fetch_outcomes(conn, run_id, outcomes)
+        console.print(f"Snapshot saved to {db_path}")
+
+        # Write parquet
+        snap_dir = data_dir / "snapshots"
+        snap_dir.mkdir(parents=True, exist_ok=True)
+        parquet_path = snap_dir / f"arf_{as_of}.parquet"
+        df.to_parquet(parquet_path, index=False)
+        console.print(f"Parquet written: {parquet_path}")
+
+        # Render reports
+        thermo = query_thermometer_series(conn)
+        write_report(df, thermo, as_of, report_dir)
+        console.print(f"Reports written to {report_dir}/")
+
+        status = "partial" if failed > 0 else "success"
+        finish_run(
+            conn, run_id=run_id, status=status,
+            tickers_total=len(stocks), tickers_ok=ok, tickers_failed=failed,
+        )
+        conn.close()
+
+        if storage.is_gcs_mode():
+            storage.upload_db(db_path)
+            storage.upload_artifact(parquet_path, f"snapshots/arf_{as_of}.parquet")
+            md_path = report_dir / f"arf_{as_of}.md"
+            if md_path.exists():
+                storage.upload_artifact(md_path, f"reports/arf_{as_of}.md")
+            thermo_html = report_dir / "thermometer.html"
+            if thermo_html.exists():
+                storage.upload_artifact(thermo_html, "reports/thermometer.html")
+            console.print("Synced artifacts to GCS")
+
+        _print_calibration_summary(df)
+        return df
+    except Exception as exc:
+        log.exception("Pipeline failed")
+        finish_run(
+            conn, run_id=run_id, status="error",
+            tickers_total=0, tickers_ok=0, tickers_failed=0,
+            error_message=str(exc),
+        )
+        conn.close()
+        if storage.is_gcs_mode():
+            # Persist the run-failure record so the webapp can show it.
+            try:
+                storage.upload_db(db_path)
+            except Exception:
+                log.exception("Failed to upload DB after pipeline failure")
+        raise
 
 
 def _print_calibration_summary(df: pd.DataFrame) -> None:
@@ -174,17 +246,27 @@ def _print_calibration_summary(df: pd.DataFrame) -> None:
 def main() -> None:
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
     parser = argparse.ArgumentParser(description="Run the ARF pipeline")
-    parser.add_argument("--as-of", required=True, type=date.fromisoformat,
-                        help="Snapshot date (YYYY-MM-DD)")
+    parser.add_argument("--as-of", required=False, type=date.fromisoformat,
+                        default=None,
+                        help="Snapshot date (YYYY-MM-DD). Defaults to env AS_OF or today UTC.")
     parser.add_argument("--data-dir", type=Path, default=Path("data"))
     parser.add_argument("--report-dir", type=Path, default=Path("reports"))
     parser.add_argument("--universe", type=Path, default=Path("config/universe.yaml"))
+    parser.add_argument("--trigger-source", default=os.getenv("TRIGGER_SOURCE", "manual"),
+                        help="Tag for the run record: manual|scheduler|webapp")
     args = parser.parse_args()
+
+    as_of = args.as_of
+    if as_of is None:
+        env_date = os.getenv("AS_OF")
+        as_of = date.fromisoformat(env_date) if env_date else date.today()
+
     run_pipeline(
-        as_of=args.as_of,
+        as_of=as_of,
         data_dir=args.data_dir,
         report_dir=args.report_dir,
         universe_path=args.universe,
+        trigger_source=args.trigger_source,
     )
 
 

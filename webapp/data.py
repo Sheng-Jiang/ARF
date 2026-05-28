@@ -14,6 +14,13 @@ GCS_BUCKET = os.getenv("GCS_BUCKET", "")
 GCS_DB_OBJECT = os.getenv("GCS_DB_OBJECT", "arf.db")
 
 
+def _ensure_schema(path: Path) -> None:
+    """Apply ARF DB schema migrations (idempotent) before opening read-only."""
+    from arf.db import init_db  # local import to avoid Streamlit reload churn
+    conn = init_db(path)
+    conn.close()
+
+
 @st.cache_resource(ttl=3600)
 def _open_conn() -> duckdb.DuckDBPyConnection:
     if DATA_SOURCE == "gcs":
@@ -21,7 +28,9 @@ def _open_conn() -> duckdb.DuckDBPyConnection:
         client = storage.Client()
         tmp_path = Path(tempfile.mkdtemp()) / "arf.db"
         client.bucket(GCS_BUCKET).blob(GCS_DB_OBJECT).download_to_filename(str(tmp_path))
+        _ensure_schema(tmp_path)
         return duckdb.connect(str(tmp_path), read_only=True)
+    _ensure_schema(LOCAL_DB_PATH)
     return duckdb.connect(str(LOCAL_DB_PATH), read_only=True)
 
 
@@ -55,3 +64,21 @@ def load_thermometer_series() -> pd.DataFrame:
 
 def refresh_data() -> None:
     _open_conn.clear()
+
+
+def load_runs(limit: int = 20) -> pd.DataFrame:
+    return _open_conn().execute(
+        "SELECT * FROM runs ORDER BY started_at DESC LIMIT ?", [limit]
+    ).fetchdf()
+
+
+def load_latest_run() -> pd.DataFrame:
+    return _open_conn().execute(
+        "SELECT * FROM runs ORDER BY started_at DESC LIMIT 1"
+    ).fetchdf()
+
+
+def load_fetch_outcomes(run_id: str) -> pd.DataFrame:
+    return _open_conn().execute(
+        "SELECT * FROM fetch_outcomes WHERE run_id = ? ORDER BY ticker", [run_id]
+    ).fetchdf()

@@ -1,10 +1,10 @@
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import duckdb
 import pandas as pd
 
-_SCHEMA = """
+_SCHEMA_SNAPSHOTS = """
 CREATE TABLE IF NOT EXISTS snapshots (
     ticker                  TEXT        NOT NULL,
     as_of_date              DATE        NOT NULL,
@@ -48,12 +48,121 @@ CREATE TABLE IF NOT EXISTS snapshots (
 )
 """
 
+_SCHEMA_RUNS = """
+CREATE TABLE IF NOT EXISTS runs (
+    run_id          TEXT       PRIMARY KEY,
+    as_of_date      DATE       NOT NULL,
+    started_at      TIMESTAMP  NOT NULL,
+    finished_at     TIMESTAMP,
+    status          TEXT,
+    tickers_total   INTEGER,
+    tickers_ok      INTEGER,
+    tickers_failed  INTEGER,
+    duration_sec    DOUBLE,
+    error_message   TEXT,
+    trigger_source  TEXT
+)
+"""
+
+_SCHEMA_FETCH_OUTCOMES = """
+CREATE TABLE IF NOT EXISTS fetch_outcomes (
+    run_id       TEXT  NOT NULL,
+    ticker       TEXT  NOT NULL,
+    status       TEXT,
+    data_source  TEXT,
+    PRIMARY KEY (run_id, ticker)
+)
+"""
+
 
 def init_db(path: Path = Path("data/arf.db")) -> duckdb.DuckDBPyConnection:
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = duckdb.connect(str(path))
-    conn.execute(_SCHEMA)
+    conn.execute(_SCHEMA_SNAPSHOTS)
+    conn.execute(_SCHEMA_RUNS)
+    conn.execute(_SCHEMA_FETCH_OUTCOMES)
     return conn
+
+
+def start_run(
+    conn: duckdb.DuckDBPyConnection,
+    run_id: str,
+    as_of_date: date,
+    trigger_source: str,
+    started_at: datetime | None = None,
+) -> None:
+    conn.execute(
+        "INSERT INTO runs (run_id, as_of_date, started_at, status, trigger_source) "
+        "VALUES (?, ?, ?, 'running', ?)",
+        [run_id, as_of_date, started_at or datetime.now(UTC).replace(tzinfo=None), trigger_source],
+    )
+    conn.commit()
+
+
+def finish_run(
+    conn: duckdb.DuckDBPyConnection,
+    run_id: str,
+    status: str,
+    tickers_total: int,
+    tickers_ok: int,
+    tickers_failed: int,
+    error_message: str | None = None,
+    finished_at: datetime | None = None,
+) -> None:
+    finished = finished_at or datetime.now(UTC).replace(tzinfo=None)
+    row = conn.execute("SELECT started_at FROM runs WHERE run_id = ?", [run_id]).fetchone()
+    duration = (finished - row[0]).total_seconds() if row else None
+    conn.execute(
+        """UPDATE runs SET
+            finished_at = ?,
+            status = ?,
+            tickers_total = ?,
+            tickers_ok = ?,
+            tickers_failed = ?,
+            duration_sec = ?,
+            error_message = ?
+           WHERE run_id = ?""",
+        [finished, status, tickers_total, tickers_ok, tickers_failed,
+         duration, error_message, run_id],
+    )
+    conn.commit()
+
+
+def record_fetch_outcomes(
+    conn: duckdb.DuckDBPyConnection,
+    run_id: str,
+    outcomes: list[tuple[str, str, str | None]],
+) -> None:
+    """outcomes: list of (ticker, status, data_source) tuples."""
+    if not outcomes:
+        return
+    conn.execute("DELETE FROM fetch_outcomes WHERE run_id = ?", [run_id])
+    conn.executemany(
+        "INSERT INTO fetch_outcomes (run_id, ticker, status, data_source) VALUES (?, ?, ?, ?)",
+        [(run_id, t, s, ds) for t, s, ds in outcomes],
+    )
+    conn.commit()
+
+
+def query_latest_run(conn: duckdb.DuckDBPyConnection) -> pd.DataFrame:
+    return conn.execute(
+        "SELECT * FROM runs ORDER BY started_at DESC LIMIT 1"
+    ).fetchdf()
+
+
+def query_runs(conn: duckdb.DuckDBPyConnection, limit: int = 20) -> pd.DataFrame:
+    return conn.execute(
+        "SELECT * FROM runs ORDER BY started_at DESC LIMIT ?", [limit]
+    ).fetchdf()
+
+
+def query_fetch_outcomes(
+    conn: duckdb.DuckDBPyConnection,
+    run_id: str,
+) -> pd.DataFrame:
+    return conn.execute(
+        "SELECT * FROM fetch_outcomes WHERE run_id = ? ORDER BY ticker", [run_id]
+    ).fetchdf()
 
 
 def upsert_snapshot(

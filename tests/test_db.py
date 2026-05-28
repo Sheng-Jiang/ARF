@@ -1,9 +1,21 @@
-from datetime import date
+import uuid
+from datetime import date, datetime
 
 import pandas as pd
 import pytest
 
-from arf.db import init_db, query_latest, query_snapshot, upsert_snapshot
+from arf.db import (
+    finish_run,
+    init_db,
+    query_fetch_outcomes,
+    query_latest,
+    query_latest_run,
+    query_runs,
+    query_snapshot,
+    record_fetch_outcomes,
+    start_run,
+    upsert_snapshot,
+)
 
 
 @pytest.fixture
@@ -133,3 +145,79 @@ class TestQuerySnapshot:
         result = query_snapshot(conn, date(2020, 1, 1))
         assert isinstance(result, pd.DataFrame)
         assert len(result) == 0
+
+
+class TestRunTracking:
+    def test_start_run_inserts_running_row(self, conn):
+        rid = uuid.uuid4().hex
+        start_run(conn, rid, date(2026, 5, 28), trigger_source="manual")
+        row = conn.execute("SELECT status, trigger_source FROM runs WHERE run_id = ?", [rid]).fetchone()
+        assert row == ("running", "manual")
+
+    def test_finish_run_records_duration_and_status(self, conn):
+        rid = uuid.uuid4().hex
+        start = datetime(2026, 5, 28, 12, 0, 0)
+        finish = datetime(2026, 5, 28, 12, 2, 30)
+        start_run(conn, rid, date(2026, 5, 28), trigger_source="scheduler", started_at=start)
+        finish_run(conn, rid, status="success",
+                   tickers_total=32, tickers_ok=32, tickers_failed=0,
+                   finished_at=finish)
+        row = conn.execute(
+            "SELECT status, tickers_total, tickers_ok, tickers_failed, duration_sec "
+            "FROM runs WHERE run_id = ?", [rid]
+        ).fetchone()
+        assert row[0] == "success"
+        assert row[1:4] == (32, 32, 0)
+        assert row[4] == pytest.approx(150.0)
+
+    def test_finish_run_partial_with_error_message(self, conn):
+        rid = uuid.uuid4().hex
+        start_run(conn, rid, date(2026, 5, 28), trigger_source="manual")
+        finish_run(conn, rid, status="partial",
+                   tickers_total=32, tickers_ok=30, tickers_failed=2,
+                   error_message="2 tickers failed")
+        row = conn.execute("SELECT status, error_message FROM runs WHERE run_id = ?", [rid]).fetchone()
+        assert row == ("partial", "2 tickers failed")
+
+    def test_record_fetch_outcomes_round_trip(self, conn):
+        rid = uuid.uuid4().hex
+        start_run(conn, rid, date(2026, 5, 28), trigger_source="manual")
+        record_fetch_outcomes(conn, rid, [
+            ("NVDA", "ok", "yfinance"),
+            ("PLTR", "ok", "yfinance"),
+            ("BROKEN", "error", "error"),
+        ])
+        df = query_fetch_outcomes(conn, rid)
+        assert len(df) == 3
+        assert set(df["ticker"]) == {"NVDA", "PLTR", "BROKEN"}
+        assert df[df["ticker"] == "BROKEN"]["status"].iloc[0] == "error"
+
+    def test_record_fetch_outcomes_replaces_previous(self, conn):
+        rid = uuid.uuid4().hex
+        start_run(conn, rid, date(2026, 5, 28), trigger_source="manual")
+        record_fetch_outcomes(conn, rid, [("NVDA", "ok", "yfinance")])
+        record_fetch_outcomes(conn, rid, [("NVDA", "error", "yfinance"), ("AMD", "ok", "yfinance")])
+        df = query_fetch_outcomes(conn, rid)
+        assert len(df) == 2
+        assert df[df["ticker"] == "NVDA"]["status"].iloc[0] == "error"
+
+    def test_query_latest_run_returns_most_recent(self, conn):
+        old = uuid.uuid4().hex
+        new = uuid.uuid4().hex
+        start_run(conn, old, date(2026, 5, 21), trigger_source="manual",
+                  started_at=datetime(2026, 5, 21, 10, 0, 0))
+        start_run(conn, new, date(2026, 5, 28), trigger_source="scheduler",
+                  started_at=datetime(2026, 5, 28, 10, 0, 0))
+        df = query_latest_run(conn)
+        assert len(df) == 1
+        assert df.iloc[0]["run_id"] == new
+
+    def test_query_runs_returns_in_descending_order(self, conn):
+        for i in range(3):
+            rid = uuid.uuid4().hex
+            start_run(conn, rid, date(2026, 5, 7 + 7 * i), trigger_source="manual",
+                      started_at=datetime(2026, 5, 7 + 7 * i, 10, 0, 0))
+        df = query_runs(conn, limit=5)
+        assert len(df) == 3
+        dates = pd.to_datetime(df["started_at"]).dt.date.tolist()
+        assert dates == sorted(dates, reverse=True)
