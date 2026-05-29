@@ -33,6 +33,7 @@ webapp = [
     "streamlit>=1.35",
     "google-cloud-storage>=2.16",
     "google-cloud-run>=0.10",
+    "google-genai>=0.3",
 ]
 cloud = [
     "google-cloud-storage>=2.16",

@@ -3,14 +3,14 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from webapp.data import load_thermometer_series
-from webapp.ui import render_sidebar
+from webapp.data import load_snapshot, load_thermometer_series
+from webapp.ui import render_ask_gemini, render_sidebar
 
 st.set_page_config(page_title="ARF — 泡沫温度计", layout="wide")
 st.title("泡沫温度计")
 st.caption("AI估值泡沫的周度演变。多次运行数据管道后，趋势线将逐渐清晰。")
 
-render_sidebar()
+as_of = render_sidebar()
 
 thermo = load_thermometer_series()
 us_thermo = thermo[thermo["leg"] == "US"].sort_values("as_of_date")
@@ -139,3 +139,16 @@ if len(dates) >= 2:
         st.dataframe(pd.DataFrame(delta_rows), hide_index=True, use_container_width=True)
 else:
     st.info("在第二个日期运行数据管道后，即可查看周度对比数据。")
+
+st.divider()
+
+if as_of is not None:
+    snapshot_df = load_snapshot(as_of)
+    scored = snapshot_df[snapshot_df["leg"].isin(["US", "China"])]
+    render_ask_gemini(
+        scored,
+        as_of,
+        section_key="thermometer",
+        label_intro="以本快照中美股+中股各前5名（共10只）为口径，"
+                    "请 Gemini 联网检索最新新闻，解读温度计读数背后的宏观叙事变化。",
+    )

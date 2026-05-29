@@ -2,7 +2,7 @@
 import streamlit as st
 
 from webapp.data import load_snapshot
-from webapp.ui import render_sidebar
+from webapp.ui import render_ask_gemini, render_sidebar
 
 st.set_page_config(
     page_title="ARF 仪表盘",
@@ -96,3 +96,12 @@ with col_cn:
             hide_index=True,
             use_container_width=True,
         )
+
+st.divider()
+render_ask_gemini(
+    scored_df,
+    as_of,
+    section_key="home",
+    label_intro="基于本快照中美股+中股各前5名（共10只），由 Gemini 2.5 Pro 联网检索最近两周新闻，"
+                "解读叙事面与因子读数之间的关系。",
+)

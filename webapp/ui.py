@@ -1,10 +1,11 @@
-"""Shared UI helpers: sidebar, table renderer, scatter plot."""
+"""Shared UI helpers: sidebar, table renderer, scatter plot, Gemini cards."""
 from datetime import date
 
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from webapp import gemini
 from webapp.data import list_dates, refresh_data
 
 
@@ -162,3 +163,82 @@ def scatter_plot(df: pd.DataFrame, leg_name: str) -> go.Figure:
         margin=dict(t=50, b=40),
     )
     return fig
+
+
+def render_ask_gemini(
+    snapshot_df: pd.DataFrame,
+    as_of: date,
+    *,
+    section_key: str,
+    label_intro: str,
+) -> None:
+    """Render the "Ask Gemini" button + per-stock expandable cards.
+
+    `section_key` namespaces the session_state cache so multiple pages don't collide.
+    `label_intro` is the caption above the button explaining what cohort is covered.
+    """
+    st.markdown("### 🤖 Ask Gemini — 新闻与叙事补充")
+    st.caption(label_intro)
+
+    if not gemini.is_enabled():
+        st.info(
+            "未配置 Gemini API 密钥。请在 Cloud Run 上挂载 `GEMINI_API_KEY` "
+            "（推荐通过 Secret Manager），按钮即可启用。"
+        )
+        return
+
+    cohort = gemini.cohort_for_overview(snapshot_df)
+    if not cohort:
+        st.warning("该快照无评分股票，无法生成新闻摘要。")
+        return
+
+    cache_key_str = gemini.to_session_cache_key(as_of, cohort)
+    cache_slot = f"gemini_cache_{section_key}"
+    cache = st.session_state.setdefault(cache_slot, {})
+
+    cached_report = cache.get(cache_key_str)
+    btn_label = "🔄 重新生成" if cached_report else f"✨ 询问 Gemini（{len(cohort)} 只股票）"
+
+    if st.button(btn_label, key=f"ask_gemini_btn_{section_key}"):
+        with st.spinner("Gemini 正在检索最新新闻并撰写摘要……（约15–30秒）"):
+            try:
+                report = gemini.summarize_stocks(snapshot_df, cohort, as_of)
+                cache[cache_key_str] = report
+                cached_report = report
+            except Exception as exc:  # noqa: BLE001
+                st.error(f"调用 Gemini 失败：{exc}")
+                return
+
+    if cached_report is None:
+        return
+
+    if not cached_report.stocks:
+        st.warning("Gemini 未返回任何可解析的股票卡片。原始输出：")
+        st.code(cached_report.raw_text[:2000] or "(空)")
+        return
+
+    name_lookup = dict(
+        zip(snapshot_df["ticker"], snapshot_df["name"], strict=False)
+    )
+
+    for s in cached_report.stocks:
+        display_name = name_lookup.get(s.ticker, s.name)
+        header = f"**{s.ticker}** · {display_name}"
+        if s.headline:
+            header += f" — {s.headline}"
+        with st.expander(header, expanded=False):
+            if s.bullets:
+                for b in s.bullets:
+                    st.markdown(f"- {b}")
+            else:
+                st.caption("（无要点）")
+            if s.reconcile:
+                st.markdown(f"**与ARF读数的关系：** {s.reconcile}")
+
+    if cached_report.citations:
+        with st.expander(f"📚 引用来源（{len(cached_report.citations)}）", expanded=False):
+            for c in cached_report.citations:
+                title = c.title or c.uri
+                st.markdown(f"- [{title}]({c.uri})")
+
+    st.caption(f"模型：{cached_report.model} · 快照日期：{cached_report.as_of}")

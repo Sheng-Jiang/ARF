@@ -313,3 +313,53 @@ v1 is done when:
 3. Should the Markdown report include short manual commentary per top-decile name, or pure numbers only?
 4. Refresh cadence: weekly Mondays, or on-demand only?
 5. Where should snapshots be stored long-term — local DB only, or also pushed to a cloud bucket for portability?
+
+## 13. "Ask Gemini" — Qualitative News Layer (Phase 3, added 2026-05-29)
+
+### 13.1 Motivation
+The ARF score answers *how much* a stock is bent by the AI narrative. It does not answer *why* the latest week's snapshot changed (earnings beat, geopolitics, customer concentration shift, new product). The webapp now exposes an **"Ask Gemini"** button that augments the quantitative ranking with grounded news from the last 7–14 days, so a user reading the dashboard does not need to context-switch into a search engine.
+
+Hard rule: **the numerical factors stay the source of truth.** Gemini receives the snapshot rows as ground-truth context and is instructed never to override or restate the scores. Its job is to source and summarize the *narrative* sitting behind the numbers.
+
+### 13.2 Surfaces
+A single "Ask Gemini" button appears on:
+- **Home (overview) page** — covers the top-5 by ARF in each leg (10 stocks total).
+- **Thermometer page** — same top-10 set; the summary is framed as a regime/macro story explaining why the bubble counts moved.
+
+The leg pages (US, China) do not get the button in v1 — the top-5 set on Home is the canonical "what should I read about" cohort.
+
+### 13.3 Output
+Per-stock expandable cards, one per ticker. Each card contains:
+- 1–2 sentence headline summary of recent news.
+- 3–5 bullet points of the most material developments (M&A, earnings, regulation, customer wins/losses, supply-chain events).
+- A "how this reconciles with the ARF reading" line — e.g. *"ARF D1 + froth-flag is consistent with the recent guidance raise above consensus on tiny base revenue."*
+- Citation list (publisher + URL) from Google Search grounding.
+
+### 13.4 Model and grounding
+- Model: **Gemini 2.5 Pro** (default; latest production model). No model picker exposed in v1.
+- Tool: **Google Search grounding** enabled on every call. Grounding metadata (URIs + titles) is captured and rendered as citations.
+- Temperature: low (0.2) — this is summarization, not creative writing.
+- Per-call token budget: ~8k input (snapshot rows + methodology + prompt) and ~3k output. One call summarizes all 10 stocks in one pass to keep cost bounded.
+
+### 13.5 Auth and secrets
+- API key from Google AI Studio stored in **Secret Manager** as `gemini-api-key`.
+- Cloud Run webapp mounts it as env var `GEMINI_API_KEY` via `--update-secrets`.
+- Webapp service account has `roles/secretmanager.secretAccessor` on the secret only.
+- Button is hidden (or shows a setup hint) when `GEMINI_API_KEY` is absent — feature degrades gracefully in local dev.
+
+### 13.6 Caching
+Responses are cached in `st.session_state` keyed by `(as_of_date, sorted ticker tuple)` for the lifetime of the browser session. This avoids burning quota when the user toggles between the Home and Thermometer pages, which share the same cohort. No server-side cache in v1 — keep it simple, refresh on session restart.
+
+### 13.7 Non-goals (v1)
+- No per-stock follow-up chat — single-shot summarize call only.
+- No fine-grained source filtering (date ranges, language) — Gemini picks.
+- No persistent storage of generated summaries in DuckDB. The numerical snapshot remains the only durable record.
+- No streaming output — wait + render full response (keeps the cards stable).
+- No multi-model fallback. Gemini fails → user sees the error and tries again.
+
+### 13.8 Acceptance criteria
+- [ ] Clicking the button on Home returns ≤30 s in normal network conditions.
+- [ ] At least 80% of stocks in the cohort get ≥2 citations from credible sources (FT, Reuters, Bloomberg, 财新, 证券时报, company IR).
+- [ ] Summary never contradicts the ARF score it was shown. (Spot-checked manually.)
+- [ ] Webapp continues to render every other tab cleanly when `GEMINI_API_KEY` is unset — button greys out with a tooltip; no exceptions.
+- [ ] Total Gemini cost per click ≤ $0.10 at 2026-05 list prices for Gemini 2.5 Pro with grounding.
