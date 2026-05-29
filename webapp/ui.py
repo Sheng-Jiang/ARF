@@ -221,11 +221,19 @@ def render_ask_gemini(
         zip(snapshot_df["ticker"], snapshot_df["name"], strict=False)
     )
 
+    total_sources = 0
     for s in cached_report.stocks:
         display_name = name_lookup.get(s.ticker, s.name)
         header = f"**{s.ticker}** · {display_name}"
         if s.headline:
             header += f" — {s.headline}"
+        stock_citations = getattr(s, "citations", []) or []
+        domain_mentions = getattr(s, "domain_mentions", []) or []
+        source_count = len(stock_citations) or len(domain_mentions)
+        total_sources += source_count
+        if source_count:
+            header += f"  · {source_count}🔗"
+
         with st.expander(header, expanded=False):
             if s.bullets:
                 for b in s.bullets:
@@ -235,10 +243,21 @@ def render_ask_gemini(
             if s.reconcile:
                 st.markdown(f"**与ARF读数的关系：** {s.reconcile}")
 
-    if cached_report.citations:
-        with st.expander(f"📚 引用来源（{len(cached_report.citations)}）", expanded=False):
-            for c in cached_report.citations:
-                title = c.title or c.uri
-                st.markdown(f"- [{title}]({c.uri})")
+            if stock_citations:
+                st.markdown("**来源：**")
+                for c in stock_citations:
+                    title = c.title or c.uri
+                    st.markdown(f"- [{title}]({c.uri})")
+            elif domain_mentions:
+                st.markdown("**引用来源：** " + " · ".join(f"`{d}`" for d in domain_mentions))
 
-    st.caption(f"模型：{cached_report.model} · 快照日期：{cached_report.as_of}")
+            queries = getattr(s, "search_queries", []) or []
+            if queries:
+                with st.expander(f"🔍 检索关键词（{len(queries)}）", expanded=False):
+                    for q in queries:
+                        st.markdown(f"- `{q}`")
+
+    st.caption(
+        f"模型：{cached_report.model} · 快照日期：{cached_report.as_of} · "
+        f"共 {total_sources} 条来源"
+    )

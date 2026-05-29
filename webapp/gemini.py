@@ -1,8 +1,12 @@
 """Ask Gemini — qualitative news layer on top of ARF scores.
 
-Wraps Gemini 2.5 Pro with the Google Search grounding tool. The model is given
-the snapshot rows as ground truth and asked to summarise recent news per stock,
-returning structured per-ticker cards rendered by the webapp.
+One grounded Gemini 2.5 Pro call per stock, fanned out in parallel. The model
+is given the snapshot row as ground truth and asked to summarise recent news,
+with language-aware search hints (Chinese ticker → Chinese-language search).
+
+The earlier single-call-for-N-stocks approach made the model lazy — it would
+search only for stock #1 and fabricate citations for the rest. Per-stock calls
+force grounding for every name in the cohort.
 """
 from __future__ import annotations
 
@@ -10,6 +14,7 @@ import json
 import logging
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import date
 
@@ -18,6 +23,7 @@ import pandas as pd
 log = logging.getLogger(__name__)
 
 MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-pro")
+MAX_PARALLEL = int(os.getenv("GEMINI_MAX_PARALLEL", "6"))
 
 
 def is_enabled() -> bool:
@@ -38,6 +44,9 @@ class StockSummary:
     headline: str
     bullets: list[str] = field(default_factory=list)
     reconcile: str = ""
+    citations: list[Citation] = field(default_factory=list)
+    search_queries: list[str] = field(default_factory=list)
+    domain_mentions: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -45,13 +54,13 @@ class GeminiReport:
     as_of: date
     cohort: list[str]
     stocks: list[StockSummary]
-    citations: list[Citation]
+    citations: list[Citation]  # union of all per-stock citations
     raw_text: str
     model: str
 
 
-def _format_row(row: pd.Series) -> str:
-    """Compact one-line dump of a stock's ARF context for the prompt."""
+def _factor_line(row: pd.Series) -> str:
+    """One-line dump of a stock's ARF context for the prompt."""
 
     def f(k: str, fmt: str = "{:.1f}") -> str:
         v = row.get(k)
@@ -63,130 +72,225 @@ def _format_row(row: pd.Series) -> str:
             return str(v)
 
     froth = "★FROTH" if bool(row.get("froth_flag")) else ""
+    decile = int(row["decile"]) if pd.notna(row.get("decile")) else "?"
     return (
-        f"- {row.get('ticker')} ({row.get('name', '')}) — leg={row.get('leg')} "
-        f"layer={row.get('layer')} decile=D{int(row['decile']) if pd.notna(row.get('decile')) else '?'} "
+        f"leg={row.get('leg')} layer={row.get('layer')} decile=D{decile} "
         f"ARF={f('arf')} E={f('e_score')} V={f('v_score')} "
         f"fwd_PE={f('forward_pe')} P/S={f('ps_ratio')} ROE={f('roe', '{:.1%}')} "
-        f"rev_yoy={f('revenue_yoy_growth', '{:.1%}')} {froth}"
+        f"rev_yoy={f('revenue_yoy_growth', '{:.1%}')} {froth}".strip()
     )
+
+
+def _split_name(full_name: str) -> tuple[str, str]:
+    """Split a 'Chinese English' name field into (chinese, english) halves.
+
+    universe.yaml stores names like '中际旭创 InnoLight' or just 'NVIDIA'.
+    Returns ('', english) if no Chinese characters found.
+    """
+    if not full_name:
+        return "", ""
+    # Anything in CJK Unified Ideographs range
+    cjk = re.findall(r"[一-鿿]+", full_name)
+    chinese = " ".join(cjk).strip()
+    english = re.sub(r"[一-鿿]+", "", full_name).strip()
+    return chinese, english
 
 
 _SYSTEM_PROMPT = """You are a sell-side analyst writing a brief news-and-narrative
 companion to a quantitative AI-relevance factor (ARF) ranking. The user has
 already computed the factor — DO NOT restate or re-derive the scores. Your job is
-to source recent (last 14 days) news that explains the narrative around each name
-and reconcile it with the factor reading.
+to source recent (last 30 days) news that explains the narrative for ONE specific
+stock and reconcile it with the factor reading.
 
-Rules:
-1. Use Google Search to find news. Cite sources.
-2. For each stock, output a section with this exact structure:
+Hard rules:
+1. ALWAYS use Google Search. Fire at least 3 distinct queries before deciding
+   whether news exists. Vary queries: include the company's English name,
+   Chinese name, ticker, and the most material recent topics
+   (earnings, products, customers, M&A, regulation).
+2. EVERY fact in your bullets MUST come from a search result and end with the
+   source domain in parentheses, e.g. "(reuters.com)" or "(caixin.com)". Do not
+   include any unsourced claims.
+3. If you genuinely cannot find news after exhausting reasonable queries, write
+   exactly one bullet: "- No material news in the last 30 days." Do not pad with
+   generic background.
+
+Output format — exactly this, no preamble, no other sections:
 
 ### <TICKER>
-HEADLINE: <one sentence, ≤25 words>
+HEADLINE: <one sentence, ≤25 words, plain English>
 BULLETS:
-- <fact + source domain in parens>
-- <fact + source domain in parens>
-- <fact + source domain in parens>
+- <fact (domain.com)>
+- <fact (domain.com)>
+- <fact (domain.com)>
 RECONCILE: <one sentence linking the news to the ARF/E/V/decile shown>
-
-3. Order stocks the same way they were given (ARF descending).
-4. If you cannot find material news for a stock, say so honestly in the BULLETS
-   instead of fabricating.
-5. Never claim the ARF score itself is wrong. The factor is the ground truth in
-   this exercise.
 """
 
 
-def _build_user_prompt(rows_df: pd.DataFrame, as_of: date) -> str:
-    rows = "\n".join(_format_row(r) for _, r in rows_df.iterrows())
+def _build_single_stock_prompt(row: pd.Series, as_of: date) -> str:
+    chinese, english = _split_name(str(row.get("name", "") or ""))
+    ticker = str(row.get("ticker", ""))
+    leg = str(row.get("leg", ""))
+
+    search_hints = [f'"{english}"' if english else None, f'"{ticker}"']
+    if chinese:
+        search_hints.append(f'"{chinese}"')
+        search_hints.append(
+            f'For this Chinese {leg}-listed name, search Chinese-language news '
+            f'(query in Chinese: 「{chinese}」). Also try:'
+            f' site:caixin.com, site:cls.cn, site:21jingji.com, site:stcn.com,'
+            f' site:sina.com.cn.'
+        )
+    else:
+        search_hints.append(
+            'Prioritise high-credibility English outlets: site:reuters.com, '
+            'site:bloomberg.com, site:ft.com, site:wsj.com, site:cnbc.com, '
+            'plus the company\'s own investor-relations site.'
+        )
+
+    hints_str = "\n".join(f"- {h}" for h in search_hints if h)
+
     return (
         f"Snapshot date: {as_of.isoformat()}\n"
-        f"Methodology recap: ARF = √(E_score × V_score) within each leg, "
-        f"percentile-ranked to 0–100. D1 = top decile (most stretched by AI narrative). "
-        f"★FROTH = D1 + ROE < cost-of-equity (10% US / 12% China) + P/S > 25.\n\n"
-        f"Cohort (top by ARF):\n{rows}\n\n"
-        f"Now produce the per-stock sections. Cover every stock listed above, in the same order."
+        f"Stock: {ticker} — {row.get('name', '')}\n"
+        f"Factor reading: {_factor_line(row)}\n\n"
+        f"Search guidance:\n{hints_str}\n\n"
+        f"Now produce the section for {ticker} following the exact output format. "
+        f"Search BEFORE writing. Every bullet needs a cited domain. "
+        f"If genuinely no news, use the 'No material news' fallback bullet."
     )
 
 
 _SECTION_RE = re.compile(r"^###\s+([A-Za-z0-9\.\-]+)\s*$", re.MULTILINE)
 
+# Capture "(domain.tld)" or "(sub.domain.tld)" at the end of a bullet, single
+# or comma-separated. Handles ".com", ".com.cn", ".cn", ".net", etc.
+_DOMAIN_RE = re.compile(
+    r"\(([a-z0-9][a-z0-9\-]*(?:\.[a-z0-9][a-z0-9\-]*)+(?:\s*,\s*[a-z0-9][a-z0-9\-]*(?:\.[a-z0-9][a-z0-9\-]*)+)*)\)",
+    re.IGNORECASE,
+)
 
-def _parse_sections(
-    text: str,
-    cohort_df: pd.DataFrame,
-) -> list[StockSummary]:
-    """Split the model output into per-stock summaries.
 
-    Resilient to small format drift — accepts any leading whitespace, missing
-    fields just leave defaults.
+def _extract_domain_mentions(bullets: list[str]) -> list[str]:
+    """Pull '(domain.com)' tokens out of bullet text, deduped, order-preserved.
+
+    Handles comma-separated forms like '(reuters.com, bloomberg.com)'.
     """
-    matches = list(_SECTION_RE.finditer(text))
-    out: list[StockSummary] = []
-    name_lookup = dict(zip(cohort_df["ticker"], cohort_df["name"], strict=False))
-
-    for i, m in enumerate(matches):
-        ticker = m.group(1).strip()
-        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
-        body = text[m.end():end]
-
-        headline = ""
-        reconcile = ""
-        bullets: list[str] = []
-
-        hl = re.search(r"HEADLINE:\s*(.+?)(?:\n|$)", body, re.IGNORECASE)
-        if hl:
-            headline = hl.group(1).strip()
-        rc = re.search(r"RECONCILE:\s*(.+?)(?:\n###|\Z)", body, re.IGNORECASE | re.DOTALL)
-        if rc:
-            reconcile = rc.group(1).strip().rstrip("`*_").strip()
-
-        bullets_section = re.search(
-            r"BULLETS:\s*(.*?)(?:RECONCILE:|\n###|\Z)",
-            body, re.IGNORECASE | re.DOTALL,
-        )
-        if bullets_section:
-            for line in bullets_section.group(1).splitlines():
-                line = line.strip()
-                if line.startswith(("-", "*", "•")):
-                    bullets.append(line[1:].strip())
-
-        out.append(StockSummary(
-            ticker=ticker,
-            name=name_lookup.get(ticker, ticker),
-            headline=headline,
-            bullets=bullets,
-            reconcile=reconcile,
-        ))
-    return out
+    seen: dict[str, None] = {}
+    for line in bullets:
+        for match in _DOMAIN_RE.finditer(line):
+            for dom in match.group(1).split(","):
+                d = dom.strip().lower()
+                if "." in d and d not in seen:
+                    seen[d] = None
+    return list(seen)
 
 
-def _extract_citations(response) -> list[Citation]:
-    """Pull grounding citations from the SDK response (best-effort, schema-tolerant)."""
-    out: list[Citation] = []
+def _parse_one_section(text: str, expected_ticker: str, name: str) -> StockSummary:
+    """Parse a single per-stock response; expected_ticker is the known truth."""
+    match = _SECTION_RE.search(text)
+    body = text[match.end():] if match else text
+    ticker = match.group(1).strip() if match else expected_ticker
+
+    headline = ""
+    reconcile = ""
+    bullets: list[str] = []
+
+    hl = re.search(r"HEADLINE:\s*(.+?)(?:\n|$)", body, re.IGNORECASE)
+    if hl:
+        headline = hl.group(1).strip()
+    rc = re.search(r"RECONCILE:\s*(.+?)(?:\n###|\Z)", body, re.IGNORECASE | re.DOTALL)
+    if rc:
+        reconcile = rc.group(1).strip().rstrip("`*_").strip()
+
+    bullets_section = re.search(
+        r"BULLETS:\s*(.*?)(?:RECONCILE:|\n###|\Z)",
+        body, re.IGNORECASE | re.DOTALL,
+    )
+    if bullets_section:
+        for line in bullets_section.group(1).splitlines():
+            line = line.strip()
+            if line.startswith(("-", "*", "•")):
+                bullets.append(line[1:].strip())
+
+    return StockSummary(
+        ticker=ticker or expected_ticker,
+        name=name,
+        headline=headline,
+        bullets=bullets,
+        reconcile=reconcile,
+    )
+
+
+def _extract_citations(response) -> tuple[list[Citation], list[str]]:
+    """Return (citations, search_queries) from one response, deduped."""
+    citations: list[Citation] = []
+    queries: list[str] = []
     try:
-        candidates = getattr(response, "candidates", None) or []
-        for cand in candidates:
+        for cand in (getattr(response, "candidates", None) or []):
             gm = getattr(cand, "grounding_metadata", None)
-            chunks = getattr(gm, "grounding_chunks", None) or []
-            for ch in chunks:
+            if gm is None:
+                continue
+            for q in (getattr(gm, "web_search_queries", None) or []):
+                if q and q not in queries:
+                    queries.append(q)
+            for ch in (getattr(gm, "grounding_chunks", None) or []):
                 web = getattr(ch, "web", None)
                 if web is None:
                     continue
-                out.append(Citation(
+                citations.append(Citation(
                     title=str(getattr(web, "title", "") or ""),
                     uri=str(getattr(web, "uri", "") or ""),
                 ))
     except Exception:  # noqa: BLE001
-        log.exception("Failed to extract citations — returning empty list")
+        log.exception("Failed to extract citations")
 
     seen, deduped = set(), []
-    for c in out:
+    for c in citations:
         if c.uri and c.uri not in seen:
             seen.add(c.uri)
             deduped.append(c)
-    return deduped
+    return deduped, queries
+
+
+def _summarize_one(api_key: str, row: pd.Series, as_of: date) -> StockSummary:
+    """One grounded Gemini call for one stock. Never raises — returns an empty
+    card with a hint in the headline on failure."""
+    from google import genai
+    from google.genai import types
+
+    ticker = str(row.get("ticker", ""))
+    name = str(row.get("name", "") or ticker)
+    try:
+        client = genai.Client(api_key=api_key)
+        config = types.GenerateContentConfig(
+            tools=[types.Tool(google_search=types.GoogleSearch())],
+            temperature=0.2,
+            system_instruction=_SYSTEM_PROMPT,
+        )
+        response = client.models.generate_content(
+            model=MODEL,
+            contents=_build_single_stock_prompt(row, as_of),
+            config=config,
+        )
+        text = response.text or ""
+        summary = _parse_one_section(text, ticker, name)
+        cits, queries = _extract_citations(response)
+        summary.citations = cits
+        summary.search_queries = queries
+        summary.domain_mentions = _extract_domain_mentions(summary.bullets)
+        log.info(
+            "Gemini per-stock: %s chunks=%d queries=%d bullets=%d domains=%d",
+            ticker, len(cits), len(queries), len(summary.bullets),
+            len(summary.domain_mentions),
+        )
+        return summary
+    except Exception as exc:  # noqa: BLE001
+        log.exception("Gemini call failed for %s", ticker)
+        return StockSummary(
+            ticker=ticker,
+            name=name,
+            headline=f"[Gemini error: {type(exc).__name__}]",
+        )
 
 
 def summarize_stocks(
@@ -194,15 +298,12 @@ def summarize_stocks(
     tickers: list[str],
     as_of: date,
 ) -> GeminiReport:
-    """Call Gemini with Google Search grounding; return parsed report.
+    """Fan out one grounded call per ticker; aggregate into a GeminiReport.
 
     Raises RuntimeError if GEMINI_API_KEY is unset.
     """
     if not is_enabled():
         raise RuntimeError("GEMINI_API_KEY not set")
-
-    from google import genai
-    from google.genai import types
 
     cohort = snapshot_df[snapshot_df["ticker"].isin(tickers)].copy()
     cohort = cohort.sort_values("arf", ascending=False, na_position="last")
@@ -212,32 +313,49 @@ def summarize_stocks(
             citations=[], raw_text="", model=MODEL,
         )
 
-    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
-    config = types.GenerateContentConfig(
-        tools=[types.Tool(google_search=types.GoogleSearch())],
-        temperature=0.2,
-        system_instruction=_SYSTEM_PROMPT,
-    )
-    response = client.models.generate_content(
-        model=MODEL,
-        contents=_build_user_prompt(cohort, as_of),
-        config=config,
-    )
+    api_key = os.environ["GEMINI_API_KEY"]
+    rows = [r for _, r in cohort.iterrows()]
+    results_by_ticker: dict[str, StockSummary] = {}
 
-    text = response.text or ""
-    summaries = _parse_sections(text, cohort)
-    citations = _extract_citations(response)
+    with ThreadPoolExecutor(max_workers=MAX_PARALLEL) as pool:
+        futures = {
+            pool.submit(_summarize_one, api_key, row, as_of): str(row["ticker"])
+            for row in rows
+        }
+        for fut in as_completed(futures):
+            ticker = futures[fut]
+            results_by_ticker[ticker] = fut.result()
+
+    # Preserve cohort order (ARF descending)
+    ordered = [results_by_ticker[str(r["ticker"])] for r in rows
+               if str(r["ticker"]) in results_by_ticker]
+
+    # Union of citations across all stocks, deduped
+    all_citations: list[Citation] = []
+    seen = set()
+    for s in ordered:
+        for c in s.citations:
+            if c.uri and c.uri not in seen:
+                seen.add(c.uri)
+                all_citations.append(c)
+
+    raw_text = "\n\n".join(
+        f"### {s.ticker}\nHEADLINE: {s.headline}\nBULLETS:\n" +
+        "\n".join(f"- {b}" for b in s.bullets) +
+        f"\nRECONCILE: {s.reconcile}"
+        for s in ordered
+    )
 
     log.info(
-        "Gemini summary: model=%s tickers=%d parsed=%d citations=%d",
-        MODEL, len(cohort), len(summaries), len(citations),
+        "Gemini report: model=%s stocks=%d total_citations=%d",
+        MODEL, len(ordered), len(all_citations),
     )
     return GeminiReport(
         as_of=as_of,
         cohort=cohort["ticker"].tolist(),
-        stocks=summaries,
-        citations=citations,
-        raw_text=text,
+        stocks=ordered,
+        citations=all_citations,
+        raw_text=raw_text,
         model=MODEL,
     )
 
