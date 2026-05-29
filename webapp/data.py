@@ -82,3 +82,11 @@ def load_fetch_outcomes(run_id: str) -> pd.DataFrame:
     return _open_conn().execute(
         "SELECT * FROM fetch_outcomes WHERE run_id = ? ORDER BY ticker", [run_id]
     ).fetchdf()
+
+
+def load_gemini_summaries(as_of: date, cohort_key: str) -> pd.DataFrame:
+    return _open_conn().execute(
+        "SELECT * FROM gemini_summaries WHERE as_of_date = ? AND cohort_key = ? "
+        "ORDER BY ticker",
+        [as_of, cohort_key],
+    ).fetchdf()

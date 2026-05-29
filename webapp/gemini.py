@@ -371,3 +371,91 @@ def cohort_for_overview(snapshot_df: pd.DataFrame) -> list[str]:
 
 def to_session_cache_key(as_of: date, cohort: list[str]) -> str:
     return json.dumps({"as_of": as_of.isoformat(), "cohort": sorted(cohort)})
+
+
+# ---------- DB serialization ----------
+
+OVERVIEW_COHORT_KEY = "overview"
+
+
+def summary_to_db_row(
+    s: StockSummary,
+    as_of: date,
+    cohort_key: str,
+    model: str,
+    generated_at,
+) -> dict:
+    return {
+        "as_of_date": as_of,
+        "ticker": s.ticker,
+        "cohort_key": cohort_key,
+        "name": s.name,
+        "headline": s.headline,
+        "bullets_json": json.dumps(s.bullets, ensure_ascii=False),
+        "reconcile": s.reconcile,
+        "domain_mentions_json": json.dumps(s.domain_mentions, ensure_ascii=False),
+        "search_queries_json": json.dumps(s.search_queries, ensure_ascii=False),
+        "citations_json": json.dumps(
+            [{"title": c.title, "uri": c.uri} for c in s.citations],
+            ensure_ascii=False,
+        ),
+        "model": model,
+        "generated_at": generated_at,
+    }
+
+
+def _json_loads_safe(s: str | None) -> list:
+    if not s:
+        return []
+    try:
+        v = json.loads(s)
+        return v if isinstance(v, list) else []
+    except (TypeError, ValueError):
+        return []
+
+
+def db_rows_to_report(rows_df: pd.DataFrame, as_of: date) -> GeminiReport | None:
+    """Build a GeminiReport from a query_gemini_summaries() result.
+
+    Returns None if the dataframe is empty.
+    """
+    if rows_df is None or len(rows_df) == 0:
+        return None
+
+    stocks: list[StockSummary] = []
+    seen, all_citations = set(), []
+    model = ""
+    for _, r in rows_df.iterrows():
+        citations = [
+            Citation(title=str(c.get("title", "")), uri=str(c.get("uri", "")))
+            for c in _json_loads_safe(r.get("citations_json"))
+        ]
+        s = StockSummary(
+            ticker=str(r.get("ticker") or ""),
+            name=str(r.get("name") or r.get("ticker") or ""),
+            headline=str(r.get("headline") or ""),
+            bullets=[str(b) for b in _json_loads_safe(r.get("bullets_json"))],
+            reconcile=str(r.get("reconcile") or ""),
+            citations=citations,
+            search_queries=[
+                str(q) for q in _json_loads_safe(r.get("search_queries_json"))
+            ],
+            domain_mentions=[
+                str(d) for d in _json_loads_safe(r.get("domain_mentions_json"))
+            ],
+        )
+        stocks.append(s)
+        model = str(r.get("model") or model)
+        for c in citations:
+            if c.uri and c.uri not in seen:
+                seen.add(c.uri)
+                all_citations.append(c)
+
+    return GeminiReport(
+        as_of=as_of,
+        cohort=[s.ticker for s in stocks],
+        stocks=stocks,
+        citations=all_citations,
+        raw_text="",
+        model=model,
+    )

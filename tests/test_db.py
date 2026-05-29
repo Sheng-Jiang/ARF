@@ -8,12 +8,14 @@ from arf.db import (
     finish_run,
     init_db,
     query_fetch_outcomes,
+    query_gemini_summaries,
     query_latest,
     query_latest_run,
     query_runs,
     query_snapshot,
     record_fetch_outcomes,
     start_run,
+    upsert_gemini_summaries,
     upsert_snapshot,
 )
 
@@ -221,3 +223,125 @@ class TestRunTracking:
         assert len(df) == 3
         dates = pd.to_datetime(df["started_at"]).dt.date.tolist()
         assert dates == sorted(dates, reverse=True)
+
+
+class TestGeminiSummaries:
+    def _row(self, ticker: str, as_of: date, cohort_key: str = "overview") -> dict:
+        return {
+            "as_of_date": as_of,
+            "ticker": ticker,
+            "cohort_key": cohort_key,
+            "name": f"Co {ticker}",
+            "headline": f"{ticker} latest news",
+            "bullets_json": '["bullet1 (reuters.com)", "bullet2 (eastmoney.com)"]',
+            "reconcile": "consistent with D1",
+            "domain_mentions_json": '["reuters.com", "eastmoney.com"]',
+            "search_queries_json": '["q1", "q2"]',
+            "citations_json": '[{"title": "Reuters", "uri": "https://reuters.com/1"}]',
+            "model": "gemini-2.5-pro",
+            "generated_at": datetime(2026, 5, 29, 4, 30, 0),
+        }
+
+    def test_upsert_inserts_rows(self, conn):
+        upsert_gemini_summaries(
+            conn,
+            [self._row("NVDA", date(2026, 5, 28)),
+             self._row("PLTR", date(2026, 5, 28))],
+            date(2026, 5, 28), "overview",
+        )
+        df = query_gemini_summaries(conn, date(2026, 5, 28), "overview")
+        assert len(df) == 2
+        assert set(df["ticker"]) == {"NVDA", "PLTR"}
+
+    def test_upsert_idempotent_replaces_cohort(self, conn):
+        upsert_gemini_summaries(
+            conn, [self._row("NVDA", date(2026, 5, 28))],
+            date(2026, 5, 28), "overview",
+        )
+        # Replace with a different set
+        upsert_gemini_summaries(
+            conn, [self._row("PLTR", date(2026, 5, 28))],
+            date(2026, 5, 28), "overview",
+        )
+        df = query_gemini_summaries(conn, date(2026, 5, 28), "overview")
+        assert len(df) == 1
+        assert df.iloc[0]["ticker"] == "PLTR"
+
+    def test_upsert_preserves_other_dates(self, conn):
+        upsert_gemini_summaries(
+            conn, [self._row("NVDA", date(2026, 5, 21))],
+            date(2026, 5, 21), "overview",
+        )
+        upsert_gemini_summaries(
+            conn, [self._row("PLTR", date(2026, 5, 28))],
+            date(2026, 5, 28), "overview",
+        )
+        assert len(query_gemini_summaries(conn, date(2026, 5, 21), "overview")) == 1
+        assert len(query_gemini_summaries(conn, date(2026, 5, 28), "overview")) == 1
+
+    def test_upsert_preserves_other_cohort_keys(self, conn):
+        upsert_gemini_summaries(
+            conn, [self._row("NVDA", date(2026, 5, 28), cohort_key="overview")],
+            date(2026, 5, 28), "overview",
+        )
+        upsert_gemini_summaries(
+            conn, [self._row("MRVL", date(2026, 5, 28), cohort_key="us_leg")],
+            date(2026, 5, 28), "us_leg",
+        )
+        assert len(query_gemini_summaries(conn, date(2026, 5, 28), "overview")) == 1
+        assert len(query_gemini_summaries(conn, date(2026, 5, 28), "us_leg")) == 1
+
+    def test_empty_rows_clears_cohort(self, conn):
+        upsert_gemini_summaries(
+            conn, [self._row("NVDA", date(2026, 5, 28))],
+            date(2026, 5, 28), "overview",
+        )
+        upsert_gemini_summaries(conn, [], date(2026, 5, 28), "overview")
+        assert len(query_gemini_summaries(conn, date(2026, 5, 28), "overview")) == 0
+
+
+class TestGeminiSerialization:
+    def test_summary_to_row_round_trip(self, conn):
+        from webapp.gemini import (
+            Citation,
+            StockSummary,
+            db_rows_to_report,
+            summary_to_db_row,
+        )
+        s = StockSummary(
+            ticker="NVDA",
+            name="NVIDIA",
+            headline="Q1 beat",
+            bullets=["bullet A (reuters.com)", "bullet B (bloomberg.com)"],
+            reconcile="non-bubbly given fundamentals",
+            citations=[
+                Citation(title="Reuters", uri="https://reuters.com/1"),
+                Citation(title="Bloomberg", uri="https://bloomberg.com/2"),
+            ],
+            search_queries=["NVDA Q1 earnings", "Marvell custom silicon"],
+            domain_mentions=["reuters.com", "bloomberg.com"],
+        )
+        gen_at = datetime(2026, 5, 29, 4, 30, 0)
+        row = summary_to_db_row(s, date(2026, 5, 28), "overview", "gemini-2.5-pro", gen_at)
+        upsert_gemini_summaries(conn, [row], date(2026, 5, 28), "overview")
+
+        df = query_gemini_summaries(conn, date(2026, 5, 28), "overview")
+        report = db_rows_to_report(df, date(2026, 5, 28))
+        assert report is not None
+        assert len(report.stocks) == 1
+        rs = report.stocks[0]
+        assert rs.ticker == "NVDA"
+        assert rs.name == "NVIDIA"
+        assert rs.headline == "Q1 beat"
+        assert rs.bullets == ["bullet A (reuters.com)", "bullet B (bloomberg.com)"]
+        assert rs.reconcile == "non-bubbly given fundamentals"
+        assert rs.search_queries == ["NVDA Q1 earnings", "Marvell custom silicon"]
+        assert rs.domain_mentions == ["reuters.com", "bloomberg.com"]
+        assert [c.uri for c in rs.citations] == [
+            "https://reuters.com/1", "https://bloomberg.com/2"
+        ]
+        assert report.model == "gemini-2.5-pro"
+
+    def test_db_rows_to_report_empty_df_returns_none(self):
+        from webapp.gemini import db_rows_to_report
+        assert db_rows_to_report(pd.DataFrame(), date(2026, 5, 28)) is None

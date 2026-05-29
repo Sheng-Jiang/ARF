@@ -8,7 +8,7 @@ import logging
 import os
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pandas as pd
@@ -116,6 +116,60 @@ def _build_scoring_df(
     return pd.DataFrame(rows)
 
 
+def _maybe_generate_gemini_summaries(
+    conn,
+    df: pd.DataFrame,
+    as_of: date,
+) -> None:
+    """Generate Ask-Gemini per-stock summaries and persist them.
+
+    No-op if GEMINI_API_KEY is unset. Failures here MUST NOT fail the pipeline —
+    Gemini summarisation is a value-add layer on top of the numerical snapshot.
+    """
+    if not os.getenv("GEMINI_API_KEY"):
+        log.info("GEMINI_API_KEY not set — skipping Gemini summarisation")
+        return
+
+    try:
+        # webapp is included in the same package install for the cloud job.
+        # If the import fails (e.g. running in a slim env), skip gracefully.
+        from arf.db import upsert_gemini_summaries
+        from webapp import gemini
+    except ImportError as exc:
+        log.warning("Gemini imports unavailable, skipping summarisation: %s", exc)
+        return
+
+    scored = df[df["leg"].isin(["US", "China"])]
+    cohort = gemini.cohort_for_overview(scored)
+    if not cohort:
+        log.info("Empty cohort — skipping Gemini summarisation")
+        return
+
+    console.print(
+        f"Generating Gemini summaries for {len(cohort)} stocks "
+        f"(cohort_key={gemini.OVERVIEW_COHORT_KEY})…"
+    )
+    try:
+        report = gemini.summarize_stocks(scored, cohort, as_of)
+    except Exception:
+        log.exception("Gemini summarisation failed — continuing pipeline")
+        return
+
+    generated_at = datetime.now(UTC).replace(tzinfo=None)
+    rows = [
+        gemini.summary_to_db_row(
+            s, as_of, gemini.OVERVIEW_COHORT_KEY, report.model, generated_at,
+        )
+        for s in report.stocks
+    ]
+    upsert_gemini_summaries(conn, rows, as_of, gemini.OVERVIEW_COHORT_KEY)
+    console.print(
+        f"Persisted {len(rows)} Gemini cards "
+        f"({sum(len(s.domain_mentions) for s in report.stocks)} domain mentions, "
+        f"{len(report.citations)} grounded citations)"
+    )
+
+
 def _outcome_for(sd: StockData) -> str:
     if sd.data_source == "error":
         return "error"
@@ -170,6 +224,8 @@ def run_pipeline(
         upsert_snapshot(conn, df, as_of)
         record_fetch_outcomes(conn, run_id, outcomes)
         console.print(f"Snapshot saved to {db_path}")
+
+        _maybe_generate_gemini_summaries(conn, df, as_of)
 
         # Write parquet
         snap_dir = data_dir / "snapshots"

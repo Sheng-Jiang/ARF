@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from webapp import gemini
-from webapp.data import list_dates, refresh_data
+from webapp.data import list_dates, load_gemini_summaries, refresh_data
 
 
 def render_sidebar() -> date | None:
@@ -196,26 +196,53 @@ def render_ask_gemini(
     cache_slot = f"gemini_cache_{section_key}"
     cache = st.session_state.setdefault(cache_slot, {})
 
+    # 1) Try session cache (already refreshed this browser session)
     cached_report = cache.get(cache_key_str)
-    btn_label = "🔄 重新生成" if cached_report else f"✨ 询问 Gemini（{len(cohort)} 只股票）"
+    is_precomputed = False
+
+    # 2) Fall back to pipeline pre-compute in DuckDB
+    if cached_report is None:
+        try:
+            db_rows = load_gemini_summaries(as_of, gemini.OVERVIEW_COHORT_KEY)
+        except Exception:  # noqa: BLE001
+            db_rows = None
+        precomputed = gemini.db_rows_to_report(db_rows, as_of) if db_rows is not None else None
+        if precomputed and precomputed.stocks:
+            cached_report = precomputed
+            is_precomputed = True
+
+    btn_label = (
+        f"🔄 重新生成最新新闻（{len(cohort)} 只）"
+        if cached_report
+        else f"✨ 询问 Gemini（{len(cohort)} 只股票）"
+    )
 
     if st.button(btn_label, key=f"ask_gemini_btn_{section_key}"):
-        with st.spinner("Gemini 正在检索最新新闻并撰写摘要……（约15–30秒）"):
+        with st.spinner("Gemini 正在检索最新新闻并撰写摘要……（约30–45秒）"):
             try:
                 report = gemini.summarize_stocks(snapshot_df, cohort, as_of)
                 cache[cache_key_str] = report
                 cached_report = report
+                is_precomputed = False
             except Exception as exc:  # noqa: BLE001
                 st.error(f"调用 Gemini 失败：{exc}")
                 return
 
     if cached_report is None:
+        st.caption("点击上方按钮，由 Gemini 联网检索此快照中股票的最新新闻。")
         return
 
     if not cached_report.stocks:
         st.warning("Gemini 未返回任何可解析的股票卡片。原始输出：")
         st.code(cached_report.raw_text[:2000] or "(空)")
         return
+
+    if is_precomputed:
+        st.info(
+            "📦 显示本次快照运行时预先生成的新闻摘要 · "
+            "点击「重新生成」获取实时最新版本。",
+            icon="📦",
+        )
 
     name_lookup = dict(
         zip(snapshot_df["ticker"], snapshot_df["name"], strict=False)

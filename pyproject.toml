@@ -37,6 +37,7 @@ webapp = [
 ]
 cloud = [
     "google-cloud-storage>=2.16",
+    "google-genai>=0.3",
 ]
 
 [project.scripts]

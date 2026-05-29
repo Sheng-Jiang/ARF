@@ -33,7 +33,8 @@ steps:
           --cpu=1 \
           --task-timeout=30m \
           --max-retries=1 \
-          --set-env-vars=OUTPUT_TARGET=gcs,GCS_BUCKET=${_GCS_BUCKET},GCS_DB_OBJECT=arf.db,TRIGGER_SOURCE=scheduler
+          --set-env-vars=OUTPUT_TARGET=gcs,GCS_BUCKET=${_GCS_BUCKET},GCS_DB_OBJECT=arf.db,TRIGGER_SOURCE=scheduler \
+          --update-secrets=GEMINI_API_KEY=gemini-api-key:latest
 
 images:
   - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_JOB}

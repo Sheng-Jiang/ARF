@@ -74,6 +74,24 @@ CREATE TABLE IF NOT EXISTS fetch_outcomes (
 )
 """
 
+_SCHEMA_GEMINI_SUMMARIES = """
+CREATE TABLE IF NOT EXISTS gemini_summaries (
+    as_of_date           DATE      NOT NULL,
+    ticker               TEXT      NOT NULL,
+    cohort_key           TEXT      NOT NULL,
+    name                 TEXT,
+    headline             TEXT,
+    bullets_json         TEXT,
+    reconcile            TEXT,
+    domain_mentions_json TEXT,
+    search_queries_json  TEXT,
+    citations_json       TEXT,
+    model                TEXT,
+    generated_at         TIMESTAMP NOT NULL,
+    PRIMARY KEY (as_of_date, ticker, cohort_key)
+)
+"""
+
 
 def init_db(path: Path = Path("data/arf.db")) -> duckdb.DuckDBPyConnection:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -81,6 +99,7 @@ def init_db(path: Path = Path("data/arf.db")) -> duckdb.DuckDBPyConnection:
     conn.execute(_SCHEMA_SNAPSHOTS)
     conn.execute(_SCHEMA_RUNS)
     conn.execute(_SCHEMA_FETCH_OUTCOMES)
+    conn.execute(_SCHEMA_GEMINI_SUMMARIES)
     return conn
 
 
@@ -162,6 +181,50 @@ def query_fetch_outcomes(
 ) -> pd.DataFrame:
     return conn.execute(
         "SELECT * FROM fetch_outcomes WHERE run_id = ? ORDER BY ticker", [run_id]
+    ).fetchdf()
+
+
+_GEMINI_COLS = [
+    "as_of_date", "ticker", "cohort_key", "name", "headline",
+    "bullets_json", "reconcile", "domain_mentions_json",
+    "search_queries_json", "citations_json", "model", "generated_at",
+]
+
+
+def upsert_gemini_summaries(
+    conn: duckdb.DuckDBPyConnection,
+    rows: list[dict],
+    as_of_date: date,
+    cohort_key: str,
+) -> None:
+    """Replace any existing summaries for (as_of_date, cohort_key) with `rows`.
+
+    Each row must contain all _GEMINI_COLS keys (the *_json fields as JSON strings).
+    """
+    conn.execute(
+        "DELETE FROM gemini_summaries WHERE as_of_date = ? AND cohort_key = ?",
+        [as_of_date, cohort_key],
+    )
+    if not rows:
+        conn.commit()
+        return
+    conn.executemany(
+        f"INSERT INTO gemini_summaries ({', '.join(_GEMINI_COLS)}) "
+        f"VALUES ({', '.join(['?'] * len(_GEMINI_COLS))})",
+        [tuple(r[c] for c in _GEMINI_COLS) for r in rows],
+    )
+    conn.commit()
+
+
+def query_gemini_summaries(
+    conn: duckdb.DuckDBPyConnection,
+    as_of_date: date,
+    cohort_key: str,
+) -> pd.DataFrame:
+    return conn.execute(
+        "SELECT * FROM gemini_summaries WHERE as_of_date = ? AND cohort_key = ? "
+        "ORDER BY ticker",
+        [as_of_date, cohort_key],
     ).fetchdf()
 
 
