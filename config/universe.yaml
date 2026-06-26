@@ -155,6 +155,150 @@
   policy_premium: false
   notes: "AI optics + OCS pure play"
 
+- ticker: TSM
+  name: "台积电 TSMC"
+  leg: US
+  layer: L2
+  pure_play_pct: 60
+  primary_exchange: NYSE
+  policy_premium: false
+  notes: "Advanced node foundry leader"
+
+- ticker: MU
+  name: "美光科技 Micron"
+  leg: US
+  layer: L2
+  pure_play_pct: 45
+  primary_exchange: NASDAQ
+  policy_premium: false
+  notes: "HBM3e memory supplier"
+
+- ticker: QCOM
+  name: "高通 Qualcomm"
+  leg: US
+  layer: L2
+  pure_play_pct: 30
+  primary_exchange: NASDAQ
+  policy_premium: false
+  notes: "Edge AI mobile/PC processors"
+
+- ticker: KLAC
+  name: "科磊 KLA Corp"
+  leg: US
+  layer: L2
+  pure_play_pct: 35
+  primary_exchange: NASDAQ
+  policy_premium: false
+  notes: "Semiconductor metrology equipment"
+
+- ticker: LRCX
+  name: "拉姆研究 Lam Research"
+  leg: US
+  layer: L2
+  pure_play_pct: 40
+  primary_exchange: NASDAQ
+  policy_premium: false
+  notes: "Semiconductor etching equipment"
+
+- ticker: AMAT
+  name: "应用材料 Applied Materials"
+  leg: US
+  layer: L2
+  pure_play_pct: 40
+  primary_exchange: NASDAQ
+  policy_premium: false
+  notes: "Broad fabrication equipment portfolio"
+
+- ticker: GOOGL
+  name: "谷歌 Alphabet"
+  leg: US
+  layer: L5
+  pure_play_pct: 40
+  primary_exchange: NASDAQ
+  policy_premium: false
+  notes: "Gemini models + Google Cloud AI + search/workspace apps"
+
+- ticker: META
+  name: "Meta Platforms"
+  leg: US
+  layer: L5
+  pure_play_pct: 50
+  primary_exchange: NASDAQ
+  policy_premium: false
+  notes: "LLaMA open-weights + AI ad ranking + social apps"
+
+- ticker: AAPL
+  name: "苹果 Apple"
+  leg: US
+  layer: L5
+  pure_play_pct: 30
+  primary_exchange: NASDAQ
+  policy_premium: false
+  notes: "Apple Intelligence edge AI ecosystem"
+
+- ticker: TSLA
+  name: "特斯拉 Tesla"
+  leg: US
+  layer: L5
+  pure_play_pct: 60
+  primary_exchange: NASDAQ
+  policy_premium: false
+  notes: "FSD autonomous driving + Optimus robotics"
+
+- ticker: ORCL
+  name: "甲骨文 Oracle"
+  leg: US
+  layer: L5
+  pure_play_pct: 45
+  primary_exchange: NYSE
+  policy_premium: false
+  notes: "OCI cloud GPU cluster renting"
+
+- ticker: NOW
+  name: "ServiceNow"
+  leg: US
+  layer: L5
+  pure_play_pct: 35
+  primary_exchange: NYSE
+  policy_premium: false
+  notes: "Enterprise AI workflow automation"
+
+- ticker: DELL
+  name: "戴尔 Dell"
+  leg: US
+  layer: L3
+  pure_play_pct: 50
+  primary_exchange: NYSE
+  policy_premium: false
+  notes: "AI server racks provider"
+
+- ticker: VRT
+  name: "维谛技术 Vertiv"
+  leg: US
+  layer: L3
+  pure_play_pct: 75
+  primary_exchange: NYSE
+  policy_premium: false
+  notes: "Data center liquid cooling and power management"
+
+- ticker: CEG
+  name: "星辰能源 Constellation"
+  leg: US
+  layer: L1
+  pure_play_pct: 40
+  primary_exchange: NASDAQ
+  policy_premium: false
+  notes: "Nuclear power supplier for Microsoft AI clusters"
+
+- ticker: VST
+  name: "维斯特拉 Vistra"
+  leg: US
+  layer: L1
+  pure_play_pct: 35
+  primary_exchange: NYSE
+  policy_premium: false
+  notes: "Nuclear/gas utility generator in ERCOT"
+
 # ── China Leg ────────────────────────────────────────────────────────────────
 - ticker: "300308.SZ"
   name: "中际旭创 InnoLight"
@@ -299,6 +443,186 @@
   primary_exchange: HKEX
   policy_premium: false
   notes: "Pure-play foundation model; IPO Jan 2026"
+
+- ticker: "601138.SH"
+  name: "工业富联 FII"
+  leg: China
+  layer: L3
+  pure_play_pct: 70
+  primary_exchange: SSE
+  policy_premium: false
+  notes: "Foxconn Industrial Internet; AI servers assembly"
+
+- ticker: "002463.SZ"
+  name: "沪电股份 WUS"
+  leg: China
+  layer: L3
+  pure_play_pct: 75
+  primary_exchange: SZSE
+  policy_premium: false
+  notes: "High-layer PCBs for AI servers"
+
+- ticker: "300496.SZ"
+  name: "中科创达 Thundersoft"
+  leg: China
+  layer: L5
+  pure_play_pct: 50
+  primary_exchange: SZSE
+  policy_premium: false
+  notes: "Edge AI software and operating systems"
+
+- ticker: "002230.SZ"
+  name: "科大讯飞 iFlytek"
+  leg: China
+  layer: L5
+  pure_play_pct: 65
+  primary_exchange: SZSE
+  policy_premium: false
+  notes: "Spark LLM and speech/education AI solutions"
+
+- ticker: "688111.SH"
+  name: "金山办公 WPS"
+  leg: China
+  layer: L5
+  pure_play_pct: 60
+  primary_exchange: SSE
+  policy_premium: false
+  notes: "WPS AI office productivity suite"
+
+- ticker: "1810.HK"
+  name: "小米集团 Xiaomi"
+  leg: China
+  layer: L5
+  pure_play_pct: 45
+  primary_exchange: HKEX
+  policy_premium: false
+  notes: "Edge AIoT and autonomous EV driving"
+
+- ticker: "3690.HK"
+  name: "美团 Meituan"
+  leg: China
+  layer: L5
+  pure_play_pct: 40
+  primary_exchange: HKEX
+  policy_premium: false
+  notes: "Autonomous drone/robot delivery networks"
+
+- ticker: "002415.SZ"
+  name: "海康威视 Hikvision"
+  leg: China
+  layer: L5
+  pure_play_pct: 30
+  primary_exchange: SZSE
+  policy_premium: false
+  notes: "Enterprise physical AI and smart video analytics"
+
+- ticker: "300033.SZ"
+  name: "同花顺 Hithink"
+  leg: China
+  layer: L5
+  pure_play_pct: 50
+  primary_exchange: SZSE
+  policy_premium: false
+  notes: "AI financial terminals and services"
+
+- ticker: "688787.SH"
+  name: "海天瑞声"
+  leg: China
+  layer: L5
+  pure_play_pct: 90
+  primary_exchange: SSE
+  policy_premium: false
+  notes: "Structured training data for Chinese LLMs"
+
+- ticker: "603501.SH"
+  name: "韦尔股份 WillSemi"
+  leg: China
+  layer: L2
+  pure_play_pct: 30
+  primary_exchange: SSE
+  policy_premium: false
+  notes: "Automotive CIS chips with edge processing"
+
+- ticker: "603986.SH"
+  name: "兆易创新 GigaDevice"
+  leg: China
+  layer: L2
+  pure_play_pct: 25
+  primary_exchange: SSE
+  policy_premium: false
+  notes: "NOR Flash memory and MCU controllers"
+
+- ticker: "688012.SH"
+  name: "中微公司 AMEC"
+  leg: China
+  layer: L2
+  pure_play_pct: 45
+  primary_exchange: SSE
+  policy_premium: false
+  notes: "Advanced semiconductor etching equipment"
+
+- ticker: "0981.HK"
+  name: "中芯国际 SMIC (HK)"
+  leg: China
+  layer: L2
+  pure_play_pct: 50
+  primary_exchange: HKEX
+  policy_premium: true
+  notes: "HK-listed SMIC for liquidity reference; A-share (688981.SH) remains scored"
+
+- ticker: "1347.HK"
+  name: "华虹半导体 Hua Hong"
+  leg: China
+  layer: L2
+  pure_play_pct: 20
+  primary_exchange: HKEX
+  policy_premium: false
+  notes: "Leading specialty foundry in China"
+
+- ticker: "600584.SH"
+  name: "长电科技 JCET"
+  leg: China
+  layer: L2
+  pure_play_pct: 45
+  primary_exchange: SSE
+  policy_premium: false
+  notes: "Advanced packaging and packaging-on-chiplet services"
+
+- ticker: "000063.SZ"
+  name: "中兴通讯 ZTE"
+  leg: China
+  layer: L3
+  pure_play_pct: 30
+  primary_exchange: SZSE
+  policy_premium: false
+  notes: "Telecommunication and AI datacenter networking equipment"
+
+- ticker: "300017.SZ"
+  name: "网宿科技 Wangsu"
+  leg: China
+  layer: L3
+  pure_play_pct: 45
+  primary_exchange: SZSE
+  policy_premium: false
+  notes: "CDN edge servers and liquid cooling solutions"
+
+- ticker: "300151.SZ"
+  name: "昌红科技"
+  leg: China
+  layer: L3
+  pure_play_pct: 20
+  primary_exchange: SZSE
+  policy_premium: false
+  notes: "High-precision consumable manufacturing for optics and chips"
+
+- ticker: "600268.SH"
+  name: "国电南瑞 Nari"
+  leg: China
+  layer: L1
+  pure_play_pct: 25
+  primary_exchange: SSE
+  policy_premium: false
+  notes: "Grid automation and smart power dispatching systems"
 
 # ── Pre-IPO Sub-Universe (manual tier only, no numeric ARF) ──────────────────
 - ticker: ANTHROPIC
