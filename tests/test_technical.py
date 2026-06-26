@@ -157,3 +157,40 @@ def test_score_stock_technical_bearish():
     
     # Bearish indicators should yield a very low score (typically < 30)
     assert 0.0 <= score <= 35.0
+
+
+def test_calculate_chip_distribution_us_scaling():
+    """Test that US volume scaling (is_a_share=False) works correctly in the chip model."""
+    # Create 150 days of dummy data
+    dates = pd.date_range(start="2026-01-01", periods=150, freq="D")
+    close_prices = [100.0] * 100 + [100.0 + (i - 100) * 1.0 for i in range(100, 150)]  # 100 to 149
+    high_prices = [p + 1.0 for p in close_prices]
+    low_prices = [p - 1.0 for p in close_prices]
+    # For US, volume from yfinance is in shares (e.g. 500,000 shares per day)
+    volume = [500_000] * 150  
+    
+    df = pd.DataFrame({
+        "date": dates,
+        "open": close_prices,
+        "high": high_prices,
+        "low": low_prices,
+        "close": close_prices,
+        "volume": volume
+    })
+    
+    outstanding_shares = 100_000_000  # 100M outstanding shares
+    # Daily turnover = 500k / 100M = 0.005 (0.5%)
+    
+    # Calculate with is_a_share=False (multiplier = 1.0)
+    profit_ratio, avg_cost, c90_min, c90_max, c70_min, c70_max = calculate_chip_distribution(
+        df, outstanding_shares, lookback=150, is_a_share=False
+    )
+    
+    # The output metrics should be identical to the hands-based calculation since
+    # volume in shares (500k) with multiplier=1.0 yields the exact same daily turnover rate (0.5%)
+    # as volume in hands (5k) with multiplier=100.0.
+    assert 0.8 <= profit_ratio <= 1.0
+    assert 100.0 < avg_cost < 149.0
+    assert c90_min <= avg_cost <= c90_max
+    assert 99.0 <= c90_min <= 101.0
+

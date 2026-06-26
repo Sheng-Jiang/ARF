@@ -24,6 +24,48 @@ if as_of is None:
     st.info("👈 请在左侧边栏选择快照日期以开始。")
     st.stop()
 
+# ── Screener Pool Display ───────────────────────────────────────────────────
+import logging
+log = logging.getLogger(__name__)
+
+try:
+    conn = _open_conn()
+    pool_df = conn.execute("""
+        SELECT 
+            s.ticker AS "代码", 
+            s.name AS "公司名称", 
+            s.leg AS "板块", 
+            s.layer AS "层级",
+            CASE WHEN t.technical_score IS NOT NULL THEN '已覆盖 ✅' ELSE '暂无技术面 ❌' END AS "技术与筹码数据"
+        FROM snapshots s
+        LEFT JOIN (
+            SELECT ticker, technical_score 
+            FROM technical_metrics 
+            WHERE as_of_date = ?
+        ) t ON s.ticker = t.ticker
+        WHERE s.as_of_date = ? AND s.leg IN ('US', 'China')
+        ORDER BY s.leg DESC, s.ticker
+    """, [as_of, as_of]).fetchdf()
+    
+    if not pool_df.empty:
+        total_count = len(pool_df)
+        us_count = len(pool_df[pool_df["板块"] == "US"])
+        cn_count = len(pool_df[pool_df["板块"] == "China"])
+        covered_count = len(pool_df[pool_df["技术与筹码数据"] == "已覆盖 ✅"])
+        
+        with st.expander(f"📊 查看当前可供筛选的股票池 (当前共 {total_count} 只股票，已加载技术面 {covered_count} 只)", expanded=False):
+            st.markdown(f"""
+            当前快照日期 **{as_of}** 的可供多因子筛选的股票池共包含 **{total_count}** 只核心 AI 股票：
+            - 🇺🇸 **美股板块**: **{us_count}** 只
+            - 🇨🇳 **中股/港股板块**: **{cn_count}** 只
+            - 🛠️ **技术面与筹码覆盖**: **{covered_count}/{total_count}** 只已成功提取日 K 线并完成量化指标计算
+            
+            你可以使用下面的自然语言输入框，输入任何关于**基本面、估值、技术形态或筹码获利分布**的组合条件进行实时筛选！
+            """)
+            st.dataframe(pool_df, use_container_width=True, hide_index=True)
+except Exception as e:
+    log.warning("Failed to load screener pool display: %s", e)
+
 # Guidance and examples
 with st.expander("💡 选股条件输入指南与示例", expanded=True):
     st.markdown("""

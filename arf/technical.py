@@ -67,7 +67,8 @@ def calculate_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
 def calculate_chip_distribution(
     df: pd.DataFrame, 
     outstanding_shares: float, 
-    lookback: int = 150
+    lookback: int = 150,
+    is_a_share: bool = True
 ) -> Tuple[float, float, float, float, float, float]:
     """Calculate chip distribution metrics using decayed historical typical prices.
     
@@ -78,6 +79,7 @@ def calculate_chip_distribution(
         df: DataFrame containing ['high', 'low', 'close', 'volume']
         outstanding_shares: Total shares outstanding (for turnover rate)
         lookback: Historical window to calculate distribution (default 150 days)
+        is_a_share: If True, volume is scaled by 100 (AkShare hand to shares). If False, volume is used raw.
         
     Returns:
         Tuple: (profit_ratio, avg_cost, cost_90_min, cost_90_max, cost_70_min, cost_70_max)
@@ -93,8 +95,9 @@ def calculate_chip_distribution(
     sub_df["typical_price"] = (sub_df["high"] + sub_df["low"] + sub_df["close"]) / 3.0
     
     # 2. Calculate daily turnover rate (T)
-    # AkShare volume is in hands (1 hand = 100 shares)
-    sub_df["turnover"] = ((sub_df["volume"] * 100.0) / outstanding_shares).clip(upper=0.5)
+    # AkShare volume is in hands (1 hand = 100 shares), yfinance is in shares
+    multiplier = 100.0 if is_a_share else 1.0
+    sub_df["turnover"] = ((sub_df["volume"] * multiplier) / outstanding_shares).clip(upper=0.5)
     
     prices = sub_df["typical_price"].values
     turnover = sub_df["turnover"].values

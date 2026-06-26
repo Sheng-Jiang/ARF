@@ -181,8 +181,42 @@ def _outcome_for(sd: StockData) -> str:
     return "ok"
 
 
+def fetch_daily_prices_yf(ticker: str, start_date: str, end_date: str) -> pd.DataFrame:
+    """Fetch daily price history from yfinance and format it for DuckDB."""
+    import yfinance as yf
+    try:
+        t = yf.Ticker(ticker)
+        # Fetch history. yfinance expects YYYY-MM-DD strings for start and end
+        hist = t.history(start=start_date, end=end_date, interval="1d")
+        if hist.empty:
+            log.warning("No daily prices returned from yfinance for %s", ticker)
+            return pd.DataFrame()
+            
+        df = hist.reset_index()
+        df["ticker"] = ticker
+        df = df.rename(columns={
+            "Date": "date",
+            "Open": "open",
+            "High": "high",
+            "Low": "low",
+            "Close": "close",
+            "Volume": "volume"
+        })
+        # yfinance Date column might be timezone-aware; normalize to naive date
+        df["date"] = pd.to_datetime(df["date"]).dt.date
+        df = df[["ticker", "date", "open", "high", "low", "close", "volume"]]
+        
+        for col in ["open", "high", "low", "close", "volume"]:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+            
+        return df
+    except Exception as e:
+        log.warning("Failed to fetch daily prices from yfinance for %s: %s", ticker, e)
+        return pd.DataFrame()
+
+
 def _run_technical_pipeline(conn, df: pd.DataFrame, universe: list[UniverseEntry], as_of: date) -> None:
-    """Pre-calculate and cache daily prices and technical metrics for universe A-shares in DuckDB.
+    """Pre-calculate and cache daily prices and technical metrics for scored universe stocks in DuckDB.
     
     This ensures that the AI-Screener and dashboard charts have pre-populated data out-of-the-box.
     """
@@ -192,11 +226,11 @@ def _run_technical_pipeline(conn, df: pd.DataFrame, universe: list[UniverseEntry
     from datetime import timedelta
     import numpy as np
     
-    a_shares = [e for e in universe if e.leg == "China" and (e.ticker.endswith(".SZ") or e.ticker.endswith(".SH"))]
-    if not a_shares:
+    scored_stocks = [e for e in universe if e.leg in ("US", "China")]
+    if not scored_stocks:
         return
         
-    console.print(f"Running technical pipeline for {len(a_shares)} A-share universe stocks...")
+    console.print(f"Running technical pipeline for {len(scored_stocks)} scored universe stocks...")
     tech_rows = []
     
     # Estimate outstanding shares for each stock from the fundamental snapshot
@@ -205,11 +239,11 @@ def _run_technical_pipeline(conn, df: pd.DataFrame, universe: list[UniverseEntry
     for _, r in df.iterrows():
         ticker = r["ticker"]
         mc_usd = r.get("market_cap_usd")
-        fx = r.get("fx_rate_usd", 7.2)
+        fx = r.get("fx_rate_usd", 1.0)  # Default to 1.0 (e.g., US stocks)
         price = r.get("price")
         if mc_usd and price:
             shares = (mc_usd * fx) / price
-            # Adjust scaling if needed
+            # Adjust scaling if needed (A-shares might need scaling, but keep it generic)
             if shares < 1_000_000:
                 shares *= 1_000_000
             shares_map[ticker] = shares
@@ -219,11 +253,17 @@ def _run_technical_pipeline(conn, df: pd.DataFrame, universe: list[UniverseEntry
     start_str = start_date.strftime("%Y-%m-%d")
     end_str = as_of.strftime("%Y-%m-%d")
     
-    for entry in a_shares:
+    for entry in scored_stocks:
         ticker = entry.ticker
         try:
-            # 1. Fetch daily prices
-            prices_df = fetch_daily_prices(ticker, start_str, end_str, adjust="qfq")
+            # 1. Fetch daily prices (A-shares from AkShare, others from yfinance)
+            if entry.leg == "China" and (ticker.endswith(".SZ") or ticker.endswith(".SH")):
+                prices_df = fetch_daily_prices(ticker, start_str, end_str, adjust="qfq")
+                is_a_share = True
+            else:
+                prices_df = fetch_daily_prices_yf(ticker, start_str, end_str)
+                is_a_share = False
+                
             if prices_df.empty:
                 log.warning("No daily prices returned for %s in technical pipeline", ticker)
                 continue
@@ -238,7 +278,7 @@ def _run_technical_pipeline(conn, df: pd.DataFrame, universe: list[UniverseEntry
                 
             # 4. Calculate chips
             shares = shares_map.get(ticker, 100_000_000.0)
-            chip_metrics = calculate_chip_distribution(prices_df, shares)
+            chip_metrics = calculate_chip_distribution(prices_df, shares, is_a_share=is_a_share)
             profit_ratio, avg_cost, c90_min, c90_max, c70_min, c70_max = chip_metrics
             
             # 5. Score technical
