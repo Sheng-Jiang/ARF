@@ -92,6 +92,50 @@ CREATE TABLE IF NOT EXISTS gemini_summaries (
 )
 """
 
+_SCHEMA_DAILY_PRICES = """
+CREATE TABLE IF NOT EXISTS daily_prices (
+    ticker          TEXT        NOT NULL,
+    date            DATE        NOT NULL,
+    open            DOUBLE,
+    high            DOUBLE,
+    low             DOUBLE,
+    close           DOUBLE,
+    volume          DOUBLE,
+    turnover_rate   DOUBLE,
+    PRIMARY KEY (ticker, date)
+)
+"""
+
+_SCHEMA_TECHNICAL_METRICS = """
+CREATE TABLE IF NOT EXISTS technical_metrics (
+    ticker                  TEXT        NOT NULL,
+    as_of_date              DATE        NOT NULL,
+    technical_score         DOUBLE,
+    ma5                     DOUBLE,
+    ma10                    DOUBLE,
+    ma20                    DOUBLE,
+    ma30                    DOUBLE,
+    ma60                    DOUBLE,
+    ma120                   DOUBLE,
+    ma_bullish_alignment    BOOLEAN,
+    macd_dif                DOUBLE,
+    macd_dea                DOUBLE,
+    macd_hist               DOUBLE,
+    rsi                     DOUBLE,
+    bollinger_mid           DOUBLE,
+    bollinger_upper         DOUBLE,
+    bollinger_lower         DOUBLE,
+    atr                     DOUBLE,
+    chip_profit_ratio       DOUBLE,
+    chip_avg_cost           DOUBLE,
+    chip_90_cost_min        DOUBLE,
+    chip_90_cost_max        DOUBLE,
+    chip_70_cost_min        DOUBLE,
+    chip_70_cost_max        DOUBLE,
+    PRIMARY KEY (ticker, as_of_date)
+)
+"""
+
 
 def init_db(path: Path = Path("data/arf.db")) -> duckdb.DuckDBPyConnection:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -100,6 +144,8 @@ def init_db(path: Path = Path("data/arf.db")) -> duckdb.DuckDBPyConnection:
     conn.execute(_SCHEMA_RUNS)
     conn.execute(_SCHEMA_FETCH_OUTCOMES)
     conn.execute(_SCHEMA_GEMINI_SUMMARIES)
+    conn.execute(_SCHEMA_DAILY_PRICES)
+    conn.execute(_SCHEMA_TECHNICAL_METRICS)
     return conn
 
 
@@ -280,3 +326,82 @@ def query_thermometer_series(conn: duckdb.DuckDBPyConnection) -> pd.DataFrame:
         GROUP BY as_of_date, leg
         ORDER BY as_of_date, leg
     """).fetchdf()
+
+
+def upsert_daily_prices(
+    conn: duckdb.DuckDBPyConnection,
+    df: pd.DataFrame,
+) -> None:
+    """Insert or overwrite daily prices.
+
+    Matches columns of daily_prices table.
+    """
+    if df.empty:
+        return
+    df = df.copy()
+    
+    # Ensure dates are date objects for DuckDB
+    if "date" in df.columns:
+        df["date"] = pd.to_datetime(df["date"]).dt.date
+
+    # Delete existing data for the tickers in the input dataframe to ensure idempotency
+    tickers = list(df["ticker"].unique())
+    if len(tickers) == 1:
+        conn.execute("DELETE FROM daily_prices WHERE ticker = ?", [tickers[0]])
+    elif len(tickers) > 1:
+        tickers_str = ", ".join(f"'{t}'" for t in tickers)
+        conn.execute(f"DELETE FROM daily_prices WHERE ticker IN ({tickers_str})")
+
+    schema_cols = [
+        row[0]
+        for row in conn.execute("DESCRIBE daily_prices").fetchall()
+    ]
+    df_cols = [c for c in schema_cols if c in df.columns]
+    cols_sql = ", ".join(df_cols)
+    conn.execute(f"INSERT INTO daily_prices ({cols_sql}) SELECT {cols_sql} FROM df")
+    conn.commit()
+
+
+def query_daily_prices(
+    conn: duckdb.DuckDBPyConnection,
+    ticker: str,
+) -> pd.DataFrame:
+    """Query daily prices for a given ticker, sorted by date ascending."""
+    return conn.execute(
+        "SELECT * FROM daily_prices WHERE ticker = ? ORDER BY date ASC",
+        [ticker]
+    ).fetchdf()
+
+
+def upsert_technical_metrics(
+    conn: duckdb.DuckDBPyConnection,
+    df: pd.DataFrame,
+    as_of_date: date,
+) -> None:
+    """Insert or overwrite technical metrics for the given as_of_date."""
+    if df.empty:
+        return
+    df = df.copy()
+    df["as_of_date"] = as_of_date
+
+    schema_cols = [
+        row[0]
+        for row in conn.execute("DESCRIBE technical_metrics").fetchall()
+    ]
+    df_cols = [c for c in schema_cols if c in df.columns]
+    cols_sql = ", ".join(df_cols)
+    conn.execute("DELETE FROM technical_metrics WHERE as_of_date = ?", [as_of_date])
+    conn.execute(f"INSERT INTO technical_metrics ({cols_sql}) SELECT {cols_sql} FROM df")
+    conn.commit()
+
+
+def query_technical_metrics(
+    conn: duckdb.DuckDBPyConnection,
+    as_of_date: date,
+) -> pd.DataFrame:
+    """Query technical metrics for a given date."""
+    return conn.execute(
+        "SELECT * FROM technical_metrics WHERE as_of_date = ?",
+        [as_of_date]
+    ).fetchdf()
+

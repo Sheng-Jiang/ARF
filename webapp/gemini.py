@@ -459,3 +459,204 @@ def db_rows_to_report(rows_df: pd.DataFrame, as_of: date) -> GeminiReport | None
         raw_text="",
         model=model,
     )
+
+
+# ---------- AI-Analyst & AI-Screener Additions ----------
+
+_ANALYST_SYSTEM_PROMPT = """You are a senior quantitative investment analyst writing a comprehensive Multi-Factor Narrative-Technical Synthesis Report. Your job is to reconcile a stock's quantitative data (ARF score, technical indicators, chip distribution, and backtesting performance) with qualitative recent developments (news, earnings, catalysts) sourced via Google Search.
+
+Hard Rules:
+1. ALWAYS use Google Search. Fire at least 3 distinct queries to find recent news (last 14 days) regarding the company's business developments, earnings, product catalysts, and regulatory context.
+2. Maintain strict COMPLIANCE. Frame all conclusions as objective, rules-based research findings. NEVER provide investment recommendations, buying advice, or financial advisory statements. Focus on explaining narrative-technical alignment.
+3. Every news fact must cite its source domain in parentheses, e.g. "(bloomberg.com)".
+4. Organize your response into exactly these four sections using Markdown:
+   - ### 1. 基本面与 AI 叙事剖析 (Fundamental & AI Narrative Analysis)
+   - ### 2. 技术面与筹码微观结构 (Technical & Chip Microstructure)
+   - ### 3. 历史回测绩效评估 (Historical Backtest Performance Evaluation)
+   - ### 4. 综合多因子研究结论 (Integrated Multi-Factor Synthesis)
+"""
+
+def generate_narrative_technical_report(
+    api_key: str,
+    ticker: str,
+    name: str,
+    arf_row: dict,
+    tech_row: dict,
+    chip_metrics: tuple,
+    backtest_summary: str
+) -> dict:
+    """Generate a comprehensive narrative-technical synthesis report using grounded Gemini.
+    
+    Returns a dictionary with 'report_text', 'citations', and 'queries'.
+    """
+    from google import genai
+    from google.genai import types
+    
+    profit_ratio, avg_cost, c90_min, c90_max, c70_min, c70_max = chip_metrics
+    
+    # Format data blocks for the prompt
+    arf_block = (
+        f"ARF Score: {arf_row.get('arf', 'N/A'):.1f} (Decile: D{arf_row.get('decile', 'N/A')})\n"
+        f"E_score (Exposure): {arf_row.get('e_score', 'N/A'):.1f}\n"
+        f"V_score (Valuation Stretch): {arf_row.get('v_score', 'N/A'):.1f}\n"
+        f"Forward P/E: {arf_row.get('forward_pe', 'N/A')}\n"
+        f"P/S Ratio: {arf_row.get('ps_ratio', 'N/A')}\n"
+        f"ROE: {arf_row.get('roe', 0.0)*100:.1f}%\n"
+        f"Revenue YoY Growth: {arf_row.get('revenue_yoy_growth', 0.0)*100:.1f}%\n"
+        f"Froth Flag: {arf_row.get('froth_flag', False)}"
+    )
+    
+    tech_block = (
+        f"Technical Score: {tech_row.get('technical_score', 50.0):.1f}/100\n"
+        f"MA 5/10/20/30/60/120: {tech_row.get('ma5', 0):.2f}/{tech_row.get('ma10', 0):.2f}/{tech_row.get('ma20', 0):.2f}/{tech_row.get('ma30', 0):.2f}/{tech_row.get('ma60', 0):.2f}/{tech_row.get('ma120', 0):.2f}\n"
+        f"MA Bullish Alignment: {tech_row.get('ma_bullish_alignment', False)}\n"
+        f"RSI (14): {tech_row.get('rsi', 50.0):.1f}\n"
+        f"MACD DIF/DEA/Hist: {tech_row.get('macd_dif', 0):.2f}/{tech_row.get('macd_dea', 0):.2f}/{tech_row.get('macd_hist', 0):.2f}\n"
+        f"Bollinger Position (0-1): {(tech_row.get('close', 0) - tech_row.get('bollinger_lower', 0)) / (tech_row.get('bollinger_upper', 1) - tech_row.get('bollinger_lower', 0)) if (tech_row.get('bollinger_upper', 1) - tech_row.get('bollinger_lower', 0)) > 0 else 0.5:.2f}\n"
+        f"ATR (14): {tech_row.get('atr', 0):.2f}"
+    )
+    
+    chip_block = (
+        f"Profit Chips Ratio: {profit_ratio*100:.1f}%\n"
+        f"Average Holding Cost: ¥{avg_cost:.2f}\n"
+        f"70% Cost Interval: ¥{c70_min:.2f} ~ ¥{c70_max:.2f}\n"
+        f"90% Cost Interval: ¥{c90_min:.2f} ~ ¥{c90_max:.2f}"
+    )
+    
+    prompt = (
+        f"Stock Analysis Target: {ticker} — {name}\n\n"
+        f"=== FACTOR DATA ===\n"
+        f"[1. AI Relevance Factor (ARF)]\n{arf_block}\n\n"
+        f"[2. Technical Indicators]\n{tech_block}\n\n"
+        f"[3. Chip Distribution (CYQ)]\n{chip_block}\n\n"
+        f"=== HISTORICAL BACKTEST PERFORMANCE ===\n"
+        f"{backtest_summary}\n\n"
+        f"=== INSTRUCTIONS ===\n"
+        f"1. Conduct a grounded search to find recent material news and catalysts for {ticker} ({name}) over the last 14 days.\n"
+        f"2. Synthesize the narrative layer (ARF - whether the stock is pricing in heavy AI hype) and the technical layer (momentum, scores, chip microstructure).\n"
+        f"3. Write a highly professional, objective Multi-Factor Synthesis report. Adhere strictly to the four-section markdown format and compliance guidelines."
+    )
+    
+    try:
+        client = genai.Client(api_key=api_key)
+        config = types.GenerateContentConfig(
+            tools=[types.Tool(google_search=types.GoogleSearch())],
+            temperature=0.2,
+            system_instruction=_ANALYST_SYSTEM_PROMPT,
+        )
+        response = client.models.generate_content(
+            model=MODEL,
+            contents=prompt,
+            config=config,
+        )
+        report_text = response.text or ""
+        cits, queries = _extract_citations(response)
+        return {
+            "report_text": report_text,
+            "citations": cits,
+            "queries": queries
+        }
+    except Exception as e:
+        log.exception(f"AI-Analyst report generation failed for {ticker}")
+        return {
+            "report_text": f"⚠️ **生成研究报告失败**：{str(e)}",
+            "citations": [],
+            "queries": []
+        }
+
+
+_SCREENER_SYSTEM_PROMPT = """You are a database compiler. Your job is to translate a user's natural language stock screening query into a single, valid DuckDB SQL query.
+
+We have two tables in our DuckDB database:
+1. `snapshots` table:
+   - `ticker` (TEXT, primary key)
+   - `as_of_date` (DATE, primary key)
+   - `leg` (TEXT, 'US' or 'China')
+   - `layer` (TEXT, 'L1' to 'L5')
+   - `name` (TEXT)
+   - `arf` (DOUBLE, AI Relevance Factor, 0-100)
+   - `decile` (INTEGER, 1-10, where 1 is highest ARF)
+   - `e_score` (DOUBLE, AI exposure, 0-100)
+   - `v_score` (DOUBLE, valuation stretch, 0-100)
+   - `froth_flag` (BOOLEAN, True if bubble warning)
+   - `price` (DOUBLE, local price)
+   - `market_cap_usd` (DOUBLE)
+   - `roe` (DOUBLE, as decimal, e.g. 0.15 for 15%)
+   - `ps_ratio` (DOUBLE)
+   - `forward_pe` (DOUBLE)
+   - `revenue_yoy_growth` (DOUBLE, as decimal, e.g. 0.25 for 25%)
+
+2. `technical_metrics` table:
+   - `ticker` (TEXT, primary key)
+   - `as_of_date` (DATE, primary key)
+   - `technical_score` (DOUBLE, 0-100)
+   - `ma5`, `ma10`, `ma20`, `ma30`, `ma60`, `ma120` (DOUBLE)
+   - `ma_bullish_alignment` (BOOLEAN, True if ma5 > ma10 > ma20 > ma30 > ma60 > ma120)
+   - `rsi` (DOUBLE, 0-100)
+   - `macd_dif`, `macd_dea`, `macd_hist` (DOUBLE)
+   - `bollinger_mid`, `bollinger_upper`, `bollinger_lower` (DOUBLE)
+   - `atr` (DOUBLE)
+   - `chip_profit_ratio` (DOUBLE, 0.0-1.0, representing % of chips in profit)
+   - `chip_avg_cost` (DOUBLE)
+
+Rules:
+1. Join the two tables on `ticker` and `as_of_date`.
+2. The user will specify conditions. Translate them accurately.
+   - "获利盘" / "获利筹码" refers to `chip_profit_ratio` (e.g. "获利盘大于80%" -> `chip_profit_ratio > 0.8`).
+   - "均线多头" / "均线多头排列" refers to `ma_bullish_alignment = TRUE`.
+   - "技术评分" / "技术面得分" refers to `technical_score`.
+   - "泡沫预警" / "泡沫" refers to `froth_flag = TRUE`.
+   - "估值拉伸" refers to `v_score` or `ps_ratio`.
+   - "E分" / "AI曝光" refers to `e_score`.
+3. ALWAYS filter by the given `as_of_date` to ensure we query the active snapshot (e.g. `s.as_of_date = '2026-05-28'`).
+4. Output ONLY the raw SQL query. Do not wrap it in markdown code blocks, do not add explanations, do not write anything else. Just the plain SQL string.
+
+Example:
+User Query: "均线多头，且获利盘小于30%"
+Output:
+SELECT s.ticker, s.name, s.arf, s.decile, t.technical_score, t.rsi, t.chip_profit_ratio FROM snapshots s JOIN technical_metrics t ON s.ticker = t.ticker AND s.as_of_date = t.as_of_date WHERE s.as_of_date = '2026-05-28' AND t.ma_bullish_alignment = TRUE AND t.chip_profit_ratio < 0.3 ORDER BY s.arf DESC
+"""
+
+def parse_nlp_screener_query(
+    api_key: str,
+    query: str,
+    as_of_date: date
+) -> str:
+    """Translate a natural language stock screening query into a valid DuckDB SQL query using Gemini."""
+    from google import genai
+    
+    prompt = (
+        f"Snapshot Date: {as_of_date.isoformat()}\n"
+        f"User Screener Query: {query}\n\n"
+        f"Generate the exact DuckDB SQL query following the schema and rules. Return ONLY the raw SQL text."
+    )
+    
+    try:
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",  # Flash is excellent and fast for structured text/SQL generation
+            contents=prompt,
+            config=dict(
+                temperature=0.0,
+                system_instruction=_SCREENER_SYSTEM_PROMPT
+            )
+        )
+        sql = response.text or ""
+        
+        # Strip any accidental markdown formatting
+        sql = sql.strip()
+        if sql.startswith("```"):
+            sql = sql.split("\n", 1)[1]
+        if sql.endswith("```"):
+            sql = sql.rsplit("\n", 1)[0]
+        sql = sql.strip().strip("`").strip()
+        
+        # Basic validation: must start with SELECT
+        if not sql.upper().startswith("SELECT"):
+            return f"-- Generated query was invalid:\n-- {sql}"
+            
+        return sql
+    except Exception as e:
+        log.exception("NLP SQL compilation failed")
+        return f"-- Error compiling query: {str(e)}"
+

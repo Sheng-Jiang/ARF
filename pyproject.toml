@@ -21,6 +21,8 @@ dependencies = [
     "beautifulsoup4>=4.12",
     "lxml>=5.2",
     "pyarrow>=14.0",
+    "akshare>=1.16.81",
+    "backtrader==1.9.78.123",
 ]
 
 [project.optional-dependencies]
@@ -34,6 +36,8 @@ webapp = [
     "google-cloud-storage>=2.16",
     "google-cloud-run>=0.10",
     "google-genai>=0.3",
+    "pyecharts>=2.0.8",
+    "streamlit-echarts>=0.4.0",
 ]
 cloud = [
     "google-cloud-storage>=2.16",

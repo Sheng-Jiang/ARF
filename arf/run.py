@@ -181,6 +181,104 @@ def _outcome_for(sd: StockData) -> str:
     return "ok"
 
 
+def _run_technical_pipeline(conn, df: pd.DataFrame, universe: list[UniverseEntry], as_of: date) -> None:
+    """Pre-calculate and cache daily prices and technical metrics for universe A-shares in DuckDB.
+    
+    This ensures that the AI-Screener and dashboard charts have pre-populated data out-of-the-box.
+    """
+    from arf.fetchers.akshare import fetch_daily_prices
+    from arf.technical import calculate_technical_indicators, calculate_chip_distribution, score_stock_technical
+    from arf.db import upsert_daily_prices, upsert_technical_metrics
+    from datetime import timedelta
+    import numpy as np
+    
+    a_shares = [e for e in universe if e.leg == "China" and (e.ticker.endswith(".SZ") or e.ticker.endswith(".SH"))]
+    if not a_shares:
+        return
+        
+    console.print(f"Running technical pipeline for {len(a_shares)} A-share universe stocks...")
+    tech_rows = []
+    
+    # Estimate outstanding shares for each stock from the fundamental snapshot
+    # outstanding_shares = (market_cap_usd * fx_rate_usd) / price
+    shares_map = {}
+    for _, r in df.iterrows():
+        ticker = r["ticker"]
+        mc_usd = r.get("market_cap_usd")
+        fx = r.get("fx_rate_usd", 7.2)
+        price = r.get("price")
+        if mc_usd and price:
+            shares = (mc_usd * fx) / price
+            # Adjust scaling if needed
+            if shares < 1_000_000:
+                shares *= 1_000_000
+            shares_map[ticker] = shares
+            
+    # 250 calendar days lookback to calculate moving averages and chip decay accurately
+    start_date = as_of - timedelta(days=250)
+    start_str = start_date.strftime("%Y-%m-%d")
+    end_str = as_of.strftime("%Y-%m-%d")
+    
+    for entry in a_shares:
+        ticker = entry.ticker
+        try:
+            # 1. Fetch daily prices
+            prices_df = fetch_daily_prices(ticker, start_str, end_str, adjust="qfq")
+            if prices_df.empty:
+                log.warning("No daily prices returned for %s in technical pipeline", ticker)
+                continue
+                
+            # 2. Save daily prices
+            upsert_daily_prices(conn, prices_df)
+            
+            # 3. Calculate indicators
+            ind_df = calculate_technical_indicators(prices_df)
+            if ind_df.empty:
+                continue
+                
+            # 4. Calculate chips
+            shares = shares_map.get(ticker, 100_000_000.0)
+            chip_metrics = calculate_chip_distribution(prices_df, shares)
+            profit_ratio, avg_cost, c90_min, c90_max, c70_min, c70_max = chip_metrics
+            
+            # 5. Score technical
+            latest = ind_df.iloc[-1]
+            score = score_stock_technical(latest, chip_metrics)
+            
+            tech_rows.append({
+                "ticker": ticker,
+                "technical_score": score,
+                "ma5": latest.get("ma5"),
+                "ma10": latest.get("ma10"),
+                "ma20": latest.get("ma20"),
+                "ma30": latest.get("ma30"),
+                "ma60": latest.get("ma60"),
+                "ma120": latest.get("ma120"),
+                "ma_bullish_alignment": bool(latest.get("ma_bullish_alignment", False)),
+                "macd_dif": latest.get("macd_dif"),
+                "macd_dea": latest.get("macd_dea"),
+                "macd_hist": latest.get("macd_hist"),
+                "rsi": latest.get("rsi"),
+                "bollinger_mid": latest.get("bollinger_mid"),
+                "bollinger_upper": latest.get("bollinger_upper"),
+                "bollinger_lower": latest.get("bollinger_lower"),
+                "atr": latest.get("atr"),
+                "chip_profit_ratio": profit_ratio,
+                "chip_avg_cost": avg_cost,
+                "chip_90_cost_min": c90_min,
+                "chip_90_cost_max": c90_max,
+                "chip_70_cost_min": c70_min,
+                "chip_70_cost_max": c70_max
+            })
+        except Exception as e:
+            log.warning("Technical pipeline failed for %s: %s", ticker, e)
+            
+    if tech_rows:
+        tech_df = pd.DataFrame(tech_rows)
+        upsert_technical_metrics(conn, tech_df, as_of)
+        console.print(f"Cached technical and chip metrics for {len(tech_rows)} stocks in DuckDB")
+
+
 def run_pipeline(
     as_of: date,
     data_dir: Path = Path("data"),
@@ -224,6 +322,12 @@ def run_pipeline(
         upsert_snapshot(conn, df, as_of)
         record_fetch_outcomes(conn, run_id, outcomes)
         console.print(f"Snapshot saved to {db_path}")
+
+        # Pre-calculate and cache technical indicators for A-shares
+        try:
+            _run_technical_pipeline(conn, df, universe, as_of)
+        except Exception as e:
+            log.exception("Technical indicators cache failed - continuing main pipeline")
 
         _maybe_generate_gemini_summaries(conn, df, as_of)
 
