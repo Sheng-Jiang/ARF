@@ -18,7 +18,7 @@ def test_load_universe_returns_all_entries(universe):
 
 def test_us_leg_count(universe):
     us = get_leg(universe, "US")
-    assert len(us) == 32
+    assert len(us) == 36
 
 
 def test_china_leg_count(universe):
