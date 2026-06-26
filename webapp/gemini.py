@@ -27,7 +27,7 @@ MAX_PARALLEL = int(os.getenv("GEMINI_MAX_PARALLEL", "6"))
 
 
 def is_enabled() -> bool:
-    key = os.getenv("GEMINI_API_KEY", "")
+    key = os.getenv("GEMINI_API_KEY", "").strip()
     return bool(key) and not key.startswith("PLACEHOLDER")
 
 
@@ -261,7 +261,7 @@ def _summarize_one(api_key: str, row: pd.Series, as_of: date) -> StockSummary:
     ticker = str(row.get("ticker", ""))
     name = str(row.get("name", "") or ticker)
     try:
-        client = genai.Client(api_key=api_key)
+        client = genai.Client(api_key=api_key.strip())
         config = types.GenerateContentConfig(
             tools=[types.Tool(google_search=types.GoogleSearch())],
             temperature=0.2,
@@ -313,7 +313,7 @@ def summarize_stocks(
             citations=[], raw_text="", model=MODEL,
         )
 
-    api_key = os.environ["GEMINI_API_KEY"]
+    api_key = os.environ["GEMINI_API_KEY"].strip()
     rows = [r for _, r in cohort.iterrows()]
     results_by_ticker: dict[str, StockSummary] = {}
 
@@ -538,7 +538,7 @@ def generate_narrative_technical_report(
     )
     
     try:
-        client = genai.Client(api_key=api_key)
+        client = genai.Client(api_key=api_key.strip())
         config = types.GenerateContentConfig(
             tools=[types.Tool(google_search=types.GoogleSearch())],
             temperature=0.2,
@@ -632,7 +632,7 @@ def parse_nlp_screener_query(
     )
     
     try:
-        client = genai.Client(api_key=api_key)
+        client = genai.Client(api_key=api_key.strip())
         response = client.models.generate_content(
             model="gemini-2.5-flash",  # Flash is excellent and fast for structured text/SQL generation
             contents=prompt,
