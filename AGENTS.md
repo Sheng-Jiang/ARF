@@ -4,7 +4,7 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 
 ## Project Overview
 
-ARF (AI Relevance Factor) is a Python data pipeline that computes a single 0–100 score per stock measuring how much a company's valuation is bent by the AI narrative. It covers ~30 anchor companies across US and China legs of Jensen Huang's "5-layer cake" AI stack, produces weekly ranked reports, and generates a bubble-thermometer chart over time.
+ARF (AI Relevance Factor) is a Python data pipeline that computes a single 0–100 score per stock measuring how much a company's valuation is bent by the AI narrative. It covers 72 scored companies (36 in the US leg and 36 in the China leg) of Jensen Huang's "5-layer cake" AI stack, produces weekly ranked reports, and generates a bubble-thermometer chart over time.
 
 The full spec is in `ARF_PRD.md`. The reference research is in `Reference/`.
 
@@ -46,8 +46,8 @@ ruff check arf/
 - **Froth flag**: `ARF in D1 AND ROE < cost_of_equity AND P/S > 25`
 
 ### Universe legs — scored separately, never pooled
-- **US leg**: NVDA, AMD, INTC, MSFT, CRM, EQIX, DLR, ANET, CSCO, NEE, WMB, COHR, LITE, AVGO, MRVL, PLTR
-- **China leg**: 300308.SZ, 300502.SZ, 300394.SZ, 688498.SH, 002281.SZ, 688256.SH, 0981.HK/688981.SH, 000977.SZ, GDS, VNET, 300750.SZ, BIDU, BABA, 0700.HK, 9868.HK, 2513.HK
+- **US leg (36 names)**: NVDA, AMD, INTC, MSFT, CRM, EQIX, DLR, ANET, CSCO, NEE, WMB, COHR, LITE, AVGO, MRVL, PLTR, TSM, MU, QCOM, KLAC, LRCX, AMAT, GOOGL, META, AAPL, TSLA, ORCL, NOW, DELL, VRT, CEG, VST, SMCI, ADBE, PANW, SNPS
+- **China leg (36 names)**: 300308.SZ, 300502.SZ, 300394.SZ, 688498.SH, 002281.SZ, 688256.SH, 688981.SH, 000977.SZ, GDS, VNET, 300750.SZ, BIDU, BABA, 0700.HK, 9868.HK, 2513.HK, 601138.SH, 002463.SZ, 300496.SZ, 002230.SZ, 688111.SH, 1810.HK, 3690.HK, 002415.SZ, 300033.SZ, 688787.SH, 603501.SH, 603986.SH, 688012.SH, 0981.HK, 1347.HK, 600584.SH, 000063.SZ, 300017.SZ, 300151.SZ, 600268.SH
 - **Pre-IPO**: Anthropic, OpenAI, ByteDance, Moonshot AI, Huawei — manual tier only, no numeric ARF
 - **Europe chokepoint**: ASML, ARM, Siemens Energy, Schneider Electric, STMicro, Infineon, SAP, ABB — display-only reference
 

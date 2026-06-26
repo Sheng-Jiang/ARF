@@ -1,6 +1,6 @@
 # ARF — AI Relevance Factor
 
-A weekly stock-scoring tool that ranks ~34 AI supply-chain companies by how much their valuation is driven by the AI narrative. Produces a ranked Markdown report and a Plotly bubble-thermometer chart.
+A weekly stock-scoring tool that ranks 72 AI supply-chain companies (36 US and 36 China) by how much their valuation is driven by the AI narrative. Produces a ranked Markdown report and a Plotly bubble-thermometer chart.
 
 ## What it does
 

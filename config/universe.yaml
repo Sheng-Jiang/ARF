@@ -299,6 +299,42 @@
   policy_premium: false
   notes: "Nuclear/gas utility generator in ERCOT"
 
+- ticker: SMCI
+  name: "超微电脑 Super Micro"
+  leg: US
+  layer: L3
+  pure_play_pct: 80
+  primary_exchange: NASDAQ
+  policy_premium: false
+  notes: "Liquid-cooled AI server racks and GPU integration partner"
+
+- ticker: ADBE
+  name: "奥多比 Adobe"
+  leg: US
+  layer: L5
+  pure_play_pct: 40
+  primary_exchange: NASDAQ
+  policy_premium: false
+  notes: "Generative AI Firefly integrated creative suites"
+
+- ticker: PANW
+  name: "派拓网络 Palo Alto"
+  leg: US
+  layer: L5
+  pure_play_pct: 35
+  primary_exchange: NASDAQ
+  policy_premium: false
+  notes: "Precision AI security platform and Copilot tools"
+
+- ticker: SNPS
+  name: "新思科技 Synopsys"
+  leg: US
+  layer: L2
+  pure_play_pct: 45
+  primary_exchange: NASDAQ
+  policy_premium: false
+  notes: "EDA design tools with DSO.ai machine learning features"
+
 # ── China Leg ────────────────────────────────────────────────────────────────
 - ticker: "300308.SZ"
   name: "中际旭创 InnoLight"
