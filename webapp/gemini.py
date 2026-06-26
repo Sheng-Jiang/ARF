@@ -572,7 +572,12 @@ We have two tables in our DuckDB database:
    - `ticker` (TEXT, primary key)
    - `as_of_date` (DATE, primary key)
    - `leg` (TEXT, 'US' or 'China')
-   - `layer` (TEXT, 'L1' to 'L5')
+   - `layer` (TEXT, 'L1' to 'L5', representing the 5-layer AI stack:
+      - 'L1' = Energy / 能源 (e.g. NextEra, CATL, grid, power, batteries)
+      - 'L2' = Chips / 芯片 / 半导体 (e.g. NVIDIA, AMD, Intel, Broadcom, Marvell, SMIC, Cambricon, ASML, ARM)
+      - 'L3' = Infra / 基础设施 / 光模块 / 光器件 / 数据中心 / 服务器 (e.g. Arista, Equinix, Coherent, Lumentum, InnoLight, Eoptolink, TFC, Accelink, Inspur, GDS, VNET)
+      - 'L4' = Models / 大模型 / 算法模型 (e.g. Zhipu)
+      - 'L5' = Apps / 应用 / 软件 / 自动驾驶 (e.g. Microsoft, Salesforce, Palantir, Tencent, Alibaba, Baidu, XPeng))
    - `name` (TEXT)
    - `arf` (DOUBLE, AI Relevance Factor, 0-100)
    - `decile` (INTEGER, 1-10, where 1 is highest ARF)
@@ -608,13 +613,23 @@ Rules:
    - "泡沫预警" / "泡沫" refers to `froth_flag = TRUE`.
    - "估值拉伸" refers to `v_score` or `ps_ratio`.
    - "E分" / "AI曝光" refers to `e_score`.
+   - "芯片" / "半导体" / "芯片题材" / "半导体题材" / "芯片板块" / "半导体板块" refers to `layer = 'L2'`.
+   - "光模块" / "光器件" / "基础设施" / "数据中心" / "服务器" / "光通信" / "光模块题材" refers to `layer = 'L3'`.
+   - "大模型" / "大模型题材" / "算法模型" / "模型题材" refers to `layer = 'L4'`.
+   - "应用" / "软件" / "AI应用" / "自动驾驶" / "软件应用" refers to `layer = 'L5'`.
+   - "能源" / "电力" / "算力能源" / "电力能源" refers to `layer = 'L1'`.
 3. ALWAYS filter by the given `as_of_date` to ensure we query the active snapshot (e.g. `s.as_of_date = '2026-05-28'`).
 4. Output ONLY the raw SQL query. Do not wrap it in markdown code blocks, do not add explanations, do not write anything else. Just the plain SQL string.
 
-Example:
+Example 1:
 User Query: "均线多头，且获利盘小于30%"
 Output:
 SELECT s.ticker, s.name, s.arf, s.decile, t.technical_score, t.rsi, t.chip_profit_ratio FROM snapshots s JOIN technical_metrics t ON s.ticker = t.ticker AND s.as_of_date = t.as_of_date WHERE s.as_of_date = '2026-05-28' AND t.ma_bullish_alignment = TRUE AND t.chip_profit_ratio < 0.3 ORDER BY s.arf DESC
+
+Example 2:
+User Query: "芯片题材"
+Output:
+SELECT s.ticker, s.name, s.arf, s.decile, s.layer, t.technical_score FROM snapshots s JOIN technical_metrics t ON s.ticker = t.ticker AND s.as_of_date = t.as_of_date WHERE s.as_of_date = '2026-05-28' AND s.layer = 'L2' ORDER BY s.arf DESC
 """
 
 def parse_nlp_screener_query(
