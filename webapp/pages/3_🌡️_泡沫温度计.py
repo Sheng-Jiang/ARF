@@ -1,6 +1,7 @@
 """泡沫温度计 — 跨快照的泡沫数量与D1个股历史趋势。"""
 import pandas as pd
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import streamlit as st
 
 from webapp.data import load_snapshot, load_thermometer_series
@@ -20,38 +21,57 @@ if thermo.empty:
     st.warning("暂无历史数据。请先至少运行一次数据管道。")
     st.stop()
 
+# ── Chart 1: Froth Count Trend ────────────────────────────────────────────────
 fig = go.Figure()
 
 if not us_thermo.empty:
+    # Absolute froth (no D1 restriction)
     fig.add_trace(go.Scatter(
-        x=us_thermo["as_of_date"], y=us_thermo["count_froth"],
-        name="美股 — 泡沫预警 ★", mode="lines+markers",
-        line=dict(color="#d62728", width=2),
+        x=us_thermo["as_of_date"], y=us_thermo["count_absolute_froth"],
+        name="美股 — 绝对泡沫数 (无D1限制) ★", mode="lines+markers",
+        line=dict(color="#d62728", width=3),
         marker=dict(size=8),
     ))
+    # Relative froth (D1 restricted)
+    fig.add_trace(go.Scatter(
+        x=us_thermo["as_of_date"], y=us_thermo["count_froth"],
+        name="美股 — 相对泡沫数 (D1限制)", mode="lines+markers",
+        line=dict(color="#d62728", width=1.5, dash="dash"),
+        marker=dict(size=6),
+    ))
+    # ARF >= 90 (D1 reference)
     fig.add_trace(go.Scatter(
         x=us_thermo["as_of_date"], y=us_thermo["count_arf_gte_90"],
-        name="美股 — ARF ≥ 90", mode="lines+markers",
-        line=dict(color="#d62728", width=2, dash="dot"),
-        marker=dict(size=6),
+        name="美股 — ARF ≥ 90 (D1参考)", mode="lines+markers",
+        line=dict(color="#d62728", width=1, dash="dot"),
+        marker=dict(size=4),
     ))
 
 if not cn_thermo.empty:
+    # Absolute froth (no D1 restriction)
     fig.add_trace(go.Scatter(
-        x=cn_thermo["as_of_date"], y=cn_thermo["count_froth"],
-        name="中股 — 泡沫预警 ★", mode="lines+markers",
-        line=dict(color="#e6a817", width=2),
+        x=cn_thermo["as_of_date"], y=cn_thermo["count_absolute_froth"],
+        name="中股 — 绝对泡沫数 (无D1限制) ★", mode="lines+markers",
+        line=dict(color="#e6a817", width=3),
         marker=dict(size=8),
     ))
+    # Relative froth (D1 restricted)
+    fig.add_trace(go.Scatter(
+        x=cn_thermo["as_of_date"], y=cn_thermo["count_froth"],
+        name="中股 — 相对泡沫数 (D1限制)", mode="lines+markers",
+        line=dict(color="#e6a817", width=1.5, dash="dash"),
+        marker=dict(size=6),
+    ))
+    # ARF >= 90 (D1 reference)
     fig.add_trace(go.Scatter(
         x=cn_thermo["as_of_date"], y=cn_thermo["count_arf_gte_90"],
-        name="中股 — ARF ≥ 90", mode="lines+markers",
-        line=dict(color="#e6a817", width=2, dash="dot"),
-        marker=dict(size=6),
+        name="中股 — ARF ≥ 90 (D1参考)", mode="lines+markers",
+        line=dict(color="#e6a817", width=1, dash="dot"),
+        marker=dict(size=4),
     ))
 
 fig.update_layout(
-    title="ARF泡沫温度计 — 泡沫预警个股数量趋势",
+    title="ARF绝对与相对泡沫个股数量趋势",
     xaxis_title="日期",
     yaxis_title="股票数量",
     hovermode="x unified",
@@ -62,47 +82,60 @@ st.plotly_chart(fig, use_container_width=True)
 
 st.markdown("""
 **温度计图解读：**
-- **泡沫预警数（实线）上升**：满足 D1 + ROE < WACC + P/S > 25 三重条件的个股增多，市场AI叙事情绪整体升温，需提高警惕
-- **ARF ≥ 90 数（虚线）上升**：接近极端估值拉伸的个股增多，系统性回调风险上升
-- **两线同步走高**：板块性泡沫信号，非个股行为
-- **两线背离**（ARF≥90增但预警未触发）：部分高估个股ROE尚可支撑估值，风险相对可控
+- **绝对泡沫数（实线）**：满足 `ROE < WACC` 且 `P/S > 25` 的个股数量。这是一个**绝对估值泡沫指标**，不受样本数量限制，能够真实反映全板块炒作的累积与出清程度（可从 0 一直“气球般膨胀”到整个板块的 16）。
+- **相对泡沫数（虚线）**：满足 D1（ARF ≥ 90）且 `ROE < WACC` 且 `P/S > 25` 的个股数量。受限于十分位定义，其最大值被锁死在板块覆盖数的 10%（即 2 只），作为相对拉伸的参考。
+- **ARF ≥ 90（点线）**：每天固定为板块前 10% 的股票（即 2 只），作为基准参考线。
 """)
 
 st.divider()
 
-# Median ARF trend
-fig2 = go.Figure()
+# ── Chart 2: Valuation Stretch & Growth Gap ──────────────────────────────────
+fig2 = make_subplots(specs=[[{"secondary_y": True}]])
+
 for leg, leg_df, color in [("美股", us_thermo, "#d62728"), ("中股", cn_thermo, "#e6a817")]:
     if not leg_df.empty:
+        # EV/Sales 5yr percentile (primary y-axis)
         fig2.add_trace(go.Scatter(
-            x=leg_df["as_of_date"], y=leg_df["median_arf"],
-            name=f"{leg}中位ARF", mode="lines+markers",
+            x=leg_df["as_of_date"], y=leg_df["median_ev_sales_pct"],
+            name=f"{leg} — EV/Sales 5年分位数中位数", mode="lines+markers",
             line=dict(color=color, width=2),
-        ))
+            marker=dict(size=6),
+        ), secondary_y=False)
+        
+        # Implied growth gap (secondary y-axis)
+        fig2.add_trace(go.Scatter(
+            x=leg_df["as_of_date"], y=leg_df["median_growth_gap_pct"],
+            name=f"{leg} — 隐含增长差值中位数 (%)", mode="lines+markers",
+            line=dict(color=color, width=1.5, dash="dash"),
+            marker=dict(size=5, symbol="square"),
+        ), secondary_y=True)
 
+# Add baseline line for primary y-axis (50% percentile)
 fig2.add_hline(y=50, line_dash="dot", line_color="gray", opacity=0.5,
-               annotation_text="基准中线")
+               annotation_text="估值历史中线 (50%)")
+
 fig2.update_layout(
-    title="各板块中位ARF走势",
+    title="各板块估值热度与隐含增长差值走势",
     xaxis_title="日期",
-    yaxis_title="中位ARF（0–100）",
-    yaxis=dict(range=[0, 100]),
     hovermode="x unified",
-    height=320,
+    height=380,
+    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
 )
+
+fig2.update_yaxes(title_text="EV/Sales 5年历史分位数中位数 (0-100%)", range=[0, 100], secondary_y=False)
+fig2.update_yaxes(title_text="隐含永续增长率与共识差值中位数 (%)", secondary_y=True)
+
 st.plotly_chart(fig2, use_container_width=True)
 
 st.markdown("""
-**中位ARF解读：**
-中位ARF反映的是整个板块的"平均温度"。
-- **持续高于50**：板块整体被AI叙事显著抬高，个股选择需更加谨慎
-- **快速上升**：新资金涌入 + 估值快速扩张，泡沫形成加速
-- **从高位回落**：叙事降温或基本面业绩开始消化估值，泡沫出清
+**估值与增长差值解读：**
+- **EV/Sales 5年历史分位数中位数（实线，左轴）**：反映整个板块相对于自身历史估值的“平均温度”。持续高于 50% 说明板块估值整体偏贵；快速逼近 100% 说明估值已处于 5 年来的极端高位。该指标替代了原先因百分位排序而恒等于 53 的 flat 线。
+- **隐含增长率与共识差值中位数（虚线，右轴）**：反映市场交易价格中隐含的永续增长率（$g^*$）比分析师 3 年 consensus 预期高出多少。差值越高，说明市场定价越是“定价完美”（Priced for Perfection），对未来业绩增长的透支越严重，系统性回调风险上升。
 """)
 
 st.divider()
 
-# Week-over-week delta table
+# ── Week-over-Week Delta Table ───────────────────────────────────────────────
 dates = sorted(thermo["as_of_date"].unique())
 if len(dates) >= 2:
     latest_dt, prior_dt = dates[-1], dates[-2]
@@ -110,11 +143,18 @@ if len(dates) >= 2:
     prior = thermo[thermo["as_of_date"] == prior_dt]
 
     st.subheader(f"周度变化：{prior_dt} → {latest_dt}")
-    def _delta(cur: pd.Series, prv: pd.Series | None, col: str) -> str:
-        if prv is None:
+    
+    def _delta_int(cur: pd.Series, prv: pd.Series | None, col: str) -> str:
+        if prv is None or col not in prv or pd.isna(prv[col]) or pd.isna(cur[col]):
             return "—"
         diff = int(cur[col]) - int(prv[col])
         return f"+{diff}" if diff > 0 else str(diff)
+
+    def _delta_float(cur: pd.Series, prv: pd.Series | None, col: str) -> str:
+        if prv is None or col not in prv or pd.isna(prv[col]) or pd.isna(cur[col]):
+            return "—"
+        diff = float(cur[col]) - float(prv[col])
+        return f"+{diff:.2f}%" if diff > 0 else f"{diff:.2f}%"
 
     delta_rows = []
     for leg, leg_label in [("US", "🇺🇸 美股"), ("China", "🇨🇳 中股")]:
@@ -127,11 +167,14 @@ if len(dates) >= 2:
 
         delta_rows.append({
             "板块": leg_label,
-            "泡沫预警数": int(cur["count_froth"]),
-            "泡沫预警变化": _delta(cur, prv, "count_froth"),
-            "ARF≥90数": int(cur["count_arf_gte_90"]),
-            "ARF≥90变化": _delta(cur, prv, "count_arf_gte_90"),
-            "中位ARF": f"{cur['median_arf']:.1f}",
+            "绝对泡沫数": int(cur["count_absolute_froth"]),
+            "绝对泡沫变化": _delta_int(cur, prv, "count_absolute_froth"),
+            "相对泡沫数 (D1)": int(cur["count_froth"]),
+            "相对泡沫变化": _delta_int(cur, prv, "count_froth"),
+            "EV/Sales历史分位数中位数": f"{cur['median_ev_sales_pct']:.1f}%",
+            "分位数变化": _delta_float(cur, prv, "median_ev_sales_pct"),
+            "隐含增长差值中位数": f"{cur['median_growth_gap_pct']:.2f}%",
+            "增长差值变化": _delta_float(cur, prv, "median_growth_gap_pct"),
             "覆盖股票数": int(cur["total"]),
         })
 
@@ -152,3 +195,4 @@ if as_of is not None:
         label_intro="以本快照中美股+中股各前5名（共10只）为口径，"
                     "请 Gemini 联网检索最新新闻，解读温度计读数背后的宏观叙事变化。",
     )
+

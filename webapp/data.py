@@ -54,6 +54,13 @@ def load_thermometer_series() -> pd.DataFrame:
             leg,
             COUNT(*) FILTER (WHERE arf >= 90)       AS count_arf_gte_90,
             COUNT(*) FILTER (WHERE froth_flag = TRUE) AS count_froth,
+            -- Absolute froth count: ROE < WACC (10% US, 12% China) AND P/S > 25
+            COUNT(*) FILTER (
+                WHERE (leg = 'US' AND roe < 0.10 AND ps_ratio > 25) OR
+                      (leg = 'China' AND roe < 0.12 AND ps_ratio > 25)
+            ) AS count_absolute_froth,
+            MEDIAN(ev_sales_5yr_percentile)          AS median_ev_sales_pct,
+            MEDIAN(implied_growth_gap) * 100         AS median_growth_gap_pct,
             MEDIAN(arf)                              AS median_arf,
             COUNT(*)                                 AS total
         FROM snapshots

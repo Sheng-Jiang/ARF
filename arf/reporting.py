@@ -114,18 +114,27 @@ def render_thermometer_html(thermo: pd.DataFrame) -> str:
     if len(thermo):
         for leg in thermo["leg"].unique():
             leg_df = thermo[thermo["leg"] == leg].sort_values("as_of_date")
+            if "count_absolute_froth" in leg_df.columns:
+                fig.add_trace(go.Scatter(
+                    x=leg_df["as_of_date"],
+                    y=leg_df["count_absolute_froth"],
+                    mode="lines+markers",
+                    name=f"{leg} — absolute froth count",
+                    line={"width": 3},
+                ))
             fig.add_trace(go.Scatter(
                 x=leg_df["as_of_date"],
                 y=leg_df["count_froth"],
                 mode="lines+markers",
-                name=f"{leg} — froth count",
+                name=f"{leg} — relative froth count (D1)",
+                line={"dash": "dash", "width": 1.5},
             ))
             fig.add_trace(go.Scatter(
                 x=leg_df["as_of_date"],
                 y=leg_df["count_arf_gte_90"],
                 mode="lines+markers",
                 name=f"{leg} — ARF ≥ 90 count",
-                line={"dash": "dot"},
+                line={"dash": "dot", "width": 1},
             ))
 
     fig.update_layout(
