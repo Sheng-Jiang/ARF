@@ -9,6 +9,7 @@ import yaml
 import numpy as np
 
 # Local imports
+from webapp import gemini
 from webapp.data import _open_conn
 from webapp.charts import draw_pro_kline, draw_result_bar
 from webapp.backtest import run_backtrader
