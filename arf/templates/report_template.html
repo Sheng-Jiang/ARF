@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ARF 周度综合研报 — {{ as_of }}</title>
+<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-primary: #0f1117;
+    --bg-card: rgba(22, 25, 37, 0.95);
+    --bg-card-hover: rgba(30, 34, 50, 0.95);
+    --glass: rgba(255,255,255,0.04);
+    --border: rgba(255,255,255,0.08);
+    --text-primary: #e8e8ed;
+    --text-secondary: #9ca3af;
+    --text-dim: #6b7280;
+    --accent-red: #ef4444;
+    --accent-amber: #f59e0b;
+    --accent-green: #10b981;
+    --accent-blue: #3b82f6;
+    --accent-purple: #8b5cf6;
+    --gradient-red: linear-gradient(135deg, #ef4444, #dc2626);
+    --gradient-amber: linear-gradient(135deg, #f59e0b, #d97706);
+    --gradient-green: linear-gradient(135deg, #10b981, #059669);
+    --gradient-blue: linear-gradient(135deg, #3b82f6, #2563eb);
+    --gradient-purple: linear-gradient(135deg, #8b5cf6, #7c3aed);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    line-height: 1.6;
+    min-height: 100vh;
+  }
+
+  .container { max-width: 1200px; margin: 0 auto; padding: 24px 20px; }
+
+  /* ── Header ───────────────────────────────────── */
+  .report-header {
+    text-align: center;
+    padding: 48px 24px 36px;
+    background: linear-gradient(180deg, rgba(59,130,246,0.08) 0%, transparent 100%);
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 32px;
+  }
+  .report-header h1 {
+    font-size: 2.2rem;
+    font-weight: 700;
+    background: linear-gradient(135deg, #60a5fa, #a78bfa, #f472b6);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    letter-spacing: -0.02em;
+    margin-bottom: 8px;
+  }
+  .report-header .subtitle {
+    font-size: 1rem;
+    color: var(--text-secondary);
+    font-weight: 300;
+  }
+  .report-header .meta {
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    margin-top: 12px;
+  }
+
+  /* ── Section Headers ──────────────────────────── */
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 40px 0 20px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .section-header .icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.2rem;
+    flex-shrink: 0;
+  }
+  .section-header h2 {
+    font-size: 1.4rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  /* ── Metric Cards ─────────────────────────────── */
+  .metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 16px;
+    margin-bottom: 28px;
+  }
+  .metric-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px;
+    text-align: center;
+    backdrop-filter: blur(12px);
+    transition: transform 0.2s, border-color 0.2s;
+  }
+  .metric-card:hover {
+    transform: translateY(-2px);
+    border-color: rgba(255,255,255,0.15);
+  }
+  .metric-card .value {
+    font-size: 2rem;
+    font-weight: 700;
+    margin-bottom: 4px;
+  }
+  .metric-card .label {
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    font-weight: 400;
+  }
+  .metric-card .delta {
+    font-size: 0.75rem;
+    margin-top: 4px;
+    font-weight: 500;
+  }
+  .delta-up { color: var(--accent-red); }
+  .delta-down { color: var(--accent-green); }
+  .delta-flat { color: var(--text-dim); }
+
+  /* ── Tables ───────────────────────────────────── */
+  .table-wrapper {
+    overflow-x: auto;
+    margin-bottom: 24px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+  }
+  th {
+    background: rgba(255,255,255,0.04);
+    padding: 10px 12px;
+    text-align: left;
+    font-weight: 600;
+    color: var(--text-secondary);
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+    position: sticky;
+    top: 0;
+  }
+  td {
+    padding: 8px 12px;
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+    white-space: nowrap;
+  }
+  tr:hover { background: rgba(255,255,255,0.02); }
+  .row-d1 { background: rgba(239, 68, 68, 0.08); }
+  .row-d2 { background: rgba(245, 158, 11, 0.06); }
+  .row-d8plus { background: rgba(16, 185, 129, 0.06); }
+  .froth-star { color: var(--accent-red); font-weight: 700; }
+
+  /* ── Backtest Cards ───────────────────────────── */
+  .bt-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+    gap: 20px;
+    margin-bottom: 28px;
+  }
+  .bt-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 24px;
+    backdrop-filter: blur(12px);
+    transition: transform 0.2s, border-color 0.2s;
+  }
+  .bt-card:hover {
+    transform: translateY(-2px);
+    border-color: rgba(255,255,255,0.15);
+  }
+  .bt-card .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 16px;
+  }
+  .bt-card .ticker {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--accent-blue);
+  }
+  .bt-card .name {
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    margin-top: 2px;
+  }
+  .bt-card .tech-badge {
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.78rem;
+    font-weight: 600;
+  }
+  .tech-high { background: rgba(239,68,68,0.15); color: #fca5a5; }
+  .tech-mid { background: rgba(245,158,11,0.15); color: #fcd34d; }
+  .tech-low { background: rgba(16,185,129,0.15); color: #6ee7b7; }
+
+  .mini-stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+  .mini-stat {
+    text-align: center;
+    padding: 8px 4px;
+    background: var(--glass);
+    border-radius: 8px;
+  }
+  .mini-stat .val {
+    font-size: 0.9rem;
+    font-weight: 600;
+  }
+  .mini-stat .lbl {
+    font-size: 0.7rem;
+    color: var(--text-dim);
+    margin-top: 2px;
+  }
+
+  .strategy-table {
+    width: 100%;
+    font-size: 0.78rem;
+    margin-top: 12px;
+  }
+  .strategy-table th {
+    padding: 6px 8px;
+    font-size: 0.72rem;
+  }
+  .strategy-table td {
+    padding: 5px 8px;
+  }
+  .best-row { background: rgba(59,130,246,0.1); }
+
+  .best-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    background: var(--gradient-blue);
+    color: white;
+    margin-left: 4px;
+  }
+
+  /* ── Gemini Synthesis ─────────────────────────── */
+  .gemini-section {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 32px;
+    margin-bottom: 28px;
+    backdrop-filter: blur(12px);
+  }
+  .gemini-section h3 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--accent-purple);
+    margin: 24px 0 12px;
+  }
+  .gemini-section h3:first-child { margin-top: 0; }
+  .gemini-section p, .gemini-section li {
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    line-height: 1.8;
+  }
+  .gemini-section ul { padding-left: 20px; margin: 8px 0; }
+  .gemini-section li { margin-bottom: 4px; }
+  .gemini-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 14px;
+    border-radius: 20px;
+    background: linear-gradient(135deg, rgba(139,92,246,0.2), rgba(59,130,246,0.2));
+    border: 1px solid rgba(139,92,246,0.3);
+    font-size: 0.78rem;
+    color: #c4b5fd;
+    margin-bottom: 20px;
+  }
+
+  /* ── Citations ────────────────────────────────── */
+  .citations {
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+  }
+  .citations h4 {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+  }
+  .citations a {
+    color: var(--accent-blue);
+    text-decoration: none;
+    font-size: 0.8rem;
+    display: block;
+    padding: 2px 0;
+  }
+  .citations a:hover { text-decoration: underline; }
+
+  /* ── Chart Container ──────────────────────────── */
+  .chart-container {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px;
+    margin-bottom: 24px;
+    overflow: hidden;
+  }
+
+  /* ── Disclaimer ───────────────────────────────── */
+  .disclaimer {
+    margin-top: 48px;
+    padding: 20px 24px;
+    background: rgba(245,158,11,0.06);
+    border: 1px solid rgba(245,158,11,0.15);
+    border-radius: 12px;
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    line-height: 1.6;
+  }
+  .disclaimer strong { color: var(--accent-amber); }
+
+  /* ── Footer ───────────────────────────────────── */
+  .footer {
+    text-align: center;
+    padding: 32px 0 24px;
+    color: var(--text-dim);
+    font-size: 0.75rem;
+  }
+
+  /* ── Print ────────────────────────────────────── */
+  @media print {
+    body { background: white; color: #111; }
+    .metric-card, .bt-card, .gemini-section, .chart-container {
+      background: #f9fafb; border-color: #e5e7eb;
+    }
+    th { background: #f3f4f6; }
+  }
+
+  /* ── Responsive ───────────────────────────────── */
+  @media (max-width: 768px) {
+    .report-header h1 { font-size: 1.6rem; }
+    .metrics-grid { grid-template-columns: repeat(2, 1fr); }
+    .bt-grid { grid-template-columns: 1fr; }
+    .container { padding: 16px 12px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════ HEADER -->
+<div class="report-header">
+  <h1>AI Stack Bubble Monitor · 周度综合研报</h1>
+  <div class="subtitle">AI Relevance Factor (ARF) Weekly Synthesis Report</div>
+  <div class="meta">快照日期: {{ as_of }} · 生成时间: {{ generated_at }} · 回测窗口: {{ lookback_months }} 个月</div>
+</div>
+
+<div class="container">
+
+<!-- ═══════════════════════════════════════════════════ 1. SNAPSHOT SUMMARY -->
+<div class="section-header">
+  <div class="icon" style="background: var(--gradient-blue);">📊</div>
+  <h2>ARF 快照概览</h2>
+</div>
+
+<div class="metrics-grid">
+  <div class="metric-card">
+    <div class="value" style="color: var(--accent-red);">{{ d1_us }}</div>
+    <div class="label">🇺🇸 美股 D1 数量</div>
+  </div>
+  <div class="metric-card">
+    <div class="value" style="color: var(--accent-red);">{{ froth_us }}</div>
+    <div class="label">🇺🇸 美股泡沫预警 ★</div>
+  </div>
+  <div class="metric-card">
+    <div class="value" style="color: var(--accent-amber);">{{ d1_china }}</div>
+    <div class="label">🇨🇳 中股 D1 数量</div>
+  </div>
+  <div class="metric-card">
+    <div class="value" style="color: var(--accent-amber);">{{ froth_china }}</div>
+    <div class="label">🇨🇳 中股泡沫预警 ★</div>
+  </div>
+</div>
+
+<!-- US Leg Table -->
+{% if us_rows %}
+<h3 style="font-size: 1rem; color: var(--text-secondary); margin-bottom: 12px;">🇺🇸 美股评分排名</h3>
+<div class="table-wrapper">
+<table>
+  <thead>
+    <tr><th>代码</th><th>公司</th><th>层级</th><th>ARF</th><th>D</th><th>E</th><th>V</th><th>★</th><th>Fwd P/E</th><th>P/S</th><th>ROE</th><th>Rev YoY</th></tr>
+  </thead>
+  <tbody>
+    {% for r in us_rows %}
+    <tr class="{% if r.decile == 1 %}row-d1{% elif r.decile == 2 %}row-d2{% elif r.decile is number and r.decile >= 8 %}row-d8plus{% endif %}">
+      <td><strong>{{ r.ticker }}</strong></td>
+      <td>{{ r.name }}</td>
+      <td>{{ r.layer }}</td>
+      <td>{{ r.arf }}</td>
+      <td>{{ r.decile }}</td>
+      <td>{{ r.e_score }}</td>
+      <td>{{ r.v_score }}</td>
+      <td>{% if r.froth %}<span class="froth-star">★</span>{% endif %}</td>
+      <td>{{ r.forward_pe }}</td>
+      <td>{{ r.ps_ratio }}</td>
+      <td>{{ r.roe }}</td>
+      <td>{{ r.rev_yoy }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+
+<!-- China Leg Table -->
+{% if china_rows %}
+<h3 style="font-size: 1rem; color: var(--text-secondary); margin-bottom: 12px;">🇨🇳 中股评分排名</h3>
+<div class="table-wrapper">
+<table>
+  <thead>
+    <tr><th>代码</th><th>公司</th><th>层级</th><th>ARF</th><th>D</th><th>E</th><th>V</th><th>★</th><th>Fwd P/E</th><th>P/S</th><th>ROE</th><th>Rev YoY</th></tr>
+  </thead>
+  <tbody>
+    {% for r in china_rows %}
+    <tr class="{% if r.decile == 1 %}row-d1{% elif r.decile == 2 %}row-d2{% elif r.decile is number and r.decile >= 8 %}row-d8plus{% endif %}">
+      <td><strong>{{ r.ticker }}</strong></td>
+      <td>{{ r.name }}</td>
+      <td>{{ r.layer }}</td>
+      <td>{{ r.arf }}</td>
+      <td>{{ r.decile }}</td>
+      <td>{{ r.e_score }}</td>
+      <td>{{ r.v_score }}</td>
+      <td>{% if r.froth %}<span class="froth-star">★</span>{% endif %}</td>
+      <td>{{ r.forward_pe }}</td>
+      <td>{{ r.ps_ratio }}</td>
+      <td>{{ r.roe }}</td>
+      <td>{{ r.rev_yoy }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+
+<!-- ═══════════════════════════════════════════ 2. BUBBLE THERMOMETER TREND -->
+<div class="section-header">
+  <div class="icon" style="background: var(--gradient-red);">🌡️</div>
+  <h2>泡沫温度计趋势</h2>
+</div>
+
+<!-- Thermometer Delta Table -->
+{% if thermo_deltas %}
+<div class="metrics-grid">
+  {% for d in thermo_deltas %}
+  <div class="metric-card">
+    <div class="value" style="color: {% if d.leg == 'US' %}var(--accent-red){% else %}var(--accent-amber){% endif %};">{{ d.absolute_froth }}</div>
+    <div class="label">{% if d.leg == 'US' %}🇺🇸{% else %}🇨🇳{% endif %} 绝对泡沫数</div>
+    <div class="delta {% if '+' in d.absolute_froth_delta %}delta-up{% elif '-' in d.absolute_froth_delta %}delta-down{% else %}delta-flat{% endif %}">{{ d.absolute_froth_delta }}</div>
+  </div>
+  <div class="metric-card">
+    <div class="value">{{ "%.1f"|format(d.median_ev_sales_pct) }}%</div>
+    <div class="label">{% if d.leg == 'US' %}🇺🇸{% else %}🇨🇳{% endif %} EV/Sales 分位数</div>
+    <div class="delta {% if '+' in d.ev_sales_delta %}delta-up{% elif '-' in d.ev_sales_delta %}delta-down{% else %}delta-flat{% endif %}">{{ d.ev_sales_delta }}</div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<!-- Charts -->
+{% if thermo_chart %}
+<div class="chart-container">
+  {{ thermo_chart|safe }}
+</div>
+{% endif %}
+
+{% if valuation_chart %}
+<div class="chart-container">
+  {{ valuation_chart|safe }}
+</div>
+{% endif %}
+
+<!-- ═══════════════════════════════════════════ 3. BACKTEST RESULTS -->
+<div class="section-header">
+  <div class="icon" style="background: var(--gradient-green);">🏁</div>
+  <h2>Top 5 中国 A+H 股策略回测 ({{ lookback_months }}个月)</h2>
+</div>
+
+{% if backtest_cards %}
+<div class="bt-grid">
+  {% for card in backtest_cards %}
+  <div class="bt-card">
+    <div class="card-header">
+      <div>
+        <div class="ticker">{{ card.ticker }}</div>
+        <div class="name">{{ card.name }}</div>
+      </div>
+      <div class="tech-badge {% if card.tech_score != 'N/A' and card.tech_score|float >= 70 %}tech-high{% elif card.tech_score != 'N/A' and card.tech_score|float >= 40 %}tech-mid{% else %}tech-low{% endif %}">
+        技术评分 {{ card.tech_score }}
+      </div>
+    </div>
+
+    <div class="mini-stats">
+      <div class="mini-stat">
+        <div class="val">{{ card.rsi }}</div>
+        <div class="lbl">RSI</div>
+      </div>
+      <div class="mini-stat">
+        <div class="val">{{ card.ma_bullish }}</div>
+        <div class="lbl">均线多头</div>
+      </div>
+      <div class="mini-stat">
+        <div class="val">{{ card.chip_profit }}</div>
+        <div class="lbl">获利盘</div>
+      </div>
+    </div>
+
+    {% if card.strategies %}
+    <table class="strategy-table">
+      <thead>
+        <tr><th>策略</th><th>最优参数</th><th>收益率%</th><th>夏普</th><th>回撤%</th></tr>
+      </thead>
+      <tbody>
+        {% for s in card.strategies %}
+        <tr class="{% if s.name == card.best_strategy %}best-row{% endif %}">
+          <td>{{ s.name.split(' ')[0] }}{% if s.name == card.best_strategy %}<span class="best-badge">最优</span>{% endif %}</td>
+          <td style="font-size: 0.72rem; color: var(--text-dim);">{{ s.params }}</td>
+          <td style="color: {% if s.ret|float > 0 %}var(--accent-red){% else %}var(--accent-green){% endif %};">{{ s.ret }}%</td>
+          <td>{{ s.sharpe }}</td>
+          <td>{{ s.dd }}%</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div style="text-align: center; color: var(--text-dim); padding: 16px;">暂无回测数据</div>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div style="text-align: center; color: var(--text-dim); padding: 32px;">未找到符合条件的中国A+H股进行回测</div>
+{% endif %}
+
+<!-- ═══════════════════════════════════════════ 4. GEMINI AI SYNTHESIS -->
+<div class="section-header">
+  <div class="icon" style="background: var(--gradient-purple);">🤖</div>
+  <h2>Gemini AI 综合研判</h2>
+</div>
+
+{% if gemini_synthesis %}
+<div class="gemini-section">
+  <div class="gemini-badge">✨ Powered by Gemini 2.5 Pro with Google Search Grounding</div>
+  {{ gemini_synthesis|safe }}
+
+  {% if gemini_citations %}
+  <div class="citations">
+    <h4>🔗 引用来源</h4>
+    {% for c in gemini_citations %}
+    <a href="{{ c.uri }}" target="_blank" rel="noopener">{{ c.title or c.uri }}</a>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+{% else %}
+<div class="gemini-section" style="text-align: center; color: var(--text-dim);">
+  <p>未配置 GEMINI_API_KEY 或 AI 综合研判生成失败。<br>请在环境变量中设置 API 密钥后重试。</p>
+</div>
+{% endif %}
+
+<!-- ═══════════════════════════════════════════ DISCLAIMER -->
+<div class="disclaimer">
+  <strong>⚠️ 合规与免责声明：</strong>
+  本报告由 ARF (AI Relevance Factor) 量化模型自动生成，所有数据、评分、回测结果及 AI 综合研判均基于预设算法与公开市场数据，
+  仅作为量化分析与学术研究的<strong>参考工具</strong>，<strong>不构成任何证券买卖建议或投资决策推荐</strong>。
+  历史回测绩效不代表未来收益。AI 生成的叙事分析可能包含不准确信息，请自行核实。投资者应保持独立判断，自主承担风险。
+</div>
+
+<!-- ═══════════════════════════════════════════ FOOTER -->
+<div class="footer">
+  ARF AI Stack Bubble Monitor · Generated {{ generated_at }}
+</div>
+
+</div><!-- .container -->
+</body>
+</html>

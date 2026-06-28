@@ -136,6 +136,17 @@ CREATE TABLE IF NOT EXISTS technical_metrics (
 )
 """
 
+_SCHEMA_WEEKLY_REPORTS = """
+CREATE TABLE IF NOT EXISTS weekly_reports (
+    as_of_date      DATE        PRIMARY KEY,
+    generated_at    TIMESTAMP   NOT NULL,
+    report_path     TEXT,
+    gemini_summary  TEXT,
+    stocks_covered  TEXT,
+    trigger_source  TEXT
+)
+"""
+
 
 def init_db(path: Path = Path("data/arf.db")) -> duckdb.DuckDBPyConnection:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -146,6 +157,7 @@ def init_db(path: Path = Path("data/arf.db")) -> duckdb.DuckDBPyConnection:
     conn.execute(_SCHEMA_GEMINI_SUMMARIES)
     conn.execute(_SCHEMA_DAILY_PRICES)
     conn.execute(_SCHEMA_TECHNICAL_METRICS)
+    conn.execute(_SCHEMA_WEEKLY_REPORTS)
     return conn
 
 
@@ -410,5 +422,35 @@ def query_technical_metrics(
     return conn.execute(
         "SELECT * FROM technical_metrics WHERE as_of_date = ?",
         [as_of_date]
+    ).fetchdf()
+
+
+def upsert_weekly_report(
+    conn: duckdb.DuckDBPyConnection,
+    as_of_date: date,
+    report_path: str,
+    gemini_summary: str,
+    stocks_covered: str,
+    trigger_source: str,
+    generated_at: datetime | None = None,
+) -> None:
+    """Insert or overwrite a weekly report record."""
+    generated = generated_at or datetime.now(UTC).replace(tzinfo=None)
+    conn.execute("DELETE FROM weekly_reports WHERE as_of_date = ?", [as_of_date])
+    conn.execute(
+        "INSERT INTO weekly_reports (as_of_date, generated_at, report_path, "
+        "gemini_summary, stocks_covered, trigger_source) VALUES (?, ?, ?, ?, ?, ?)",
+        [as_of_date, generated, report_path, gemini_summary, stocks_covered, trigger_source],
+    )
+    conn.commit()
+
+
+def query_weekly_reports(
+    conn: duckdb.DuckDBPyConnection,
+    limit: int = 20,
+) -> pd.DataFrame:
+    """List weekly reports ordered by date descending."""
+    return conn.execute(
+        "SELECT * FROM weekly_reports ORDER BY as_of_date DESC LIMIT ?", [limit]
     ).fetchdf()
 

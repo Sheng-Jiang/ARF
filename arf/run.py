@@ -181,6 +181,49 @@ def _outcome_for(sd: StockData) -> str:
     return "ok"
 
 
+def _maybe_generate_weekly_report(
+    as_of: date,
+    data_dir: Path,
+    report_dir: Path,
+    trigger_source: str,
+) -> None:
+    """Auto-generate the one-click weekly report if enabled.
+
+    Controlled by ONECLICK_AUTO_REPORT env var:
+    - 'true' / '1' → always generate
+    - 'false' / '0' → never generate
+    - unset → generate only for scheduler triggers (not manual)
+
+    Failures here must never crash the pipeline.
+    """
+    env_val = os.getenv("ONECLICK_AUTO_REPORT", "").strip().lower()
+    if env_val in ("false", "0"):
+        return
+    if not env_val and trigger_source == "manual":
+        log.info("ONECLICK_AUTO_REPORT unset and trigger=manual — skipping weekly report")
+        return
+
+    console.print("Generating one-click weekly report…")
+    try:
+        from arf.oneclick import generate_oneclick_report
+        out_path = generate_oneclick_report(
+            as_of=as_of,
+            db_path=data_dir / "arf.db",
+            report_dir=report_dir,
+            trigger_source=trigger_source,
+            enable_gemini=bool(os.getenv("GEMINI_API_KEY")),
+        )
+        console.print(f"Weekly report written: {out_path}")
+
+        if storage.is_gcs_mode():
+            try:
+                storage.upload_artifact(out_path, f"reports/weekly_report_{as_of}.html")
+            except Exception:
+                log.exception("Failed to upload weekly report to GCS")
+    except Exception:
+        log.exception("Weekly report generation failed — continuing pipeline")
+
+
 def fetch_daily_prices_yf(ticker: str, start_date: str, end_date: str) -> pd.DataFrame:
     """Fetch daily price history from yfinance and format it for DuckDB."""
     import yfinance as yf
@@ -382,6 +425,9 @@ def run_pipeline(
         thermo = query_thermometer_series(conn)
         write_report(df, thermo, as_of, report_dir)
         console.print(f"Reports written to {report_dir}/")
+
+        # One-click weekly report auto-generation
+        _maybe_generate_weekly_report(as_of, data_dir, report_dir, trigger_source)
 
         status = "partial" if failed > 0 else "success"
         finish_run(

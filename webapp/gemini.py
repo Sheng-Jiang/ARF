@@ -675,3 +675,123 @@ def parse_nlp_screener_query(
         log.exception("NLP SQL compilation failed")
         return f"-- Error compiling query: {str(e)}"
 
+
+# ---------- Weekly One-Click Synthesis ----------
+
+_WEEKLY_SYNTHESIS_SYSTEM_PROMPT = """You are a senior cross-asset strategist at a quantitative research house. You are
+writing the weekly "AI Stack Bubble Monitor" synthesis report. You receive:
+1. Thermometer deltas (froth count changes week-over-week for US and China legs)
+2. Top-5 China A+H stocks by ARF with their backtest performance across 3 strategies
+3. ARF snapshot summary statistics
+
+Your job is to produce a bilingual (Chinese primary, with English section headers) report
+with EXACTLY these four sections in Markdown:
+
+### 1. 市场温度概览 (Market Temperature Overview)
+Interpret the thermometer — are we heating up or cooling down? Reference the absolute and
+relative froth counts, EV/Sales percentile, and implied growth gap changes.
+
+### 2. 个股ARF趋势解读 (Stock ARF Trend Interpretation)
+For the top-5 stocks, explain why they rank highest. Reference their E_score, V_score,
+decile, and key fundamentals (P/S, ROE, forward P/E).
+
+### 3. 量化策略回测洞察 (Quantitative Backtest Insights)
+Summarize the backtest results across the 5 stocks × 3 strategies. Which strategy worked
+best overall? Which stocks showed the strongest alpha signals? Reference specific Sharpe
+ratios, returns, and max drawdowns.
+
+### 4. 综合研判与风险提示 (Synthesis & Risk Warnings)
+Tie together the narrative, technical, and backtest layers. Identify the biggest risk
+factors. This section MUST include a compliance disclaimer that this is objective research,
+NOT investment advice.
+
+Hard rules:
+1. ALWAYS use Google Search. Fire at least 3 distinct queries about the latest macro
+   context of China's AI sector, US-China tech decoupling, and any regulatory changes.
+2. Every factual claim from search MUST cite the source domain in parentheses.
+3. Keep the report under 1500 words total.
+4. Use Chinese as the primary language with English section headers.
+"""
+
+
+def generate_weekly_synthesis(report_data) -> dict:
+    """Generate a weekly synthesis report using grounded Gemini.
+
+    Args:
+        report_data: ReportData from arf.oneclick
+
+    Returns:
+        dict with 'report_text', 'citations', 'queries'
+    """
+    from google import genai
+    from google.genai import types
+
+    if not is_enabled():
+        return {"report_text": "", "citations": [], "queries": []}
+
+    api_key = os.environ["GEMINI_API_KEY"].strip()
+
+    # Build the data context for the prompt
+    from arf.oneclick import _backtest_summary_for_gemini
+
+    thermo_block = "=== 泡沫温度计周度变化 ===\n"
+    for d in report_data.thermo_deltas:
+        thermo_block += (
+            f"{d.leg}: 绝对泡沫数={d.absolute_froth} ({d.absolute_froth_delta}), "
+            f"相对泡沫数={d.relative_froth} ({d.relative_froth_delta}), "
+            f"EV/Sales分位数={d.median_ev_sales_pct:.1f}% ({d.ev_sales_delta}), "
+            f"隐含增长差值={d.median_growth_gap:.2f}% ({d.growth_gap_delta})\n"
+        )
+
+    snapshot_block = (
+        f"=== 快照摘要 ===\n"
+        f"日期: {report_data.as_of}\n"
+        f"美股 D1数量: {report_data.d1_us}, 泡沫预警: {report_data.froth_us}\n"
+        f"中股 D1数量: {report_data.d1_china}, 泡沫预警: {report_data.froth_china}\n"
+    )
+
+    backtest_block = "=== Top 5 中国A+H股回测概要 ===\n"
+    backtest_block += _backtest_summary_for_gemini(report_data.backtest_stocks)
+
+    prompt = (
+        f"{snapshot_block}\n"
+        f"{thermo_block}\n"
+        f"{backtest_block}\n"
+        f"=== 指令 ===\n"
+        f"基于以上数据，撰写本周 AI Stack Bubble Monitor 综合研报。\n"
+        f"务必联网检索最新宏观和行业动态，引用来源域名。\n"
+        f"严格按照四个章节的格式输出。"
+    )
+
+    try:
+        client = genai.Client(api_key=api_key)
+        config = types.GenerateContentConfig(
+            tools=[types.Tool(google_search=types.GoogleSearch())],
+            temperature=0.3,
+            system_instruction=_WEEKLY_SYNTHESIS_SYSTEM_PROMPT,
+        )
+        response = client.models.generate_content(
+            model=MODEL,
+            contents=prompt,
+            config=config,
+        )
+        report_text = response.text or ""
+        cits, queries = _extract_citations(response)
+        log.info(
+            "Weekly synthesis: model=%s len=%d citations=%d queries=%d",
+            MODEL, len(report_text), len(cits), len(queries),
+        )
+        return {
+            "report_text": report_text,
+            "citations": cits,
+            "queries": queries,
+        }
+    except Exception as exc:
+        log.exception("Weekly Gemini synthesis failed")
+        return {
+            "report_text": f"⚠️ AI 综合研判生成失败：{exc}",
+            "citations": [],
+            "queries": [],
+        }
+
+
