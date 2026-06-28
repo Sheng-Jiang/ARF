@@ -88,14 +88,13 @@ if generate_btn:
             _render_thermo_chart,
             _render_valuation_chart,
         )
-        from webapp.data import get_db_path
+        from webapp.data import get_db_path, _open_conn
         import os
 
         db_path = get_db_path()
-        conn = init_db(db_path)
+        conn = _open_conn()
         snapshot = query_snapshot(conn, as_of)
         thermo = query_thermometer_series(conn)
-        conn.close()
 
         us = snapshot[snapshot["leg"] == "US"]
         china = snapshot[snapshot["leg"] == "China"]
@@ -162,7 +161,7 @@ if generate_btn:
 
         # Record in DB
         try:
-            conn = init_db(db_path)
+            conn = _open_conn()
             upsert_weekly_report(
                 conn,
                 as_of_date=as_of,
@@ -171,7 +170,6 @@ if generate_btn:
                 stocks_covered=json.dumps([s.ticker for s in report.backtest_stocks]),
                 trigger_source="webapp",
             )
-            conn.close()
 
             # Sync database and HTML report back to GCS if in GCS mode
             from arf import storage

@@ -34,10 +34,10 @@ def _open_conn() -> duckdb.DuckDBPyConnection:
         client.bucket(GCS_BUCKET).blob(GCS_DB_OBJECT).download_to_filename(str(tmp_path))
         _ensure_schema(tmp_path)
         _ACTIVE_DB_PATH = tmp_path
-        return duckdb.connect(str(tmp_path), read_only=True)
+        return duckdb.connect(str(tmp_path), read_only=False)
     _ensure_schema(LOCAL_DB_PATH)
     _ACTIVE_DB_PATH = LOCAL_DB_PATH
-    return duckdb.connect(str(LOCAL_DB_PATH), read_only=True)
+    return duckdb.connect(str(LOCAL_DB_PATH), read_only=False)
 
 
 def get_db_path() -> Path:
