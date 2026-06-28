@@ -161,10 +161,16 @@ def v_score(df: pd.DataFrame, wacc: float = 0.10) -> pd.Series:
     component_stack.columns = ["c1", "c2", "c3"]
     raw_v = component_stack.mean(axis=1, skipna=True)
 
+    # Fallback for pure story stocks with negative FCF, negative PE, and no 5yr history.
+    # We rank them by their raw EV/Sales multiple so they still receive a v_score.
+    ev_sales = df["ev_sales"].astype(float)
+    c_fallback = percentile_rank(ev_sales)
+    raw_v = raw_v.fillna(c_fallback)
+
     # Quality adjustment: subtract (ROE − wacc) normalized to ±20 points
     roe = df["roe"].astype(float)
     roe_adj_raw = (roe - wacc) / 1.0  # normalizer: 100% ROE swing = 100 pts
-    roe_adj = roe_adj_raw.clip(-0.20, 0.20) * 100.0  # ±20 pts
+    roe_adj = roe_adj_raw.fillna(0.0).clip(-0.20, 0.20) * 100.0  # ±20 pts
     adjusted = (raw_v - roe_adj).clip(0, 100)
 
     return percentile_rank(adjusted)

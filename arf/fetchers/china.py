@@ -10,6 +10,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 from arf.config import UniverseEntry
 from arf.fetchers.base import StockData
+from arf.fetchers.us import calculate_ev_sales_5yr_percentile
 
 log = logging.getLogger(__name__)
 
@@ -66,16 +67,34 @@ def _fetch_a_share(entry: UniverseEntry, as_of: date) -> StockData:
     code = _bs_code(entry.ticker)
 
     with _bs_lock:
-        lg = bs.login()
-        if lg.error_code != "0":
-            log.warning("baostock login failed for %s: %s", entry.ticker, lg.error_msg)
-            return result
+        # Watchdog: if this baostock session takes >60 s, log a warning and move on.
+        _timed_out: list[bool] = [False]
+
+        def _watchdog() -> None:
+            _timed_out[0] = True
+            log.warning("baostock session for %s timed out — skipping", entry.ticker)
+            try:
+                bs.logout()
+            except Exception:
+                pass
+
+        timer = threading.Timer(60.0, _watchdog)
+        timer.start()
         try:
-            _populate_a_share(result, code, as_of)
-        except Exception as exc:
-            log.warning("baostock fetch failed for %s: %s", entry.ticker, exc)
+            lg = bs.login()
+            if lg.error_code != "0":
+                log.warning("baostock login failed for %s: %s", entry.ticker, lg.error_msg)
+                return result
+            try:
+                _populate_a_share(result, code, as_of)
+            except Exception as exc:
+                if not _timed_out[0]:
+                    log.warning("baostock fetch failed for %s: %s", entry.ticker, exc)
+            finally:
+                if not _timed_out[0]:
+                    bs.logout()
         finally:
-            bs.logout()
+            timer.cancel()
 
     return result
 
@@ -227,6 +246,12 @@ def _fetch_hk_or_adr(entry: UniverseEntry, as_of: date) -> StockData:
         result.ps_ratio = _safe(info.get("priceToSalesTrailing12Months"))
         result.ev_sales = _safe(info.get("enterpriseToRevenue"))
         result.data_source = "yfinance"
+
+        # Calculate EV/Sales 5-year percentile
+        t = yf.Ticker(entry.ticker)
+        ev_pct = calculate_ev_sales_5yr_percentile(t, info)
+        if ev_pct is not None:
+            result.ev_sales_5yr_percentile = ev_pct
     except Exception as exc:
         log.warning("yfinance failed for %s: %s", entry.ticker, exc)
     return result

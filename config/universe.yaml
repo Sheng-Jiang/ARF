@@ -480,6 +480,15 @@
   policy_premium: false
   notes: "Pure-play foundation model; IPO Jan 2026"
 
+- ticker: "0100.HK"
+  name: "MiniMax"
+  leg: China
+  layer: L4
+  pure_play_pct: 95
+  primary_exchange: HKEX
+  policy_premium: false
+  notes: "Pure-play foundation model; IPO Jan 2026"
+
 - ticker: "601138.SH"
   name: "工业富联 FII"
   leg: China

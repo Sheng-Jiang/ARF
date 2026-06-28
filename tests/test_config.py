@@ -23,7 +23,7 @@ def test_us_leg_count(universe):
 
 def test_china_leg_count(universe):
     china = get_leg(universe, "China")
-    assert len(china) == 36
+    assert len(china) == 37
 
 
 def test_pure_play_pct_range(universe):

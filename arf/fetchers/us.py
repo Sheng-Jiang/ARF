@@ -48,7 +48,7 @@ def _eps_forward_growth(info: dict) -> float | None:
     return _safe(info.get("earningsGrowth"))
 
 
-def _ev_sales_5yr_percentile(t: yf.Ticker, info: dict) -> float | None:
+def calculate_ev_sales_5yr_percentile(t: yf.Ticker, info: dict) -> float | None:
     """Compute EV/Sales 5yr percentile from yfinance historical data.
 
     Uses historical P/S (price × shares / annual revenue) as a proxy for EV/Sales,
@@ -146,7 +146,7 @@ def fetch_us(entry: UniverseEntry, as_of: date) -> StockData:
             result.free_cash_flow = result.free_cash_flow * result.shares_outstanding
 
         # EV/Sales 5yr percentile from historical yfinance data
-        ev_pct = _ev_sales_5yr_percentile(t, info)
+        ev_pct = calculate_ev_sales_5yr_percentile(t, info)
         if ev_pct is not None:
             result.ev_sales_5yr_percentile = ev_pct
 

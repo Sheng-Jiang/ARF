@@ -220,6 +220,13 @@ class TestVScore:
         # No NaN in output — missing PEG falls back gracefully
         assert not result.isna().any()
 
+    def test_missing_roe_does_not_propagate_nan(self):
+        df = _make_v_df(roe=[float("nan")])
+        rows = pd.concat([df, _make_v_df(roe=[0.15]), _make_v_df(roe=[0.30])], ignore_index=True)
+        result = v_score(rows, wacc=0.10)
+        # No NaN in output — missing ROE does not invalidate v_score
+        assert not result.isna().any()
+
 
 # ── ARF combination ──────────────────────────────────────────────────────────
 

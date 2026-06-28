@@ -77,7 +77,7 @@ def _fetch_one(entry: UniverseEntry, as_of: date) -> StockData:
 
 def fetch_all(universe: list[UniverseEntry], as_of: date) -> list[StockData]:
     results: list[StockData] = []
-    with ThreadPoolExecutor(max_workers=8) as pool:
+    with ThreadPoolExecutor(max_workers=12) as pool:
         futures = {pool.submit(_fetch_one, entry, as_of): entry for entry in universe}
         for future in as_completed(futures):
             entry = futures[future]
