@@ -1,5 +1,7 @@
 import backtrader as bt
+
 from .base import BaseStrategy
+
 
 class TechnicalPandasData(bt.feeds.PandasData):
     """Custom Pandas Data Feed for Backtrader that exposes the pre-calculated Technical Score.

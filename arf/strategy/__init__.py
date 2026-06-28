@@ -1,7 +1,7 @@
 from .base import BaseStrategy
 from .ma import MaStrategy
 from .macross import MaCrossStrategy
-from .technical_score import TechnicalScoreStrategy, TechnicalPandasData
+from .technical_score import TechnicalPandasData, TechnicalScoreStrategy
 
 # Dictionary mapping display names to strategy classes
 STRATEGIES = {

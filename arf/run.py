@@ -263,11 +263,15 @@ def _run_technical_pipeline(conn, df: pd.DataFrame, universe: list[UniverseEntry
     
     This ensures that the AI-Screener and dashboard charts have pre-populated data out-of-the-box.
     """
-    from arf.fetchers.akshare import fetch_daily_prices
-    from arf.technical import calculate_technical_indicators, calculate_chip_distribution, score_stock_technical
-    from arf.db import upsert_daily_prices, upsert_technical_metrics
     from datetime import timedelta
-    import numpy as np
+
+    from arf.db import upsert_daily_prices, upsert_technical_metrics
+    from arf.fetchers.akshare import fetch_daily_prices
+    from arf.technical import (
+        calculate_chip_distribution,
+        calculate_technical_indicators,
+        score_stock_technical,
+    )
     
     scored_stocks = [e for e in universe if e.leg in ("US", "China")]
     if not scored_stocks:
@@ -409,7 +413,7 @@ def run_pipeline(
         # Pre-calculate and cache technical indicators for A-shares
         try:
             _run_technical_pipeline(conn, df, universe, as_of)
-        except Exception as e:
+        except Exception:
             log.exception("Technical indicators cache failed - continuing main pipeline")
 
         _maybe_generate_gemini_summaries(conn, df, as_of)
@@ -423,7 +427,7 @@ def run_pipeline(
 
         # Render reports
         thermo = query_thermometer_series(conn)
-        write_report(df, thermo, as_of, report_dir)
+        write_report(df, thermo, as_of, report_dir, conn=conn)
         console.print(f"Reports written to {report_dir}/")
 
         # One-click weekly report auto-generation

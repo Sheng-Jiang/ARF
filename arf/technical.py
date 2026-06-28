@@ -5,9 +5,9 @@ Bollinger Bands, ATR) and a custom, cloud-safe mathematical Chip Distribution (C
 Also implements a heuristic 0-100 Technical Score combining trend, momentum, 
 volatility, and market micro-structure (chips).
 """
-from typing import Tuple, Dict, Any
 import numpy as np
 import pandas as pd
+
 
 def calculate_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
     """Calculate standard technical indicators on a daily price history DataFrame.
@@ -69,7 +69,7 @@ def calculate_chip_distribution(
     outstanding_shares: float, 
     lookback: int = 150,
     is_a_share: bool = True
-) -> Tuple[float, float, float, float, float, float]:
+) -> tuple[float, float, float, float, float, float]:
     """Calculate chip distribution metrics using decayed historical typical prices.
     
     Uses a high-fidelity decayed-weight model: older cohorts are decayed exponentially
@@ -148,7 +148,7 @@ def calculate_chip_distribution(
 
 def score_stock_technical(
     indicator_row: pd.Series,
-    chip_metrics: Tuple[float, float, float, float, float, float]
+    chip_metrics: tuple[float, float, float, float, float, float]
 ) -> float:
     """Compute a heuristic Technical Score (0-100) combining multiple factors.
     

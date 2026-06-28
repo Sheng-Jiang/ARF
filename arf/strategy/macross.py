@@ -1,5 +1,7 @@
 import backtrader as bt
+
 from .base import BaseStrategy
+
 
 class MaCrossStrategy(BaseStrategy):
     """Dual Moving Average Crossover Strategy.

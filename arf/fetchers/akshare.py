@@ -1,9 +1,8 @@
 """AkShare fetcher: Tencent-based daily price history for cloud-safety."""
 import logging
-import time
-import pandas as pd
+
 import akshare as ak
-import requests
+import pandas as pd
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 log = logging.getLogger(__name__)
@@ -99,13 +98,11 @@ def fetch_outstanding_shares(ticker: str) -> float:
         bs_code = f"sh.{code}" if exchange.upper() == "SH" else f"sz.{code}"
     else:
         # Fallback for bare symbols
-        if ticker.startswith(("5", "6", "9")):
-            bs_code = f"sh.{ticker}"
-        else:
-            bs_code = f"sz.{ticker}"
+        bs_code = f"sh.{ticker}" if ticker.startswith(("5", "6", "9")) else f"sz.{ticker}"
             
-    import baostock as bs
     import datetime
+
+    import baostock as bs
     
     log.info(f"Fetching outstanding shares for {ticker} using Baostock ({bs_code})")
     
@@ -129,7 +126,7 @@ def fetch_outstanding_shares(ticker: str) -> float:
             for _ in range(4):
                 rs = bs.query_profit_data(code=bs_code, year=year, quarter=quarter)
                 if rs.error_code == "0" and rs.next():
-                    row = dict(zip(rs.fields, rs.get_row_data()))
+                    row = dict(zip(rs.fields, rs.get_row_data(), strict=False))
                     val = row.get("totalShare")
                     if val:
                         try:

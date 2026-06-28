@@ -1,5 +1,5 @@
 import logging
-from typing import Optional
+
 import backtrader as bt
 
 log = logging.getLogger(__name__)
@@ -10,11 +10,11 @@ class BaseStrategy(bt.Strategy):
     _name = "base"
     params = (("printlog", False),)
 
-    def log(self, txt: str, dt: Optional[bt.datetime.date] = None, doprint: bool = False) -> None:
+    def log(self, txt: str, dt: bt.datetime.date | None = None, doprint: bool = False) -> None:
         """Logging function for this strategy."""
         if self.params.printlog or doprint:
             dt = dt or self.datas[0].datetime.date(0)
-            log.info("%s, %s" % (dt.isoformat(), txt))
+            log.info(f"{dt.isoformat()}, {txt}")
 
     def notify_order(self, order: bt.Order) -> None:
         if order.status in [order.Submitted, order.Accepted]:
@@ -25,15 +25,13 @@ class BaseStrategy(bt.Strategy):
         if order.status in [order.Completed]:
             if order.isbuy():
                 self.log(
-                    "BUY EXECUTED, Price: %.2f, Cost: %.2f, Comm %.2f"
-                    % (order.executed.price, order.executed.value, order.executed.comm)
+                    f"BUY EXECUTED, Price: {order.executed.price:.2f}, Cost: {order.executed.value:.2f}, Comm {order.executed.comm:.2f}"
                 )
                 self.buyprice = order.executed.price
                 self.buycomm = order.executed.comm
             else:  # Sell
                 self.log(
-                    "SELL EXECUTED, Price: %.2f, Cost: %.2f, Comm %.2f"
-                    % (order.executed.price, order.executed.value, order.executed.comm)
+                    f"SELL EXECUTED, Price: {order.executed.price:.2f}, Cost: {order.executed.value:.2f}, Comm {order.executed.comm:.2f}"
                 )
 
             self.bar_executed = len(self)
@@ -46,7 +44,7 @@ class BaseStrategy(bt.Strategy):
     def notify_trade(self, trade: bt.Trade) -> None:
         if not trade.isclosed:
             return
-        self.log("OPERATION PROFIT, GROSS %.2f, NET %.2f" % (trade.pnl, trade.pnlcomm))
+        self.log(f"OPERATION PROFIT, GROSS {trade.pnl:.2f}, NET {trade.pnlcomm:.2f}")
 
     def next(self) -> None:
         pass
@@ -54,6 +52,6 @@ class BaseStrategy(bt.Strategy):
     def stop(self) -> None:
         params = [f"{k}_{v}" for k, v in self.params._getkwargs().items() if k != "printlog"]
         self.log(
-            "(%s %s) Ending Value %.2f" % (self._name, " ".join(params), self.broker.getvalue()),
+            "({} {}) Ending Value {:.2f}".format(self._name, " ".join(params), self.broker.getvalue()),
             doprint=True,
         )

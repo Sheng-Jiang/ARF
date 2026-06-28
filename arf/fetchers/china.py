@@ -1,4 +1,5 @@
 """China/HK stock fetcher: Baostock for A-shares, yfinance for HK/ADR."""
+import contextlib
 import logging
 import math
 import threading
@@ -73,10 +74,8 @@ def _fetch_a_share(entry: UniverseEntry, as_of: date) -> StockData:
         def _watchdog() -> None:
             _timed_out[0] = True
             log.warning("baostock session for %s timed out — skipping", entry.ticker)
-            try:
+            with contextlib.suppress(Exception):
                 bs.logout()
-            except Exception:
-                pass
 
         timer = threading.Timer(60.0, _watchdog)
         timer.start()

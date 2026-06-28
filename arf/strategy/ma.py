@@ -1,5 +1,7 @@
 import backtrader as bt
+
 from .base import BaseStrategy
+
 
 class MaStrategy(BaseStrategy):
     """Simple Moving Average (SMA) Trend Following Strategy.

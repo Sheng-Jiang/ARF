@@ -146,9 +146,57 @@ def render_thermometer_html(thermo: pd.DataFrame) -> str:
     return fig.to_html(full_html=True, include_plotlyjs="cdn")
 
 
-def write_report(df: pd.DataFrame, thermo: pd.DataFrame, as_of: date, output_dir: Path) -> None:
+def _render_gemini_section(conn, as_of: date) -> str:
+    import json
+
+    from arf.db import query_gemini_summaries
+    
+    try:
+        summaries_df = query_gemini_summaries(conn, as_of, "overview")
+    except Exception:
+        return ""
+        
+    if summaries_df.empty:
+        return ""
+        
+    lines = ["", "## Qualitative Market Sentiment (Gemini Overview)", ""]
+    for _, r in summaries_df.iterrows():
+        ticker = r.get("ticker", "")
+        name = r.get("name", "")
+        headline = r.get("headline", "")
+        bullets_raw = r.get("bullets_json", "[]")
+        reconcile = r.get("reconcile", "")
+        
+        try:
+            bullets = json.loads(bullets_raw)
+        except Exception:
+            bullets = []
+            
+        lines.append(f"### {name} ({ticker})")
+        if headline:
+            lines.append(f"**Headline:** {headline}")
+            lines.append("")
+        if bullets:
+            lines.append("**Key News & Developments:**")
+            for b in bullets:
+                lines.append(f"- {b}")
+            lines.append("")
+        if reconcile:
+            lines.append(f"**ARF Reconciliation:** {reconcile}")
+            lines.append("")
+            
+    return "\n".join(lines)
+
+
+def write_report(df: pd.DataFrame, thermo: pd.DataFrame, as_of: date, output_dir: Path, conn=None) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     md = render_markdown(df, as_of=as_of)
+    if conn is not None:
+        gemini_sec = _render_gemini_section(conn, as_of)
+        if gemini_sec:
+            md += "\n" + gemini_sec
+            
     (output_dir / f"arf_{as_of}.md").write_text(md, encoding="utf-8")
     html = render_thermometer_html(thermo)
     (output_dir / "thermometer.html").write_text(html, encoding="utf-8")
+
