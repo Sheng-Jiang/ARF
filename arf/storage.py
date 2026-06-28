@@ -17,7 +17,10 @@ log = logging.getLogger(__name__)
 
 
 def is_gcs_mode() -> bool:
-    return os.getenv("OUTPUT_TARGET", "local").lower() == "gcs"
+    return (
+        os.getenv("OUTPUT_TARGET", "local").lower() == "gcs"
+        or os.getenv("DATA_SOURCE", "local").lower() == "gcs"
+    )
 
 
 def _bucket():

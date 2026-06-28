@@ -1,8 +1,5 @@
-"""ARF 仪表盘 — 首页：所选快照日期的核心指标概览。"""
+"""ARF 仪表盘 — 页面导航路由与配置。"""
 import streamlit as st
-
-from webapp.data import load_snapshot
-from webapp.ui import render_ask_gemini, render_sidebar
 
 st.set_page_config(
     page_title="ARF 仪表盘",
@@ -11,97 +8,18 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-st.title("AI相关性因子（ARF）仪表盘")
-st.caption(
-    "衡量AI叙事对股票估值的扭曲程度。D1 = 估值拉伸最大，D10 = 相对于AI敞口最为低估。"
-)
+pages = {
+    "ARF 核心功能": [
+        st.Page("webapp/pages/0_📊_核心概览.py", title="核心指标概览", icon="📊", default=True),
+        st.Page("webapp/pages/1_🇺🇸_美股估值.py", title="美股估值", icon="🇺🇸"),
+        st.Page("webapp/pages/2_🇨🇳_中股估值.py", title="中股估值", icon="🇨🇳"),
+        st.Page("webapp/pages/3_🌡️_泡沫温度计.py", title="泡沫温度计", icon="🌡️"),
+        st.Page("webapp/pages/4_📈_技术指标与回测.py", title="技术指标与回测", icon="📈"),
+        st.Page("webapp/pages/5_🔍_AI_智能选股.py", title="AI 智能选股", icon="🔍"),
+        st.Page("webapp/pages/7_📝_一键研报.py", title="一键研报", icon="📝"),
+        st.Page("webapp/pages/6_⚙️_系统管理.py", title="系统管理", icon="⚙️"),
+    ]
+}
 
-with st.expander("📖 如何解读ARF分数", expanded=False):
-    st.markdown("""
-**ARF（AI Relevance Factor，AI相关性因子）** 将每只股票的AI叙事泡沫程度量化为0–100分，由两个维度合成：
-
-| 维度 | 含义 | 权重逻辑 |
-|------|------|----------|
-| **E分（AI曝光度）** | 公司在AI产业链中的位置、纯AI业务占比、毛利率水平、AI营收增速 | 越高 = AI核心受益标的 |
-| **V分（估值拉伸）** | DCF反推隐含增长溢价、PEG类比、EV/Sales五年百分位，扣除ROE质量加成 | 越高 = 估值偏离基本面越严重 |
-
-**合成公式：ARF = √(E分 × V分)**，在同一板块内做百分位排名，再分为10个十分位（D1–D10）。
-
-**分数解读：**
-- 🔴 **D1（最高分）**：AI叙事泡沫最集中 — 高AI曝光 + 高估值拉伸，风险最高
-- 🟠 **D2–D3**：估值明显偏高，但尚有一定基本面支撑
-- ⚪ **D4–D7**：中性区间，AI参与度与估值基本匹配
-- 🟢 **D8–D10**：相对于AI敞口，估值处于合理或低估区间
-
-**★ 泡沫预警**：同时满足 D1 + ROE < WACC + P/S > 25 三重条件，为极端高估的强烈信号。
-
-> **注意**：ARF是相对排名指标，衡量的是板块内部的相对估值拉伸，而非绝对高估。D1股票不代表必然下跌，但意味着其定价中包含了最高比例的AI叙事溢价。
-""")
-
-as_of = render_sidebar()
-if as_of is None:
-    st.stop()
-
-df = load_snapshot(as_of)
-us = df[df["leg"] == "US"]
-china = df[df["leg"] == "China"]
-scored_df = df[df["leg"].isin(["US", "China"])]
-
-d1_us = int((us["decile"] == 1).sum()) if len(us) else 0
-d1_china = int((china["decile"] == 1).sum()) if len(china) else 0
-froth_us = int((us["froth_flag"] == True).sum()) if len(us) else 0  # noqa: E712
-froth_china = int((china["froth_flag"] == True).sum()) if len(china) else 0  # noqa: E712
-total = len(scored_df)
-scored = int(scored_df["arf"].notna().sum())
-
-c1, c2, c3, c4, c5 = st.columns(5)
-c1.metric("🇺🇸 美股 D1 数量", d1_us, help="美股中估值拉伸最大的股票数量")
-c2.metric("🇺🇸 美股泡沫预警 ★", froth_us, help="D1 + ROE < WACC + P/S > 25")
-c3.metric("🇨🇳 中股 D1 数量", d1_china, help="中股中估值拉伸最大的股票数量")
-c4.metric("🇨🇳 中股泡沫预警 ★", froth_china, help="D1 + ROE < WACC + P/S > 25")
-c5.metric("已评分股票数", f"{scored}/{total}")
-
-st.markdown(f"**快照日期：** {as_of} — 使用左侧边栏切换日期，点击页面导航查看各板块详情。")
-
-st.divider()
-
-col_us, col_cn = st.columns(2)
-
-with col_us:
-    st.subheader("🇺🇸 美股 — ARF前5名")
-    if len(us):
-        top = us.sort_values("arf", ascending=False).head(5)[
-            ["ticker", "name", "decile", "arf", "froth_flag"]
-        ].copy()
-        top["D"] = top["decile"].apply(lambda d: int(d) if d == d else "—")
-        top["ARF"] = top["arf"].apply(lambda v: f"{v:.1f}" if v == v else "—")
-        top["★"] = top["froth_flag"].apply(lambda f: "★" if f else "")
-        st.dataframe(
-            top[["ticker", "name", "D", "ARF", "★"]],
-            hide_index=True,
-            use_container_width=True,
-        )
-
-with col_cn:
-    st.subheader("🇨🇳 中股 — ARF前5名")
-    if len(china):
-        top = china.sort_values("arf", ascending=False).head(5)[
-            ["ticker", "name", "decile", "arf", "froth_flag"]
-        ].copy()
-        top["D"] = top["decile"].apply(lambda d: int(d) if d == d else "—")
-        top["ARF"] = top["arf"].apply(lambda v: f"{v:.1f}" if v == v else "—")
-        top["★"] = top["froth_flag"].apply(lambda f: "★" if f else "")
-        st.dataframe(
-            top[["ticker", "name", "D", "ARF", "★"]],
-            hide_index=True,
-            use_container_width=True,
-        )
-
-st.divider()
-render_ask_gemini(
-    scored_df,
-    as_of,
-    section_key="home",
-    label_intro="基于本快照中美股+中股各前5名（共10只），由 Gemini 2.5 Pro 联网检索最近两周新闻，"
-                "解读叙事面与因子读数之间的关系。",
-)
+pg = st.navigation(pages)
+pg.run()

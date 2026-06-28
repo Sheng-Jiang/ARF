@@ -88,9 +88,10 @@ if generate_btn:
             _render_thermo_chart,
             _render_valuation_chart,
         )
+        from webapp.data import get_db_path
         import os
 
-        db_path = Path(os.getenv("LOCAL_DB_PATH", "data/arf.db"))
+        db_path = get_db_path()
         conn = init_db(db_path)
         snapshot = query_snapshot(conn, as_of)
         thermo = query_thermometer_series(conn)
@@ -139,9 +140,8 @@ if generate_btn:
                 synthesis = generate_weekly_synthesis(report)
                 report.gemini_synthesis = synthesis.get("report_text", "")
                 report.gemini_citations = [
-                    {"title": getattr(c, "title", c.get("title", "")),
-                     "uri": getattr(c, "uri", c.get("uri", ""))}
-                    if hasattr(c, "title") else c
+                    {"title": getattr(c, "title", "") or getattr(c, "uri", ""),
+                     "uri": getattr(c, "uri", "")}
                     for c in synthesis.get("citations", [])
                 ]
             else:
@@ -172,6 +172,12 @@ if generate_btn:
                 trigger_source="webapp",
             )
             conn.close()
+
+            # Sync database and HTML report back to GCS if in GCS mode
+            from arf import storage
+            if storage.is_gcs_mode():
+                storage.upload_db(db_path)
+                storage.upload_artifact(out_path, f"reports/weekly_report_{as_of}.html")
         except Exception:
             pass
 
