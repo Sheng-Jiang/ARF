@@ -243,9 +243,35 @@ if generate_btn:
 st.divider()
 st.subheader("📚 历史研报")
 
+def get_report_html_content(report_path_str: str, as_of_date_str: str) -> str | None:
+    path = Path(report_path_str)
+    if path.exists():
+        try:
+            return path.read_text(encoding="utf-8")
+        except Exception:
+            pass
+    
+    # Check if in GCS mode
+    from arf import storage
+    if storage.is_gcs_mode():
+        try:
+            from google.cloud import storage as gcs_storage
+            bucket_name = os.getenv("GCS_BUCKET")
+            if bucket_name:
+                prefix = os.getenv("GCS_PREFIX", "").strip("/")
+                object_name = f"reports/weekly_report_{as_of_date_str}.html"
+                key = f"{prefix}/{object_name}" if prefix else object_name
+                
+                bucket = gcs_storage.Client().bucket(bucket_name)
+                blob = bucket.blob(key)
+                if blob.exists():
+                    return blob.download_as_text(encoding="utf-8")
+        except Exception:
+            pass
+    return None
+
 try:
     conn = _open_conn()
-    # Use raw query since _open_conn is read-only and may not have the table
     try:
         reports_df = conn.execute(
             "SELECT * FROM weekly_reports ORDER BY as_of_date DESC LIMIT 20"
@@ -254,36 +280,56 @@ try:
         reports_df = None
 
     if reports_df is not None and not reports_df.empty:
-        for _, r in reports_df.iterrows():
-            report_path = Path(r.get("report_path", ""))
-            as_of_date = r.get("as_of_date", "")
-            generated_at = r.get("generated_at", "")
-            stocks = r.get("stocks_covered", "[]")
-            trigger = r.get("trigger_source", "")
+        # Let user select from dropdown
+        dates_list = reports_df["as_of_date"].tolist()
+        
+        def _fmt_report_option(d):
+            row = reports_df[reports_df["as_of_date"] == d].iloc[0]
+            src = row.get("trigger_source", "manual")
+            src_lbl = "自动调度" if src in ("scheduler", "pipeline") else "手动生成"
+            return f"📅 {d} ({src_lbl})"
 
-            try:
-                stocks_list = json.loads(stocks) if stocks else []
-            except Exception:
-                stocks_list = []
-
-            col_info2, col_action = st.columns([4, 1])
-            with col_info2:
-                st.markdown(
-                    f"**{as_of_date}** · 来源: `{trigger}` · "
-                    f"覆盖: {', '.join(stocks_list[:5]) if stocks_list else '—'} · "
-                    f"生成时间: {generated_at}"
+        selected_date = st.selectbox(
+            "🔎 选择要审查/下载的历史周报",
+            options=dates_list,
+            format_func=_fmt_report_option,
+            key="hist_report_select",
+        )
+        
+        row_sel = reports_df[reports_df["as_of_date"] == selected_date].iloc[0]
+        html_content = get_report_html_content(row_sel.get("report_path", ""), str(selected_date))
+        
+        if html_content:
+            st.success(f"已成功加载 {selected_date} 的周度研报！")
+            
+            c_dl, c_src = st.columns([1, 3])
+            with c_dl:
+                st.download_button(
+                    label="⬇️ 下载 HTML 研报",
+                    data=html_content,
+                    file_name=f"ARF_Weekly_Report_{selected_date}.html",
+                    mime="text/html",
+                    key=f"dl_hist_{selected_date}",
+                    use_container_width=True,
                 )
-            with col_action:
-                if report_path.exists():
-                    html_content = report_path.read_text(encoding="utf-8")
-                    st.download_button(
-                        label="⬇️",
-                        data=html_content,
-                        file_name=f"ARF_Weekly_{as_of_date}.html",
-                        mime="text/html",
-                        key=f"dl_{as_of_date}",
-                    )
+            with c_src:
+                st.info(
+                    f"**报告生成时间：** {row_sel.get('generated_at', '—')}  \n"
+                    f"**覆盖股票数：** {len(json.loads(row_sel.get('stocks_covered', '[]')))} 只"
+                )
+            
+            # Show Gemini interpretation
+            gemini_sum = row_sel.get("gemini_summary", "")
+            if gemini_sum and not gemini_sum.startswith("⚠️"):
+                st.markdown("### 🤖 Gemini AI 综合研判 (历史记录)")
+                st.markdown(gemini_sum)
+            
+            # Preview the report inside an expander
+            with st.expander("👁️ 预览完整 HTML 研报内容 (嵌入式页面)", expanded=False):
+                st.components.v1.html(html_content, height=800, scrolling=True)
+        else:
+            st.error("无法加载该周研报的 HTML 文件内容。")
     else:
         st.caption("暂无历史研报记录。点击上方按钮生成第一份。")
-except Exception:
-    st.caption("暂无历史研报记录。")
+except Exception as exc:
+    st.caption(f"加载历史研报发生错误: {exc}")
