@@ -163,9 +163,10 @@ def v_score(df: pd.DataFrame, wacc: float = 0.10) -> pd.Series:
 
     # Fallback for pure story stocks with negative FCF, negative PE, and no 5yr history.
     # We rank them by their raw EV/Sales multiple so they still receive a v_score.
-    ev_sales = df["ev_sales"].astype(float)
-    c_fallback = percentile_rank(ev_sales)
-    raw_v = raw_v.fillna(c_fallback)
+    if "ev_sales" in df.columns:
+        ev_sales = df["ev_sales"].astype(float)
+        c_fallback = percentile_rank(ev_sales)
+        raw_v = raw_v.fillna(c_fallback)
 
     # Quality adjustment: subtract (ROE − wacc) normalized to ±20 points
     roe = df["roe"].astype(float)
