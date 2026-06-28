@@ -52,3 +52,44 @@ def trigger_pipeline(as_of: date | None = None) -> str:
         return op.metadata.name  # type: ignore[no-any-return]
     except Exception:
         return job_name
+
+
+def get_execution_status(execution_name: str) -> dict:
+    """Query the status of a pipeline Cloud Run Job execution.
+
+    Returns a dict with:
+        status: 'running' | 'succeeded' | 'failed' | 'cancelled' | 'unknown'
+        percent: int (0 to 100)
+        message: str
+    """
+    project = os.getenv("GCP_PROJECT")
+    if not project:
+        return {"status": "unknown", "percent": 0, "message": "GCP_PROJECT not configured"}
+
+    from google.cloud import run_v2  # type: ignore[import]
+    client = run_v2.ExecutionsClient()
+    try:
+        execution = client.get_execution(name=execution_name)
+        
+        # Check conditions
+        is_succeeded = False
+        is_failed = False
+        
+        # Check execution conditions
+        for cond in getattr(execution, "conditions", []):
+            if cond.type == "Succeeded":
+                if cond.status == "True":
+                    is_succeeded = True
+                elif cond.status == "False":
+                    is_failed = True
+
+        if is_succeeded:
+            return {"status": "succeeded", "percent": 100, "message": "运行成功 ✓"}
+        elif is_failed:
+            return {"status": "failed", "percent": 100, "message": "运行失败 ❌"}
+        elif getattr(execution, "cancelled", False):
+            return {"status": "cancelled", "percent": 100, "message": "运行被取消 🛑"}
+            
+        return {"status": "running", "percent": 50, "message": "正在执行异步管道任务..."}
+    except Exception as exc:
+        return {"status": "unknown", "percent": 0, "message": f"查询状态失败: {exc}"}

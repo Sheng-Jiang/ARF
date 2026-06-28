@@ -66,8 +66,44 @@ with st.form("trigger_form"):
     if submitted:
         try:
             execution = jobs.trigger_pipeline(as_of=as_of_input)
-            st.success(f"已提交运行请求。执行ID：`{execution}`")
-            st.caption("管道将在Cloud Run Job中异步运行（通常2–5分钟）。完成后刷新数据查看结果。")
+            st.success(f"已成功提交管道运行请求。执行ID：`{execution}`")
+            
+            # Start monitoring with a progress bar
+            progress_bar = st.progress(0, text="正在初始化管道任务...")
+            status_container = st.empty()
+            
+            import time
+            start_time = time.time()
+            max_duration = 300  # 5 minutes timeout
+            
+            while time.time() - start_time < max_duration:
+                status_dict = jobs.get_execution_status(execution)
+                status = status_dict.get("status", "running")
+                percent = status_dict.get("percent", 50)
+                msg = status_dict.get("message", "正在运行...")
+                
+                # Estimate percent based on elapsed time to make the progress bar look alive
+                elapsed = int(time.time() - start_time)
+                if status == "running":
+                    # Slow progress estimation from 10% to 90% over 150 seconds
+                    percent = min(90, int(10 + (elapsed / 150.0) * 80))
+                    msg = f"正在执行管道任务... ({elapsed} 秒) - {msg}"
+                
+                progress_bar.progress(percent, text=msg)
+                
+                if status == "succeeded":
+                    st.success("🎉 管道异步任务运行成功！数据已更新。")
+                    # Refresh cached connection
+                    refresh_data()
+                    st.rerun()
+                    break
+                elif status in ("failed", "cancelled"):
+                    st.error(f"❌ 管道运行未成功。状态: {status}. 原因: {msg}")
+                    break
+                    
+                time.sleep(5)
+            else:
+                st.warning("⚠️ 监控超时。管道可能仍在后台运行，请稍后手动重新加载数据库以刷新结果。")
         except Exception as exc:  # noqa: BLE001
             st.error(f"触发失败：{exc}")
 
