@@ -16,7 +16,12 @@ class BacktraderParams(BaseModel):
     end_date: datetime.date
     start_cash: float
     commission_fee: float
-    stake: int
+    # Percent of available equity deployed per trade (PercentSizer). Defaults to
+    # 95% to leave headroom for commission so buy orders aren't rejected.
+    sizer_percent: float = 95.0
+    # Legacy fixed share count — retained for backward compatibility; no longer
+    # used now that backtests size by percent of equity.
+    stake: int = 100
 
 class StrategyBase(BaseModel):
     """Schema representing a trading strategy and its parameter ranges for optimization."""
