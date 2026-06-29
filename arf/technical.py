@@ -146,6 +146,38 @@ def calculate_chip_distribution(
     
     return profit_ratio, avg_cost, cost_90_min, cost_90_max, cost_70_min, cost_70_max
 
+def score_history(
+    df: pd.DataFrame,
+    outstanding_shares: float,
+    is_a_share: bool = True,
+    chip_lookback: int = 150,
+) -> pd.DataFrame:
+    """Compute the 0-100 technical score for every bar, point-in-time.
+
+    For each bar ``i`` the chip distribution is recomputed from history up to and
+    including bar ``i`` only, so the resulting ``technical_score`` column carries
+    no look-ahead bias and is safe to feed into a backtest
+    (``TechnicalScoreStrategy``).
+
+    ``df`` must already contain the indicator columns produced by
+    :func:`calculate_technical_indicators`. Returns a copy with an added
+    ``technical_score`` column.
+    """
+    df = df.copy().reset_index(drop=True)
+    if df.empty:
+        df["technical_score"] = pd.Series(dtype=float)
+        return df
+
+    scores = np.full(len(df), 50.0)
+    for i in range(len(df)):
+        window = df.iloc[: i + 1]
+        chip_metrics = calculate_chip_distribution(
+            window, outstanding_shares, lookback=chip_lookback, is_a_share=is_a_share
+        )
+        scores[i] = score_stock_technical(df.iloc[i], chip_metrics)
+    df["technical_score"] = scores
+    return df
+
 def score_stock_technical(
     indicator_row: pd.Series,
     chip_metrics: tuple[float, float, float, float, float, float]

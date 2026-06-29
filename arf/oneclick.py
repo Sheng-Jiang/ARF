@@ -122,6 +122,7 @@ def run_batch_backtests(
     from arf.technical import (
         calculate_chip_distribution,
         calculate_technical_indicators,
+        score_history,
         score_stock_technical,
     )
     from webapp.backtest import run_backtrader
@@ -185,6 +186,9 @@ def run_batch_backtests(
             result.ma_bullish = bool(latest.get("ma_bullish_alignment", False))
             result.chip_profit_ratio = profit_ratio
             result.chip_avg_cost = avg_cost
+
+            # 4b. Per-row technical score (point-in-time) for TechnicalScoreStrategy
+            ind_df = score_history(ind_df, shares, is_a_share=is_a)
 
             # 5. Run 3 strategies
             best_sharpe = -999.0

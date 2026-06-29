@@ -82,7 +82,9 @@ def run_backtrader(
     cerebro.adddata(data)
     cerebro.broker.setcash(bt_params.start_cash)
     cerebro.broker.setcommission(commission=bt_params.commission_fee)
-    cerebro.addsizer(bt.sizers.FixedSize, stake=bt_params.stake)
+    # Size by percent of equity so the backtest reflects full capital deployment
+    # (a fixed share count barely moves a six-figure account on a high-priced stock).
+    cerebro.addsizer(bt.sizers.PercentSizer, percents=bt_params.sizer_percent)
     
     # 4. Add Analyzers
     cerebro.addanalyzer(btanalyzers.SharpeRatio, _name="sharpe", riskfreerate=0.0)

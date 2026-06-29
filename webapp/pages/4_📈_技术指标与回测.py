@@ -16,6 +16,7 @@ from arf.fetchers.prices import (
 from arf.technical import (
     calculate_chip_distribution,
     calculate_technical_indicators,
+    score_history,
     score_stock_technical,
 )
 
@@ -126,7 +127,7 @@ bt_start = st.sidebar.date_input("回测起始日期", today_dt - datetime.timed
 bt_end = st.sidebar.date_input("回测结束日期", today_dt)
 start_cash = st.sidebar.number_input(f"初始资金 ({ccy})", min_value=1000, value=100000, step=10000)
 commission_fee = st.sidebar.number_input("佣金费率", min_value=0.0, max_value=0.05, value=0.001, step=0.0001, format="%.4f", help="双边交易佣金，默认 0.1%")
-stake = st.sidebar.number_input("每次交易股数", min_value=1, value=100, step=100, help="每次买入或卖出的固定股数")
+sizer_percent = st.sidebar.number_input("单笔仓位占用资金 (%)", min_value=1.0, max_value=100.0, value=95.0, step=5.0, help="每次买入使用可用资金的百分比 (PercentSizer)，反映完整资金部署；默认 95% 以预留佣金")
 
 # ── Data Loading & Processing Flow ──────────────────────────────────────────
 if not ticker:
@@ -174,6 +175,9 @@ if not outstanding_shares:
 # Calculate indicators and chip distribution
 df_indicators = calculate_technical_indicators(df_raw)
 chip_metrics = calculate_chip_distribution(df_raw, outstanding_shares, is_a_share=(sel_market == "A"))
+# Per-row technical score (point-in-time) so TechnicalScoreStrategy can trade in backtests
+with st.spinner("正在逐日计算技术评分序列..."):
+    df_indicators = score_history(df_indicators, outstanding_shares, is_a_share=(sel_market == "A"))
 profit_ratio, avg_cost, c90_min, c90_max, c70_min, c70_max = chip_metrics
 
 # Latest day's indicators
@@ -348,7 +352,7 @@ if run_button:
         end_date=bt_end,
         start_cash=float(start_cash),
         commission_fee=float(commission_fee),
-        stake=int(stake)
+        sizer_percent=float(sizer_percent),
     )
     strategy_schema = StrategyBase(
         name=strategy_name,

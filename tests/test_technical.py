@@ -5,6 +5,7 @@ import pytest
 from arf.technical import (
     calculate_technical_indicators,
     calculate_chip_distribution,
+    score_history,
     score_stock_technical
 )
 
@@ -193,4 +194,46 @@ def test_calculate_chip_distribution_us_scaling():
     assert 100.0 < avg_cost < 149.0
     assert c90_min <= avg_cost <= c90_max
     assert 99.0 <= c90_min <= 101.0
+
+
+def test_score_history_per_row():
+    """score_history should produce one point-in-time score per bar."""
+    dates = pd.date_range(start="2026-01-01", periods=150, freq="D")
+    # Downtrend for the first half, uptrend for the second half.
+    close_prices = [200.0 - i * 1.0 for i in range(75)] + [125.0 + (i - 75) * 1.0 for i in range(75, 150)]
+    high_prices = [p + 1.0 for p in close_prices]
+    low_prices = [p - 1.0 for p in close_prices]
+    df = pd.DataFrame({
+        "date": dates,
+        "open": close_prices,
+        "high": high_prices,
+        "low": low_prices,
+        "close": close_prices,
+        "volume": [10_000] * 150,
+    })
+
+    ind = calculate_technical_indicators(df)
+    scored = score_history(ind, outstanding_shares=100_000_000, is_a_share=False)
+
+    # One score per row, all within bounds, and the column is added.
+    assert "technical_score" in scored.columns
+    assert len(scored) == len(df)
+    assert scored["technical_score"].between(0.0, 100.0).all()
+    assert not scored["technical_score"].isna().any()
+
+    # Late (uptrend) bars should score higher than early (downtrend) bars.
+    assert scored["technical_score"].iloc[-1] > scored["technical_score"].iloc[80]
+
+    # The last bar matches a direct one-shot computation (no look-ahead drift).
+    chip = calculate_chip_distribution(ind, 100_000_000, lookback=150, is_a_share=False)
+    direct = score_stock_technical(ind.iloc[-1], chip)
+    assert abs(scored["technical_score"].iloc[-1] - direct) < 1e-9
+
+
+def test_score_history_empty():
+    """score_history on an empty frame returns an empty technical_score column."""
+    empty = pd.DataFrame(columns=["date", "open", "high", "low", "close", "volume"])
+    out = score_history(empty, outstanding_shares=100_000_000)
+    assert "technical_score" in out.columns
+    assert len(out) == 0
 
