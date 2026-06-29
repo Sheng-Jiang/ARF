@@ -286,7 +286,7 @@ def _render_thermo_chart(thermo: pd.DataFrame) -> str:
     us = thermo[thermo["leg"] == "US"].sort_values("as_of_date")
     cn = thermo[thermo["leg"] == "China"].sort_values("as_of_date")
 
-    for label, df, color in [("美股", us, "#d62728"), ("中股", cn, "#e6a817")]:
+    for label, df, color in [("美股", us, "#DE6A2C"), ("中股", cn, "#D8A33E")]:
         if df.empty:
             continue
         if "count_absolute_froth" in df.columns:
@@ -306,7 +306,10 @@ def _render_thermo_chart(thermo: pd.DataFrame) -> str:
         xaxis_title="日期", yaxis_title="股票数量",
         hovermode="x unified", height=380,
         template="plotly_dark",
-        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(30,30,40,0.8)",
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(28,24,19,0.7)",
+        font=dict(family="IBM Plex Mono, monospace", color="#ECE4D4", size=12),
+        xaxis=dict(gridcolor="rgba(236,228,212,0.07)"),
+        yaxis=dict(gridcolor="rgba(236,228,212,0.07)"),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
     )
     return fig.to_html(full_html=False, include_plotlyjs=False)
@@ -318,7 +321,7 @@ def _render_valuation_chart(thermo: pd.DataFrame) -> str:
     us = thermo[thermo["leg"] == "US"].sort_values("as_of_date")
     cn = thermo[thermo["leg"] == "China"].sort_values("as_of_date")
 
-    for label, df, color in [("美股", us, "#d62728"), ("中股", cn, "#e6a817")]:
+    for label, df, color in [("美股", us, "#DE6A2C"), ("中股", cn, "#D8A33E")]:
         if df.empty:
             continue
         fig.add_trace(go.Scatter(
@@ -337,7 +340,9 @@ def _render_valuation_chart(thermo: pd.DataFrame) -> str:
         title="估值热度与隐含增长差值走势",
         xaxis_title="日期", hovermode="x unified", height=350,
         template="plotly_dark",
-        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(30,30,40,0.8)",
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(28,24,19,0.7)",
+        font=dict(family="IBM Plex Mono, monospace", color="#ECE4D4", size=12),
+        xaxis=dict(gridcolor="rgba(236,228,212,0.07)"),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
     )
     fig.update_yaxes(title_text="EV/Sales 5年分位数 (%)", range=[0, 100], secondary_y=False)
