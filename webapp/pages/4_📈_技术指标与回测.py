@@ -172,13 +172,16 @@ if df_raw.empty:
     st.stop()
 
 # Newly-listed names (e.g. MiniMax 0100.HK) may only have a few months of bars.
-# Long-window indicators (MA120/MA60) and the backtest degrade with too little
-# history — warn rather than block, so partial analysis still renders.
-_MIN_RELIABLE_BARS = 30
-if len(df_raw) < _MIN_RELIABLE_BARS:
+# The longest-window indicators (MA120, then MA60) need at least that many bars
+# to be fully defined; below MA120 they render partial/all-NaN lines. Warn rather
+# than block — partial analysis still renders — and surface which indicators are
+# unreliable so the threshold tracks the actual longest MA window.
+_LONGEST_MA = 120
+if len(df_raw) < _LONGEST_MA:
     st.warning(
-        f"⚠️ {ticker} 仅获取到 {len(df_raw)} 根 K 线，历史数据不足"
-        f"（常见于新上市标的或数据源限制）。技术指标与回测结果可能不可靠，请谨慎参考。"
+        f"⚠️ {ticker} 仅获取到 {len(df_raw)} 根 K 线，不足以稳定计算长周期指标"
+        f"（MA120 需 ≥120 根、MA60 需 ≥60 根；常见于新上市标的或数据源限制）。"
+        f"长均线、回测等结果可能不完整或不可靠，请谨慎参考。"
     )
 
 # Get outstanding shares
