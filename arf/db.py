@@ -136,6 +136,33 @@ CREATE TABLE IF NOT EXISTS technical_metrics (
 )
 """
 
+_SCHEMA_RESEARCH_REPORTS = """
+CREATE TABLE IF NOT EXISTS research_reports (
+    ticker        TEXT        NOT NULL,
+    as_of_date    DATE        NOT NULL,
+    report_date   DATE,
+    institution   TEXT,
+    rating        TEXT,
+    target_price  DOUBLE,
+    eps_forecast  DOUBLE,
+    title         TEXT,
+    pdf_url       TEXT,
+    source        TEXT,
+    currency      TEXT
+)
+"""
+
+_SCHEMA_RESEARCH_SYNTHESIS = """
+CREATE TABLE IF NOT EXISTS research_synthesis (
+    as_of_date     DATE        PRIMARY KEY,
+    synthesis_text TEXT,
+    citations_json TEXT,
+    cohort_json    TEXT,
+    model          TEXT,
+    generated_at   TIMESTAMP   NOT NULL
+)
+"""
+
 _SCHEMA_WEEKLY_REPORTS = """
 CREATE TABLE IF NOT EXISTS weekly_reports (
     as_of_date      DATE        PRIMARY KEY,
@@ -157,6 +184,8 @@ def init_db(path: Path = Path("data/arf.db")) -> duckdb.DuckDBPyConnection:
     conn.execute(_SCHEMA_GEMINI_SUMMARIES)
     conn.execute(_SCHEMA_DAILY_PRICES)
     conn.execute(_SCHEMA_TECHNICAL_METRICS)
+    conn.execute(_SCHEMA_RESEARCH_REPORTS)
+    conn.execute(_SCHEMA_RESEARCH_SYNTHESIS)
     conn.execute(_SCHEMA_WEEKLY_REPORTS)
     return conn
 
@@ -422,6 +451,86 @@ def query_technical_metrics(
     return conn.execute(
         "SELECT * FROM technical_metrics WHERE as_of_date = ?",
         [as_of_date]
+    ).fetchdf()
+
+
+def upsert_research_reports(
+    conn: duckdb.DuckDBPyConnection,
+    df: pd.DataFrame,
+    as_of_date: date,
+) -> None:
+    """Insert or overwrite all institutional research rows for the given as_of_date.
+
+    Idempotent per snapshot: every row carried for ``as_of_date`` is replaced, so a
+    re-run of the pipeline overwrites rather than duplicates. ``df`` may hold many
+    rows per ticker (one per report + a consensus row).
+    """
+    if df.empty:
+        # Still clear the date so a re-run that now finds no coverage doesn't leave
+        # stale rows behind.
+        conn.execute("DELETE FROM research_reports WHERE as_of_date = ?", [as_of_date])
+        conn.commit()
+        return
+    df = df.copy()
+    df["as_of_date"] = as_of_date
+    for col in ("report_date",):
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col], errors="coerce").dt.date
+
+    schema_cols = [row[0] for row in conn.execute("DESCRIBE research_reports").fetchall()]
+    df_cols = [c for c in schema_cols if c in df.columns]
+    cols_sql = ", ".join(df_cols)
+    conn.execute("DELETE FROM research_reports WHERE as_of_date = ?", [as_of_date])
+    conn.execute(f"INSERT INTO research_reports ({cols_sql}) SELECT {cols_sql} FROM df")
+    conn.commit()
+
+
+def query_research_reports(
+    conn: duckdb.DuckDBPyConnection,
+    as_of_date: date,
+    ticker: str | None = None,
+) -> pd.DataFrame:
+    """Query institutional research for a date, optionally filtered to one ticker."""
+    if ticker is not None:
+        return conn.execute(
+            "SELECT * FROM research_reports WHERE as_of_date = ? AND ticker = ? "
+            "ORDER BY report_date DESC",
+            [as_of_date, ticker],
+        ).fetchdf()
+    return conn.execute(
+        "SELECT * FROM research_reports WHERE as_of_date = ? "
+        "ORDER BY ticker, report_date DESC",
+        [as_of_date],
+    ).fetchdf()
+
+
+def upsert_research_synthesis(
+    conn: duckdb.DuckDBPyConnection,
+    as_of_date: date,
+    synthesis_text: str,
+    citations_json: str,
+    cohort_json: str,
+    model: str,
+    generated_at: datetime | None = None,
+) -> None:
+    """Insert or overwrite the institutional-research narrative for a date."""
+    generated = generated_at or datetime.now(UTC).replace(tzinfo=None)
+    conn.execute("DELETE FROM research_synthesis WHERE as_of_date = ?", [as_of_date])
+    conn.execute(
+        "INSERT INTO research_synthesis (as_of_date, synthesis_text, citations_json, "
+        "cohort_json, model, generated_at) VALUES (?, ?, ?, ?, ?, ?)",
+        [as_of_date, synthesis_text, citations_json, cohort_json, model, generated],
+    )
+    conn.commit()
+
+
+def query_research_synthesis(
+    conn: duckdb.DuckDBPyConnection,
+    as_of_date: date,
+) -> pd.DataFrame:
+    """Return the research-synthesis row for a date (empty frame if none)."""
+    return conn.execute(
+        "SELECT * FROM research_synthesis WHERE as_of_date = ?", [as_of_date]
     ).fetchdf()
 
 

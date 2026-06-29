@@ -5,7 +5,7 @@ from plotly.subplots import make_subplots
 import streamlit as st
 
 from webapp.data import load_snapshot, load_thermometer_series
-from webapp.ui import render_ask_gemini, render_sidebar
+from webapp.ui import render_research_synthesis, render_sidebar
 
 st.set_page_config(page_title="ARF — 泡沫温度计", layout="wide")
 st.title("泡沫温度计")
@@ -188,11 +188,5 @@ st.divider()
 if as_of is not None:
     snapshot_df = load_snapshot(as_of)
     scored = snapshot_df[snapshot_df["leg"].isin(["US", "China"])]
-    render_ask_gemini(
-        scored,
-        as_of,
-        section_key="thermometer",
-        label_intro="以本快照中美股+中股各前5名（共10只）为口径，"
-                    "请 Gemini 联网检索最新新闻，解读温度计读数背后的宏观叙事变化。",
-    )
+    render_research_synthesis(scored, as_of)
 

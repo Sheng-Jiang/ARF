@@ -461,6 +461,153 @@ def db_rows_to_report(rows_df: pd.DataFrame, as_of: date) -> GeminiReport | None
     )
 
 
+# ---------- Institutional research synthesis (thermometer) ----------
+
+RESEARCH_COHORT_KEY = "research"
+
+
+@dataclass
+class ResearchSynthesis:
+    as_of: date
+    cohort: list[str]
+    text: str
+    citations: list[Citation]
+    model: str
+
+
+_RESEARCH_SYSTEM_PROMPT = """You are a buy-side strategist writing a concise \
+Chinese-language synthesis of SELL-SIDE research coverage, to sit beside a \
+quantitative AI-relevance / valuation-froth model (ARF).
+
+You are GIVEN, as ground truth, a table of recent institutional reports (broker \
+ratings, consensus price targets, EPS forecasts) for a cohort of stocks, plus \
+each stock's ARF froth reading. Treat that table as authoritative — do NOT invent \
+ratings or targets that are not in it.
+
+Your job:
+1. Summarise where the sell-side consensus stands for the cohort (ratings skew, \
+target upside/downside).
+2. Reconcile it against the ARF model: call out DIVERGENCES explicitly — e.g. a \
+name ARF flags as froth (D1, ROE<cost-of-equity, high P/S) that the street still \
+rates 买入 with large target upside, or vice versa.
+3. You MAY use Google Search for brief recent context, but every searched fact \
+must cite its source domain in parentheses, e.g. "(reuters.com)". Facts from the \
+provided report table need no citation.
+
+Compliance: objective, rules-based research framing only. No buy/sell advice.
+
+Output: Chinese markdown, ≤350 words, EXACTLY these sections, no preamble:
+### 一、卖方一致预期概览
+### 二、与 ARF 估值读数的背离
+### 三、需要关注的个股"""
+
+
+def _research_digest(
+    consensus_df: pd.DataFrame,
+    snapshot_df: pd.DataFrame,
+    research_df: pd.DataFrame,
+    max_titles: int = 3,
+) -> str:
+    """Format the ground-truth report table + ARF readings into a prompt block."""
+    name_lookup = dict(zip(snapshot_df["ticker"], snapshot_df["name"], strict=False))
+    cons_lookup = {str(r["ticker"]): r for _, r in consensus_df.iterrows()}
+
+    blocks: list[str] = []
+    for _, row in snapshot_df.iterrows():
+        ticker = str(row["ticker"])
+        c = cons_lookup.get(ticker)
+        if c is None:
+            continue
+        parts = [f"{ticker} ({name_lookup.get(ticker, '')}) — {_factor_line(row)}"]
+
+        cons_str = (
+            f"机构={int(c['n_institutions'])} 报告={int(c['n_reports'])} "
+            f"评级=[{c['rating_summary']}]"
+        )
+        if pd.notna(c["consensus_target"]):
+            cons_str += f" 目标价={c['consensus_target']:.2f}{c['currency']}"
+        if pd.notna(c["implied_upside_pct"]):
+            cons_str += f" 隐含空间={c['implied_upside_pct']:+.1f}%"
+        if pd.notna(c["eps_forecast"]):
+            cons_str += f" EPS预测={c['eps_forecast']:.2f}"
+        parts.append("  卖方: " + cons_str)
+
+        rep = research_df[
+            (research_df["ticker"] == ticker)
+            & (research_df["source"] != "yfinance-consensus")
+        ].dropna(subset=["report_date"]).sort_values("report_date", ascending=False)
+        for _, rr in rep.head(max_titles).iterrows():
+            parts.append(
+                f"    · {rr['report_date']} {rr.get('institution') or ''} "
+                f"[{rr.get('rating') or '—'}] {rr.get('title') or ''}"
+            )
+        blocks.append("\n".join(parts))
+    return "\n\n".join(blocks)
+
+
+def synthesize_research(
+    snapshot_df: pd.DataFrame,
+    research_df: pd.DataFrame,
+    as_of: date,
+    cohort: list[str] | None = None,
+) -> ResearchSynthesis:
+    """One grounded Gemini call synthesising sell-side coverage vs ARF froth.
+
+    Raises RuntimeError if GEMINI_API_KEY is unset. The research-report table is
+    passed as ground truth; Google Search only adds recent colour.
+    """
+    if not is_enabled():
+        raise RuntimeError("GEMINI_API_KEY not set")
+
+    from arf.fetchers.research import compute_consensus
+    from google import genai
+    from google.genai import types
+
+    if cohort is None:
+        cohort = cohort_for_overview(snapshot_df)
+    sub = snapshot_df[snapshot_df["ticker"].isin(cohort)].copy()
+    sub = sub.sort_values("arf", ascending=False, na_position="last")
+
+    prices = {
+        str(t): p
+        for t, p in zip(snapshot_df["ticker"], snapshot_df.get("price"), strict=False)
+        if pd.notna(p)
+    }
+    consensus_df = compute_consensus(research_df, prices)
+    digest = _research_digest(consensus_df, sub, research_df)
+    if not digest.strip():
+        return ResearchSynthesis(
+            as_of=as_of, cohort=cohort, text="", citations=[], model=MODEL
+        )
+
+    prompt = (
+        f"Snapshot date: {as_of.isoformat()}\n"
+        f"Cohort: top-5 ARF per leg (US + China).\n\n"
+        f"=== GROUND-TRUTH INSTITUTIONAL RESEARCH + ARF READINGS ===\n"
+        f"{digest}\n\n"
+        f"Write the synthesis now, following the exact 3-section format."
+    )
+
+    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"].strip())
+    config = types.GenerateContentConfig(
+        tools=[types.Tool(google_search=types.GoogleSearch())],
+        temperature=0.2,
+        system_instruction=_RESEARCH_SYSTEM_PROMPT,
+    )
+    response = client.models.generate_content(
+        model=MODEL, contents=prompt, config=config
+    )
+    text = response.text or ""
+    citations, _ = _extract_citations(response)
+    log.info(
+        "Research synthesis: model=%s cohort=%d citations=%d chars=%d",
+        MODEL, len(cohort), len(citations), len(text),
+    )
+    return ResearchSynthesis(
+        as_of=as_of, cohort=cohort, text=text, citations=citations, model=MODEL
+    )
+
+
 # ---------- AI-Analyst & AI-Screener Additions ----------
 
 _ANALYST_SYSTEM_PROMPT = """You are a senior quantitative investment analyst writing a comprehensive Multi-Factor Narrative-Technical Synthesis Report. Your job is to reconcile a stock's quantitative data (ARF score, technical indicators, chip distribution, and backtesting performance) with qualitative recent developments (news, earnings, catalysts) sourced via Google Search.

@@ -137,8 +137,12 @@ def fetch_daily_prices_any(
 
     A-shares use AkShare; HK/US use yfinance. For HK, if yfinance returns too few
     bars (Yahoo throttles newly-listed names like MiniMax 0100.HK to a 1d/5d
-    window), fall back to AkShare's Eastmoney history. `adjust` applies to A-shares
-    and the HK AkShare fallback; yfinance always auto-adjusts.
+    window), fall back to AkShare's Eastmoney history.
+
+    `adjust` applies only to the A-share path. yfinance always auto-adjusts
+    (forward split/dividend adjustment ≈ 前复权/qfq), so the HK AkShare fallback is
+    pinned to "qfq" to keep the two HK sources on the same adjustment basis — the
+    same ticker must not switch basis depending on which source happens to win.
     """
     market = detect_market(ticker)
     if market == "A":
@@ -152,7 +156,8 @@ def fetch_daily_prices_any(
             len(df),
             ticker,
         )
-        ak_df = _fetch_hk_prices(ticker, start_date, end_date, adjust)
+        # "qfq" to match yfinance auto_adjust, not the caller's A-share `adjust`.
+        ak_df = _fetch_hk_prices(ticker, start_date, end_date, "qfq")
         return ak_df if len(ak_df) > len(df) else df
     return _fetch_yf_prices(ticker, start_date, end_date)
 

@@ -170,6 +170,65 @@ def _maybe_generate_gemini_summaries(
     )
 
 
+def _maybe_generate_research_synthesis(
+    conn,
+    df: pd.DataFrame,
+    as_of: date,
+) -> None:
+    """Generate the sell-side-research synthesis for the thermometer and persist it.
+
+    No-op if GEMINI_API_KEY is unset. Consumes the research_reports rows cached by
+    ``_run_research_pipeline`` as ground truth. Failures MUST NOT fail the pipeline.
+    """
+    if not os.getenv("GEMINI_API_KEY"):
+        log.info("GEMINI_API_KEY not set — skipping research synthesis")
+        return
+
+    try:
+        import json
+
+        from arf.db import (
+            query_research_reports,
+            upsert_research_synthesis,
+        )
+        from webapp import gemini
+    except ImportError as exc:
+        log.warning("Research synthesis imports unavailable, skipping: %s", exc)
+        return
+
+    research_df = query_research_reports(conn, as_of)
+    if research_df.empty:
+        log.info("No research rows for %s — skipping research synthesis", as_of)
+        return
+
+    scored = df[df["leg"].isin(["US", "China"])]
+    console.print("Generating institutional-research synthesis…")
+    try:
+        synth = gemini.synthesize_research(scored, research_df, as_of)
+    except Exception:
+        log.exception("Research synthesis failed — continuing pipeline")
+        return
+    if not synth.text.strip():
+        log.info("Research synthesis returned empty text — nothing persisted")
+        return
+
+    upsert_research_synthesis(
+        conn,
+        as_of_date=as_of,
+        synthesis_text=synth.text,
+        citations_json=json.dumps(
+            [{"title": c.title, "uri": c.uri} for c in synth.citations],
+            ensure_ascii=False,
+        ),
+        cohort_json=json.dumps(synth.cohort, ensure_ascii=False),
+        model=synth.model,
+    )
+    console.print(
+        f"Persisted research synthesis ({len(synth.citations)} citations, "
+        f"{len(synth.text)} chars)"
+    )
+
+
 def _outcome_for(sd: StockData) -> str:
     if sd.data_source == "error":
         return "error"
@@ -366,6 +425,46 @@ def _run_technical_pipeline(conn, df: pd.DataFrame, universe: list[UniverseEntry
         console.print(f"Cached technical and chip metrics for {len(tech_rows)} stocks in DuckDB")
 
 
+def _run_research_pipeline(
+    conn, universe: list[UniverseEntry], as_of: date
+) -> None:
+    """Fetch + persist institutional research reports for the scored universe.
+
+    Layer-1 structured consensus data (A-share via Eastmoney, US/HK via yfinance)
+    that the thermometer / Gemini narrative layer reconciles against ARF froth.
+    Per-ticker failures are tolerated; the whole stage never crashes the pipeline.
+    """
+    from arf.db import upsert_research_reports
+    from arf.fetchers.research import fetch_research_reports
+
+    scored_stocks = [e for e in universe if e.leg in ("US", "China")]
+    if not scored_stocks:
+        return
+
+    console.print(f"Fetching institutional research for {len(scored_stocks)} stocks…")
+    frames: list[pd.DataFrame] = []
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures = {
+            pool.submit(fetch_research_reports, e.ticker, as_of): e
+            for e in scored_stocks
+        }
+        for future in as_completed(futures):
+            entry = futures[future]
+            try:
+                df = future.result()
+                if not df.empty:
+                    frames.append(df)
+            except Exception as exc:
+                log.warning("Research fetch failed for %s: %s", entry.ticker, exc)
+
+    research_df = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+    upsert_research_reports(conn, research_df, as_of)
+    console.print(
+        f"Cached {len(research_df)} research rows "
+        f"for {research_df['ticker'].nunique() if not research_df.empty else 0} stocks"
+    )
+
+
 def run_pipeline(
     as_of: date,
     data_dir: Path = Path("data"),
@@ -415,6 +514,18 @@ def run_pipeline(
             _run_technical_pipeline(conn, df, universe, as_of)
         except Exception:
             log.exception("Technical indicators cache failed - continuing main pipeline")
+
+        # Fetch + cache institutional research reports (layer-1 consensus data)
+        try:
+            _run_research_pipeline(conn, universe, as_of)
+        except Exception:
+            log.exception("Research report cache failed - continuing main pipeline")
+
+        # Synthesise sell-side research vs ARF froth for the thermometer (layer-2)
+        try:
+            _maybe_generate_research_synthesis(conn, df, as_of)
+        except Exception:
+            log.exception("Research synthesis failed - continuing main pipeline")
 
         _maybe_generate_gemini_summaries(conn, df, as_of)
 
