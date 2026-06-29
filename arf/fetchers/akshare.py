@@ -86,6 +86,74 @@ def fetch_daily_prices(ticker: str, start_date: str, end_date: str, adjust: str 
         log.error(f"Failed to fetch daily prices for {ticker}: {e}")
         return pd.DataFrame()
 
+def _hk_symbol(ticker: str) -> str:
+    """Convert an ARF HK ticker to an AkShare/Eastmoney HK symbol (5-digit, zero-padded).
+
+    Examples: '0100.HK' -> '00100', '700.HK' -> '00700'.
+    """
+    code = ticker.strip().upper()
+    if code.endswith(".HK"):
+        code = code[:-3]
+    return code.lstrip("0").zfill(5)
+
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    reraise=True,
+)
+def fetch_hk_daily_prices_raw(symbol: str, start_date: str, end_date: str, adjust: str = "qfq") -> pd.DataFrame:
+    """Fetch HK daily history from Eastmoney via AkShare ``stock_hk_hist`` with retry.
+
+    ``start_date``/``end_date`` are ``YYYYMMDD`` strings (Eastmoney format).
+    """
+    log.info(f"Fetching HK daily prices for {symbol} from {start_date} to {end_date} (adjust={adjust})")
+    return ak.stock_hk_hist(
+        symbol=symbol, period="daily", start_date=start_date, end_date=end_date, adjust=adjust
+    )
+
+
+def fetch_hk_daily_prices(ticker: str, start_date: str, end_date: str, adjust: str = "qfq") -> pd.DataFrame:
+    """Fetch and normalise HK daily prices via AkShare (Eastmoney).
+
+    Used as a fallback when yfinance refuses long-range history for newly-listed HK
+    names (e.g. MiniMax 0100.HK, which Yahoo throttles to a 1d/5d window). ``volume``
+    (成交量) is in raw shares, matching the yfinance convention.
+
+    Args:
+        ticker: ARF ticker, e.g. ``0100.HK``.
+        start_date/end_date: ``YYYY-MM-DD`` strings.
+
+    Returns ['ticker', 'date', 'open', 'high', 'low', 'close', 'volume'].
+    """
+    symbol = _hk_symbol(ticker)
+    start_ak = start_date.replace("-", "")
+    end_ak = end_date.replace("-", "")
+    try:
+        df = fetch_hk_daily_prices_raw(symbol, start_ak, end_ak, adjust)
+        if df is None or df.empty:
+            log.warning(f"No AkShare HK price data returned for {ticker}")
+            return pd.DataFrame()
+
+        df = df.rename(columns={
+            "日期": "date",
+            "开盘": "open",
+            "收盘": "close",
+            "最高": "high",
+            "最低": "low",
+            "成交量": "volume",
+        })
+        df["ticker"] = ticker
+        df = df[["ticker", "date", "open", "high", "low", "close", "volume"]].copy()
+        df["date"] = pd.to_datetime(df["date"]).dt.date
+        for col in ["open", "high", "low", "close", "volume"]:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+        return df.dropna(subset=["close"]).reset_index(drop=True)
+    except Exception as e:
+        log.error(f"Failed to fetch AkShare HK prices for {ticker}: {e}")
+        return pd.DataFrame()
+
+
 def fetch_outstanding_shares(ticker: str) -> float:
     """Fetch outstanding shares for an A-share ticker using Baostock.
     

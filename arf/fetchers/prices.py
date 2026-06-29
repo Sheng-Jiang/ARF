@@ -16,6 +16,9 @@ from arf.fetchers.akshare import (
     fetch_daily_prices as _fetch_a_prices,
 )
 from arf.fetchers.akshare import (
+    fetch_hk_daily_prices as _fetch_hk_prices,
+)
+from arf.fetchers.akshare import (
     fetch_outstanding_shares as _fetch_a_shares,
 )
 
@@ -25,6 +28,10 @@ log = logging.getLogger(__name__)
 CURRENCY_SYMBOLS = {"A": "¥", "HK": "HK$", "US": "$"}
 
 _SHARES_FALLBACK = 100_000_000.0  # 100M shares, matches akshare.fetch_outstanding_shares
+
+# Below this many bars, treat a yfinance HK result as throttled (Yahoo serves newly
+# listed HK names only a 1d/5d window) and fall back to AkShare for full history.
+_HK_MIN_HISTORY_ROWS = 30
 
 
 def detect_market(ticker: str) -> str:
@@ -126,9 +133,27 @@ def _fetch_yf_shares(ticker: str) -> float:
 def fetch_daily_prices_any(
     ticker: str, start_date: str, end_date: str, adjust: str = "qfq"
 ) -> pd.DataFrame:
-    """Fetch daily prices for any market. `adjust` only applies to A-shares."""
-    if detect_market(ticker) == "A":
+    """Fetch daily prices for any market.
+
+    A-shares use AkShare; HK/US use yfinance. For HK, if yfinance returns too few
+    bars (Yahoo throttles newly-listed names like MiniMax 0100.HK to a 1d/5d
+    window), fall back to AkShare's Eastmoney history. `adjust` applies to A-shares
+    and the HK AkShare fallback; yfinance always auto-adjusts.
+    """
+    market = detect_market(ticker)
+    if market == "A":
         return _fetch_a_prices(ticker, start_date, end_date, adjust)
+    if market == "HK":
+        df = _fetch_yf_prices(ticker, start_date, end_date)
+        if len(df) >= _HK_MIN_HISTORY_ROWS:
+            return df
+        log.warning(
+            "yfinance returned only %d row(s) for %s; falling back to AkShare HK history",
+            len(df),
+            ticker,
+        )
+        ak_df = _fetch_hk_prices(ticker, start_date, end_date, adjust)
+        return ak_df if len(ak_df) > len(df) else df
     return _fetch_yf_prices(ticker, start_date, end_date)
 
 
