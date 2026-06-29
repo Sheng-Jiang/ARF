@@ -1,21 +1,30 @@
 """Streamlit page: A-share Technical Indicator Analysis and Backtesting Dashboard."""
-import streamlit as st
-from streamlit_echarts import st_pyecharts
-import pandas as pd
 import datetime
 from pathlib import Path
-import os
-import yaml
+
 import numpy as np
+import streamlit as st
+import yaml
+from streamlit_echarts import st_pyecharts
+
+from arf.fetchers.prices import (
+    CURRENCY_SYMBOLS,
+    detect_market,
+    fetch_daily_prices_any,
+    fetch_outstanding_shares_any,
+)
+from arf.technical import (
+    calculate_chip_distribution,
+    calculate_technical_indicators,
+    score_stock_technical,
+)
 
 # Local imports
 from webapp import gemini
-from webapp.data import _open_conn
-from webapp.charts import draw_pro_kline, draw_result_bar
 from webapp.backtest import run_backtrader
+from webapp.charts import draw_pro_kline, draw_result_bar
+from webapp.data import _open_conn
 from webapp.schemas import BacktraderParams, StrategyBase
-from arf.fetchers.akshare import fetch_daily_prices, fetch_outstanding_shares
-from arf.technical import calculate_technical_indicators, calculate_chip_distribution, score_stock_technical
 
 st.set_page_config(
     page_title="技术分析与策略回测",
@@ -24,8 +33,8 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-st.title("📈 A股技术面多因子评分 & 策略回测仪表盘")
-st.caption("融合技术指标 (MAs/MACD/RSI/ATR)、筹码分布 (CYQ) 及 Backtrader 历史回测的一站式量化研究平台")
+st.title("📈 技术面多因子评分 & 策略回测仪表盘")
+st.caption("融合技术指标 (MAs/MACD/RSI/ATR)、筹码分布 (CYQ) 及 Backtrader 历史回测的一站式量化研究平台 — 支持 A股 / 港股 / 美股")
 
 # ── Regulatory and Compliance Safety Disclaimer ──────────────────────────────────
 st.warning(
@@ -33,55 +42,72 @@ st.warning(
     "仅作为量化分析与学术研究的**参考工具**，**决不构成任何实际的证券买卖建议或投资决策推荐**。本平台不具备证券投资咨询业务资格。所有信号均为回测与历史规律参考，请投资者务必保持独立决策，自主承担风险。"
 )
 
-# ── Load Universe A-Shares Helper ─────────────────────────────────────────────
+# ── Load Universe Helper ──────────────────────────────────────────────────────
 @st.cache_data
-def get_universe_a_shares():
-    """Load and filter A-shares from config/universe.yaml."""
+def get_universe_stocks():
+    """Load all scored stocks from config/universe.yaml, tagged by market."""
     universe_path = Path("config/universe.yaml")
     if not universe_path.exists():
         return []
     try:
-        with open(universe_path, "r", encoding="utf-8") as f:
+        with open(universe_path, encoding="utf-8") as f:
             data = yaml.safe_load(f)
-        a_shares = []
+        stocks = []
         for item in data:
             ticker = item.get("ticker", "")
-            leg = item.get("leg", "")
-            if leg == "China" and (ticker.endswith(".SZ") or ticker.endswith(".SH")):
-                a_shares.append({
-                    "ticker": ticker,
-                    "name": item.get("name", ticker),
-                    "layer": item.get("layer", "")
-                })
-        return a_shares
+            if not ticker:
+                continue
+            stocks.append({
+                "ticker": ticker,
+                "name": item.get("name", ticker),
+                "layer": item.get("layer", ""),
+                "leg": item.get("leg", ""),
+                "market": detect_market(ticker),
+            })
+        return stocks
     except Exception as e:
         st.sidebar.error(f"加载 universe.yaml 失败: {e}")
         return []
 
-a_shares_list = get_universe_a_shares()
-dropdown_options = {f"{item['ticker']} ({item['name']})": item['ticker'] for item in a_shares_list}
+all_stocks = get_universe_stocks()
 
 # ── Sidebar Configurations ──────────────────────────────────────────────────
 st.sidebar.header("⚙️ 仪表盘配置")
 
-# 1. Ticker Selection
+# 1. Market + Ticker Selection
 st.sidebar.subheader("🎯 股票选择")
-use_manual_ticker = st.sidebar.checkbox("手动输入股票代码", value=False, help="勾选此项以输入任意 A 股代码（无需在 seed universe 中）")
+MARKET_LABELS = {"A股 (A-share)": "A", "港股 (HK)": "HK", "美股 (US)": "US"}
+selected_market_label = st.sidebar.radio("选择市场", list(MARKET_LABELS.keys()), horizontal=True)
+sel_market = MARKET_LABELS[selected_market_label]
+ccy = CURRENCY_SYMBOLS[sel_market]
+
+market_stocks = [s for s in all_stocks if s["market"] == sel_market]
+dropdown_options = {f"{s['ticker']} ({s['name']})": s["ticker"] for s in market_stocks}
+
+use_manual_ticker = st.sidebar.checkbox("手动输入股票代码", value=False, help="勾选此项以输入任意代码（无需在 seed universe 中）")
+selected_option = None
 
 if use_manual_ticker:
-    raw_ticker = st.sidebar.text_input("输入 A 股代码", value="300296", help="请输入6位数字代码，例如 300296（利亚德）或 600070（浙江富润）")
-    # Clean ticker and add suffix
-    ticker = raw_ticker.strip()
-    if ticker:
-        if not (ticker.endswith(".SZ") or ticker.endswith(".SH")):
-            # Simple heuristic suffix mapping
-            if ticker.startswith(("60", "68", "90")):
-                ticker = f"{ticker}.SH"
-            else:
-                ticker = f"{ticker}.SZ"
+    if sel_market == "A":
+        raw_ticker = st.sidebar.text_input("输入 A 股代码", value="300296", help="6位数字代码，例如 300296（利亚德）或 600070（浙江富润）")
+        ticker = raw_ticker.strip()
+        if ticker and not ticker.endswith((".SZ", ".SH")):
+            ticker = f"{ticker}.SH" if ticker.startswith(("60", "68", "90")) else f"{ticker}.SZ"
+    elif sel_market == "HK":
+        raw_ticker = st.sidebar.text_input("输入港股代码", value="0700", help="数字代码，例如 0700（腾讯）、3690（美团）；自动补足为 4 位")
+        ticker = raw_ticker.strip()
+        if ticker:
+            ticker = ticker if ticker.upper().endswith(".HK") else f"{ticker.lstrip('0').zfill(4)}.HK"
+    else:  # US
+        raw_ticker = st.sidebar.text_input("输入美股代码", value="NVDA", help="美股代码，例如 NVDA、AAPL、BABA")
+        ticker = raw_ticker.strip().upper()
 else:
-    selected_option = st.sidebar.selectbox("从 Universe 选择 stock", list(dropdown_options.keys()) if dropdown_options else ["无可用股票"])
-    ticker = dropdown_options.get(selected_option)
+    if dropdown_options:
+        selected_option = st.sidebar.selectbox("从 Universe 选择 stock", list(dropdown_options.keys()))
+        ticker = dropdown_options.get(selected_option)
+    else:
+        st.sidebar.info(f"Universe 中暂无{selected_market_label}标的，请勾选“手动输入股票代码”。")
+        ticker = None
 
 # 2. Market Data Configs
 st.sidebar.subheader("📊 行情配置")
@@ -98,7 +124,7 @@ end_date = st.sidebar.date_input("行情结束日期", today_dt)
 st.sidebar.subheader("🏁 回测配置")
 bt_start = st.sidebar.date_input("回测起始日期", today_dt - datetime.timedelta(days=365))
 bt_end = st.sidebar.date_input("回测结束日期", today_dt)
-start_cash = st.sidebar.number_input("初始资金 (CNY)", min_value=1000, value=100000, step=10000)
+start_cash = st.sidebar.number_input(f"初始资金 ({ccy})", min_value=1000, value=100000, step=10000)
 commission_fee = st.sidebar.number_input("佣金费率", min_value=0.0, max_value=0.05, value=0.001, step=0.0001, format="%.4f", help="双边交易佣金，默认 0.1%")
 stake = st.sidebar.number_input("每次交易股数", min_value=1, value=100, step=100, help="每次买入或卖出的固定股数")
 
@@ -111,17 +137,17 @@ with st.spinner("正在获取股票历史行情..."):
     # Convert dates to string format
     start_str = start_date.strftime("%Y-%m-%d")
     end_str = end_date.strftime("%Y-%m-%d")
-    df_raw = fetch_daily_prices(ticker, start_str, end_str, adjust)
+    df_raw = fetch_daily_prices_any(ticker, start_str, end_str, adjust)
 
 if df_raw.empty:
-    st.error(f"❌ 获取股票 {ticker} 的历史数据失败，请检查网络或确认代码是否正确（Tencent 接口不支持某些过往退市股票）。")
+    st.error(f"❌ 获取股票 {ticker} 的历史数据失败，请检查网络或确认代码是否正确（部分退市/停牌标的或数据源不支持）。")
     st.stop()
 
 # Get outstanding shares
 outstanding_shares = None
 
 # Try to get from DuckDB first if it's a universe stock
-is_universe_stock = any(item['ticker'] == ticker for item in a_shares_list)
+is_universe_stock = any(item['ticker'] == ticker for item in all_stocks)
 if is_universe_stock:
     try:
         conn = _open_conn()
@@ -137,17 +163,17 @@ if is_universe_stock:
             # If outstanding shares is too small (e.g. less than 1 million), adjust it
             if outstanding_shares < 1_000_000:
                 outstanding_shares *= 1_000_000
-    except Exception as e:
+    except Exception:
         pass
 
-# Fallback: Fetch dynamically from Baostock
+# Fallback: Fetch dynamically (Baostock for A-shares, yfinance for HK/US)
 if not outstanding_shares:
-    with st.spinner("正在拉取最新股本数据 (Baostock)..."):
-        outstanding_shares = fetch_outstanding_shares(ticker)
+    with st.spinner("正在拉取最新股本数据..."):
+        outstanding_shares = fetch_outstanding_shares_any(ticker)
 
 # Calculate indicators and chip distribution
 df_indicators = calculate_technical_indicators(df_raw)
-chip_metrics = calculate_chip_distribution(df_raw, outstanding_shares)
+chip_metrics = calculate_chip_distribution(df_raw, outstanding_shares, is_a_share=(sel_market == "A"))
 profit_ratio, avg_cost, c90_min, c90_max, c70_min, c70_max = chip_metrics
 
 # Latest day's indicators
@@ -211,9 +237,9 @@ with c2:
     target_price = close_price + 3.0 * atr
     
     st.markdown(f"<h2 style='color:{sug_color}; margin:0;'>{suggestion}</h2>", unsafe_allow_html=True)
-    st.write(f"**最新价格：** ¥{close_price:.2f} (基于指标客观运算)")
-    st.markdown(f"- **🎯 测算止盈价 (参考)**：<span style='color:#ff4d4f; font-weight:bold;'>¥{target_price:.2f}</span> (基于 3×ATR 波动率)", unsafe_allow_html=True)
-    st.markdown(f"- **🛡️ 测算止损价 (参考)**：<span style='color:#52c41a; font-weight:bold;'>¥{stop_loss:.2f}</span> (基于 2×ATR 波动率)", unsafe_allow_html=True)
+    st.write(f"**最新价格：** {ccy}{close_price:.2f} (基于指标客观运算)")
+    st.markdown(f"- **🎯 测算止盈价 (参考)**：<span style='color:#ff4d4f; font-weight:bold;'>{ccy}{target_price:.2f}</span> (基于 3×ATR 波动率)", unsafe_allow_html=True)
+    st.markdown(f"- **🛡️ 测算止损价 (参考)**：<span style='color:#52c41a; font-weight:bold;'>{ccy}{stop_loss:.2f}</span> (基于 2×ATR 波动率)", unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
 # Card 3: Chip Distribution (CYQ)
@@ -233,9 +259,9 @@ with c3:
         chip_color = "#52c41a"
         
     st.markdown(f"<h2 style='color:{chip_color}; margin:0;'>获利盘: {profit_pct:.1f}%</h2>", unsafe_allow_html=True)
-    st.write(f"**平均持仓成本**：¥{avg_cost:.2f} ({chip_desc})")
-    st.markdown(f"- **70% 筹码支撑区间**：¥{c70_min:.2f} ~ ¥{c70_max:.2f}")
-    st.markdown(f"- **90% 筹码套牢区间**：¥{c90_min:.2f} ~ ¥{c90_max:.2f}")
+    st.write(f"**平均持仓成本**：{ccy}{avg_cost:.2f} ({chip_desc})")
+    st.markdown(f"- **70% 筹码支撑区间**：{ccy}{c70_min:.2f} ~ {ccy}{c70_max:.2f}")
+    st.markdown(f"- **90% 筹码套牢区间**：{ccy}{c90_min:.2f} ~ {ccy}{c90_max:.2f}")
     st.markdown("</div>", unsafe_allow_html=True)
 
 # ── Section 2: Interactive K-Line ──────────────────────────────────────────
@@ -397,8 +423,8 @@ else:
     try:
         conn = _open_conn()
         row_df = conn.execute(
-            "SELECT * FROM snapshots WHERE ticker = ? AND as_of_date = ?",
-            [ticker, as_of]
+            "SELECT * FROM snapshots WHERE ticker = ? ORDER BY as_of_date DESC LIMIT 1",
+            [ticker]
         ).fetchdf()
         if not row_df.empty:
             arf_row = row_df.iloc[0].to_dict()
