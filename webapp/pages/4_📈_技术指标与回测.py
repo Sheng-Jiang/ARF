@@ -72,6 +72,33 @@ def get_universe_stocks():
 
 all_stocks = get_universe_stocks()
 
+
+# ── Cached data + computation helpers (keyed on inputs; skip recompute on rerun) ─
+@st.cache_data(show_spinner=False, ttl=3600)
+def load_prices(ticker: str, start_str: str, end_str: str, adjust: str):
+    """Cached daily-price fetch (1h TTL) — avoids re-hitting the data source on rerun."""
+    return fetch_daily_prices_any(ticker, start_str, end_str, adjust)
+
+
+@st.cache_data(show_spinner=False, ttl=3600)
+def load_outstanding_shares(ticker: str) -> float:
+    """Cached outstanding-shares fetch (1h TTL) — Baostock/yfinance can be slow."""
+    return fetch_outstanding_shares_any(ticker)
+
+
+@st.cache_data(show_spinner=False)
+def compute_analysis(df_raw, outstanding_shares: float, is_a_share: bool):
+    """Cached indicators + chip distribution + per-row technical score.
+
+    The per-row score is O(bars × lookback); caching keyed on the price frame and
+    inputs means it only recomputes when the underlying data actually changes.
+    """
+    df_ind = calculate_technical_indicators(df_raw)
+    chip = calculate_chip_distribution(df_raw, outstanding_shares, is_a_share=is_a_share)
+    df_ind = score_history(df_ind, outstanding_shares, is_a_share=is_a_share)
+    return df_ind, chip
+
+
 # ── Sidebar Configurations ──────────────────────────────────────────────────
 st.sidebar.header("⚙️ 仪表盘配置")
 
@@ -138,7 +165,7 @@ with st.spinner("正在获取股票历史行情..."):
     # Convert dates to string format
     start_str = start_date.strftime("%Y-%m-%d")
     end_str = end_date.strftime("%Y-%m-%d")
-    df_raw = fetch_daily_prices_any(ticker, start_str, end_str, adjust)
+    df_raw = load_prices(ticker, start_str, end_str, adjust)
 
 if df_raw.empty:
     st.error(f"❌ 获取股票 {ticker} 的历史数据失败，请检查网络或确认代码是否正确（部分退市/停牌标的或数据源不支持）。")
@@ -170,14 +197,11 @@ if is_universe_stock:
 # Fallback: Fetch dynamically (Baostock for A-shares, yfinance for HK/US)
 if not outstanding_shares:
     with st.spinner("正在拉取最新股本数据..."):
-        outstanding_shares = fetch_outstanding_shares_any(ticker)
+        outstanding_shares = load_outstanding_shares(ticker)
 
-# Calculate indicators and chip distribution
-df_indicators = calculate_technical_indicators(df_raw)
-chip_metrics = calculate_chip_distribution(df_raw, outstanding_shares, is_a_share=(sel_market == "A"))
-# Per-row technical score (point-in-time) so TechnicalScoreStrategy can trade in backtests
-with st.spinner("正在逐日计算技术评分序列..."):
-    df_indicators = score_history(df_indicators, outstanding_shares, is_a_share=(sel_market == "A"))
+# Indicators + chip distribution + per-row technical score (cached; see compute_analysis)
+with st.spinner("正在计算技术指标与逐日评分序列..."):
+    df_indicators, chip_metrics = compute_analysis(df_raw, outstanding_shares, sel_market == "A")
 profit_ratio, avg_cost, c90_min, c90_max, c70_min, c70_max = chip_metrics
 
 # Latest day's indicators
