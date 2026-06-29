@@ -6,7 +6,13 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from webapp import gemini
-from webapp.data import list_dates, load_gemini_summaries, refresh_data
+from webapp.data import (
+    list_dates,
+    load_gemini_summaries,
+    load_research_reports,
+    load_research_synthesis,
+    refresh_data,
+)
 
 
 def render_sidebar() -> date | None:
@@ -288,3 +294,123 @@ def render_ask_gemini(
         f"模型：{cached_report.model} · 快照日期：{cached_report.as_of} · "
         f"共 {total_sources} 条来源"
     )
+
+
+_CONSENSUS_DISPLAY_COLS = {
+    "ticker": "代码",
+    "name": "名称",
+    "n_institutions": "机构数",
+    "n_reports": "报告数",
+    "rating_summary": "评级分布",
+    "consensus_target": "一致目标价",
+    "implied_upside_pct": "隐含空间%",
+    "eps_forecast": "EPS预测",
+    "latest_report": "最新研报",
+}
+
+
+def render_research_synthesis(snapshot_df: pd.DataFrame, as_of: date) -> None:
+    """Render the institutional-research consensus table + Gemini synthesis.
+
+    Layer 1 (the deterministic consensus table) always renders when reports exist,
+    even without a Gemini key. Layer 2 (the narrative) shows the batch-precomputed
+    synthesis, with an on-demand regenerate button when a key is configured.
+    """
+    from arf.fetchers.research import compute_consensus
+
+    st.markdown("### 🏦 机构研报综述 — 卖方一致预期 × ARF 估值")
+    st.caption(
+        "以本快照美股+中股各前5名（共10只）为口径，汇总各机构最新研报评级与目标价，"
+        "并与 ARF 估值泡沫读数对照，识别卖方乐观与模型分歧之处。"
+    )
+
+    try:
+        research_df = load_research_reports(as_of)
+    except Exception as exc:  # noqa: BLE001
+        st.info(f"研报数据暂不可用：{exc}")
+        return
+    if research_df.empty:
+        st.info("本快照尚未抓取机构研报，将在下次数据管道运行时生成。")
+        return
+
+    cohort = gemini.cohort_for_overview(snapshot_df)
+    prices = {
+        str(t): p
+        for t, p in zip(snapshot_df["ticker"], snapshot_df.get("price"), strict=False)
+        if pd.notna(p)
+    }
+    consensus = compute_consensus(research_df, prices)
+    if cohort:
+        consensus = consensus[consensus["ticker"].isin(cohort)]
+    if consensus.empty:
+        st.info("本快照评分股票暂无机构研报覆盖。")
+        return
+
+    name_lookup = dict(zip(snapshot_df["ticker"], snapshot_df["name"], strict=False))
+    consensus = consensus.copy()
+    consensus["name"] = consensus["ticker"].map(name_lookup)
+    show = consensus[[c for c in _CONSENSUS_DISPLAY_COLS if c in consensus.columns]]
+    st.dataframe(
+        show.rename(columns=_CONSENSUS_DISPLAY_COLS),
+        hide_index=True,
+        use_container_width=True,
+        column_config={
+            "一致目标价": st.column_config.NumberColumn(format="%.2f"),
+            "隐含空间%": st.column_config.NumberColumn(format="%+.1f"),
+            "EPS预测": st.column_config.NumberColumn(format="%.2f"),
+        },
+    )
+
+    # Layer 2 — narrative synthesis.
+    try:
+        synth_df = load_research_synthesis(as_of)
+    except Exception:  # noqa: BLE001
+        synth_df = None
+    synth_text = ""
+    synth_model = ""
+    synth_citations: list = []
+    if synth_df is not None and not synth_df.empty:
+        import json as _json
+
+        r = synth_df.iloc[0]
+        synth_text = str(r.get("synthesis_text") or "")
+        synth_model = str(r.get("model") or "")
+        try:
+            synth_citations = _json.loads(r.get("citations_json") or "[]")
+        except (TypeError, ValueError):
+            synth_citations = []
+
+    # On-demand (re)generation when a key is configured.
+    session_slot = "research_synth_text"
+    if gemini.is_enabled():
+        btn = "🔄 重新生成研报综述" if synth_text else "✨ 生成研报综述（Gemini）"
+        if st.button(btn, key="research_synth_btn"):
+            with st.spinner("Gemini 正在综合各机构研报……（约20–40秒）"):
+                try:
+                    synth = gemini.synthesize_research(snapshot_df, research_df, as_of, cohort)
+                    st.session_state[session_slot] = synth.text
+                    st.session_state["research_synth_model"] = synth.model
+                    st.session_state["research_synth_citations"] = [
+                        {"title": c.title, "uri": c.uri} for c in synth.citations
+                    ]
+                except Exception as exc:  # noqa: BLE001
+                    st.error(f"调用 Gemini 失败：{exc}")
+        if st.session_state.get(session_slot):
+            synth_text = st.session_state[session_slot]
+            synth_model = st.session_state.get("research_synth_model", synth_model)
+            synth_citations = st.session_state.get("research_synth_citations", synth_citations)
+    elif not synth_text:
+        st.info(
+            "未配置 Gemini API 密钥时仅显示上方一致预期表格。挂载 `GEMINI_API_KEY` "
+            "后，数据管道会自动生成卖方叙事综述。"
+        )
+
+    if synth_text:
+        st.markdown(synth_text)
+        if synth_citations:
+            st.markdown("**来源：**")
+            for c in synth_citations:
+                title = c.get("title") or c.get("uri")
+                st.markdown(f"- [{title}]({c.get('uri')})")
+        if synth_model:
+            st.caption(f"模型：{synth_model} · 快照日期：{as_of}")

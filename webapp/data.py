@@ -110,3 +110,17 @@ def load_gemini_summaries(as_of: date, cohort_key: str) -> pd.DataFrame:
         "ORDER BY ticker",
         [as_of, cohort_key],
     ).fetchdf()
+
+
+def load_research_reports(as_of: date) -> pd.DataFrame:
+    return _open_conn().execute(
+        "SELECT * FROM research_reports WHERE as_of_date = ? "
+        "ORDER BY ticker, report_date DESC",
+        [as_of],
+    ).fetchdf()
+
+
+def load_research_synthesis(as_of: date) -> pd.DataFrame:
+    return _open_conn().execute(
+        "SELECT * FROM research_synthesis WHERE as_of_date = ?", [as_of]
+    ).fetchdf()
