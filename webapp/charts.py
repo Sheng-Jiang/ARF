@@ -3,6 +3,7 @@ import pandas as pd
 from pyecharts import options as opts
 from pyecharts.charts import Bar, Grid, Kline, Line
 
+
 def split_data(df: pd.DataFrame) -> tuple[list[str], list[list[float]], pd.Series, list[list[float]]]:
     """Helper to split pandas DataFrame into pyecharts-compatible formats."""
     # Standardise column names from English or Chinese
@@ -31,9 +32,80 @@ def calculate_ma(day_count: int, df_close: pd.Series) -> list[float]:
     df_ma = df_close.rolling(day_count).mean().round(2).fillna("-")
     return df_ma.values.tolist()
 
-def draw_pro_kline(df: pd.DataFrame) -> Grid:
-    """Draw a professional interactive candlestick chart with volume and MA lines."""
+def draw_pro_kline(df: pd.DataFrame, static: bool = False) -> Grid:
+    """Draw a professional candlestick chart with volume and MA lines.
+
+    When ``static`` (used on phones), the chart becomes a fixed graphic: it shows
+    only the most recent ~90 bars and drops the inside data-zoom, tooltip and
+    axis-pointer so it cannot capture touch gestures and hijack page scrolling.
+    """
+    if static:
+        df = df.tail(90)
     x_data, y_data, df_close, y_vol = split_data(df)
+
+    # Touch-capturing interactions are stripped on mobile so the page scrolls past
+    # the chart instead of panning it.
+    if static:
+        datazoom_opts: list = []
+        tooltip_opts = opts.TooltipOpts(is_show=False)
+    else:
+        datazoom_opts = [
+            opts.DataZoomOpts(
+                is_show=False,
+                type_="inside",
+                xaxis_index=[0, 1],
+                range_start=80,
+                range_end=100,
+            ),
+            opts.DataZoomOpts(
+                is_show=True,
+                xaxis_index=[0, 1],
+                type_="slider",
+                pos_top="85%",
+                range_start=80,
+                range_end=100,
+            ),
+        ]
+        tooltip_opts = opts.TooltipOpts(
+            trigger="axis",
+            axis_pointer_type="cross",
+            background_color="rgba(245, 245, 245, 0.8)",
+            border_width=1,
+            border_color="#ccc",
+            textstyle_opts=opts.TextStyleOpts(color="#000"),
+        )
+
+    kline_global_opts = dict(
+        legend_opts=opts.LegendOpts(is_show=False, pos_bottom=10, pos_left="center"),
+        datazoom_opts=datazoom_opts,
+        yaxis_opts=opts.AxisOpts(
+            is_scale=True,
+            splitarea_opts=opts.SplitAreaOpts(is_show=True, areastyle_opts=opts.AreaStyleOpts(opacity=1)),
+        ),
+        tooltip_opts=tooltip_opts,
+        visualmap_opts=opts.VisualMapOpts(
+            is_show=False,
+            dimension=2,
+            series_index=5,
+            is_piecewise=True,
+            pieces=[
+                {"value": 1, "color": "#00da3c"},
+                {"value": -1, "color": "#ec0000"},
+            ],
+        ),
+        axispointer_opts=opts.AxisPointerOpts(
+            is_show=not static,
+            link=[{"xAxisIndex": "all"}],
+            label=opts.LabelOpts(background_color="#777"),
+        ),
+    )
+    if not static:
+        kline_global_opts["brush_opts"] = opts.BrushOpts(
+            x_axis_index="all",
+            brush_link="all",
+            out_of_brush={"colorAlpha": 0.1},
+            brush_type="lineX",
+        )
 
     kline = (
         Kline()
@@ -43,59 +115,7 @@ def draw_pro_kline(df: pd.DataFrame) -> Grid:
             y_axis=y_data,
             itemstyle_opts=opts.ItemStyleOpts(color="#ec0000", color0="#00da3c"),
         )
-        .set_global_opts(
-            legend_opts=opts.LegendOpts(is_show=False, pos_bottom=10, pos_left="center"),
-            datazoom_opts=[
-                opts.DataZoomOpts(
-                    is_show=False,
-                    type_="inside",
-                    xaxis_index=[0, 1],
-                    range_start=80,
-                    range_end=100,
-                ),
-                opts.DataZoomOpts(
-                    is_show=True,
-                    xaxis_index=[0, 1],
-                    type_="slider",
-                    pos_top="85%",
-                    range_start=80,
-                    range_end=100,
-                ),
-            ],
-            yaxis_opts=opts.AxisOpts(
-                is_scale=True,
-                splitarea_opts=opts.SplitAreaOpts(is_show=True, areastyle_opts=opts.AreaStyleOpts(opacity=1)),
-            ),
-            tooltip_opts=opts.TooltipOpts(
-                trigger="axis",
-                axis_pointer_type="cross",
-                background_color="rgba(245, 245, 245, 0.8)",
-                border_width=1,
-                border_color="#ccc",
-                textstyle_opts=opts.TextStyleOpts(color="#000"),
-            ),
-            visualmap_opts=opts.VisualMapOpts(
-                is_show=False,
-                dimension=2,
-                series_index=5,
-                is_piecewise=True,
-                pieces=[
-                    {"value": 1, "color": "#00da3c"},
-                    {"value": -1, "color": "#ec0000"},
-                ],
-            ),
-            axispointer_opts=opts.AxisPointerOpts(
-                is_show=True,
-                link=[{"xAxisIndex": "all"}],
-                label=opts.LabelOpts(background_color="#777"),
-            ),
-            brush_opts=opts.BrushOpts(
-                x_axis_index="all",
-                brush_link="all",
-                out_of_brush={"colorAlpha": 0.1},
-                brush_type="lineX",
-            ),
-        )
+        .set_global_opts(**kline_global_opts)
     )
 
     line = (
@@ -203,7 +223,7 @@ def draw_result_bar(df: pd.DataFrame, n_scores: int = 3) -> Bar:
     x_data = (
         df[params_columns]
         .apply(
-            lambda x: "\n".join([f"{name}: {value}" for name, value in zip(params_columns, x)]),
+            lambda x: "\n".join([f"{name}: {value}" for name, value in zip(params_columns, x, strict=False)]),
             axis=1,
         )
         .values.tolist()

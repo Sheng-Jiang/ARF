@@ -25,6 +25,7 @@ from webapp import gemini
 from webapp.backtest import run_backtrader
 from webapp.charts import draw_pro_kline, draw_result_bar
 from webapp.data import _open_conn
+from webapp.mobile import is_mobile
 from webapp.schemas import BacktraderParams, StrategyBase
 
 st.set_page_config(
@@ -307,9 +308,10 @@ with c3:
 
 # ── Section 2: Interactive K-Line ──────────────────────────────────────────
 st.divider()
-st.subheader(f"📈 {ticker} 交互式日 K 线与均线系统")
-kline_chart = draw_pro_kline(df_indicators)
-st_pyecharts(kline_chart, height="500px")
+_mobile = is_mobile()
+st.subheader(f"📈 {ticker} {'日 K 线与均线系统（移动端静态视图）' if _mobile else '交互式日 K 线与均线系统'}")
+kline_chart = draw_pro_kline(df_indicators, static=_mobile)
+st_pyecharts(kline_chart, height="360px" if _mobile else "500px")
 
 # ── Section 3: Backtesting & Parameter Optimization ──────────────────────────
 st.divider()
