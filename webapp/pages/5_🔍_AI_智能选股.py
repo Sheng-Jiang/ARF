@@ -1,19 +1,23 @@
 """Streamlit page: AI-Screener - Natural Language Multi-Factor Stock Selector."""
-import streamlit as st
-import pandas as pd
 from datetime import date
 from pathlib import Path
 
+import pandas as pd
+import streamlit as st
+
+from webapp import gemini
+
 # Local imports
 from webapp.data import _open_conn, list_dates, refresh_data
+from webapp.mobile import inject_mobile_css
 from webapp.ui import render_sidebar
-from webapp import gemini
 
 st.set_page_config(
     page_title="AI 智能选股器",
     page_icon="🔍",
     layout="wide",
 )
+inject_mobile_css()
 
 st.title("🔍 AI 智能多因子筛选器")
 st.caption("使用自然语言输入选股条件，由 Gemini 自动解析为 SQL 查询并实时跨板块筛选股票。")
@@ -26,6 +30,7 @@ if as_of is None:
 
 # ── Screener Pool Display ───────────────────────────────────────────────────
 import logging
+
 log = logging.getLogger(__name__)
 
 try:

@@ -5,19 +5,11 @@ import streamlit as st
 from plotly.subplots import make_subplots
 
 from webapp.data import load_snapshot, load_thermometer_series
-from webapp.mobile import show_plotly
+from webapp.mobile import inject_mobile_css, show_plotly
 from webapp.ui import render_research_synthesis, render_sidebar
 
 st.set_page_config(page_title="ARF — 泡沫温度计", layout="wide")
-
-# Mobile hardening: keep CJK headings from clipping, tighten gutters on phones.
-st.markdown(
-    "<style>"
-    "h1,h2,h3{line-height:1.45!important;overflow:visible}"
-    "@media (max-width:640px){.block-container{padding-left:.7rem;padding-right:.7rem}}"
-    "</style>",
-    unsafe_allow_html=True,
-)
+inject_mobile_css()
 
 # Legend below the plot so its wrapped rows never collide with the title/toolbar.
 _LEGEND_BELOW = dict(orientation="h", yanchor="top", y=-0.25, xanchor="left", x=0, font=dict(size=11))

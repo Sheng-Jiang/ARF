@@ -2,10 +2,11 @@
 import streamlit as st
 
 from webapp.data import load_snapshot
-from webapp.mobile import is_mobile, show_plotly
+from webapp.mobile import inject_mobile_css, is_mobile, show_plotly
 from webapp.ui import render_sidebar, render_table, scatter_plot
 
 st.set_page_config(page_title="ARF — 中股板块", layout="wide")
+inject_mobile_css()
 st.title("🇨🇳 中股板块")
 st.caption("按ARF分数排名。D1 = AI叙事估值拉伸最大。红色行 = D1，橙色 = D2，绿色 = D8–D10。★ = 泡沫预警。")
 

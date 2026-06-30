@@ -28,6 +28,23 @@ def is_mobile() -> bool:
     return any(hint in ua for hint in _MOBILE_UA_HINTS)
 
 
+def inject_mobile_css() -> None:
+    """Page-level CSS for phones: shrink the (oversized) top title, tighten the
+    side gutters, and keep CJK headings from clipping. Safe on desktop — the size
+    override is scoped to a ``max-width: 640px`` media query. Call once per page.
+    """
+    st.markdown(
+        "<style>"
+        "h1,h2,h3{line-height:1.4!important;overflow:visible}"
+        "@media (max-width:640px){"
+        ".block-container{padding-left:.7rem;padding-right:.7rem}"
+        "h1{font-size:1.75rem!important}"
+        "}"
+        "</style>",
+        unsafe_allow_html=True,
+    )
+
+
 def plotly_config() -> dict:
     """Plotly config: always hide the modebar; on phones freeze the chart into a
     fixed graphic (``staticPlot``) so it never steals page scrolling."""

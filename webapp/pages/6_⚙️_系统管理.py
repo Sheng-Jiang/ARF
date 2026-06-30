@@ -12,8 +12,10 @@ from webapp.data import (
     load_runs,
     refresh_data,
 )
+from webapp.mobile import inject_mobile_css
 
 st.set_page_config(page_title="ARF — 管理面板", layout="wide")
+inject_mobile_css()
 st.title("⚙️ 管理面板")
 st.caption("查看管道运行历史、抓取明细，并按需触发新一轮数据更新。")
 

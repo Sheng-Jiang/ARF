@@ -1,10 +1,12 @@
 """Streamlit page: One-Click Weekly Report — 一键生成综合研报."""
-import streamlit as st
 import json
 from datetime import date
 from pathlib import Path
 
+import streamlit as st
+
 from webapp.data import _open_conn, list_dates
+from webapp.mobile import inject_mobile_css
 from webapp.ui import render_sidebar
 
 st.set_page_config(
@@ -13,6 +15,7 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+inject_mobile_css()
 
 st.title("📝 一键生成综合研报")
 st.caption(
@@ -49,6 +52,7 @@ def get_report_html_content(report_path_str: str, as_of_date_str: str) -> str | 
     
     # 2. Check GCS if local read failed or file is absent
     import os
+
     from arf import storage
     if storage.is_gcs_mode():
         try:
