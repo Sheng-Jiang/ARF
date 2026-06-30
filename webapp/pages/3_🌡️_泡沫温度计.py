@@ -1,13 +1,27 @@
 """泡沫温度计 — 跨快照的泡沫数量与D1个股历史趋势。"""
 import pandas as pd
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 import streamlit as st
+from plotly.subplots import make_subplots
 
 from webapp.data import load_snapshot, load_thermometer_series
+from webapp.mobile import show_plotly
 from webapp.ui import render_research_synthesis, render_sidebar
 
 st.set_page_config(page_title="ARF — 泡沫温度计", layout="wide")
+
+# Mobile hardening: keep CJK headings from clipping, tighten gutters on phones.
+st.markdown(
+    "<style>"
+    "h1,h2,h3{line-height:1.45!important;overflow:visible}"
+    "@media (max-width:640px){.block-container{padding-left:.7rem;padding-right:.7rem}}"
+    "</style>",
+    unsafe_allow_html=True,
+)
+
+# Legend below the plot so its wrapped rows never collide with the title/toolbar.
+_LEGEND_BELOW = dict(orientation="h", yanchor="top", y=-0.25, xanchor="left", x=0, font=dict(size=11))
+
 st.title("泡沫温度计")
 st.caption("AI估值泡沫的周度演变。多次运行数据管道后，趋势线将逐渐清晰。")
 
@@ -28,21 +42,21 @@ if not us_thermo.empty:
     # Absolute froth (no D1 restriction)
     fig.add_trace(go.Scatter(
         x=us_thermo["as_of_date"], y=us_thermo["count_absolute_froth"],
-        name="美股 — 绝对泡沫数 (无D1限制) ★", mode="lines+markers",
+        name="美股·绝对★", mode="lines+markers",
         line=dict(color="#d62728", width=3),
         marker=dict(size=8),
     ))
     # Relative froth (D1 restricted)
     fig.add_trace(go.Scatter(
         x=us_thermo["as_of_date"], y=us_thermo["count_froth"],
-        name="美股 — 相对泡沫数 (D1限制)", mode="lines+markers",
+        name="美股·相对(D1)", mode="lines+markers",
         line=dict(color="#d62728", width=1.5, dash="dash"),
         marker=dict(size=6),
     ))
     # ARF >= 90 (D1 reference)
     fig.add_trace(go.Scatter(
         x=us_thermo["as_of_date"], y=us_thermo["count_arf_gte_90"],
-        name="美股 — ARF ≥ 90 (D1参考)", mode="lines+markers",
+        name="美股·ARF≥90", mode="lines+markers",
         line=dict(color="#d62728", width=1, dash="dot"),
         marker=dict(size=4),
     ))
@@ -51,34 +65,35 @@ if not cn_thermo.empty:
     # Absolute froth (no D1 restriction)
     fig.add_trace(go.Scatter(
         x=cn_thermo["as_of_date"], y=cn_thermo["count_absolute_froth"],
-        name="中股 — 绝对泡沫数 (无D1限制) ★", mode="lines+markers",
+        name="中股·绝对★", mode="lines+markers",
         line=dict(color="#e6a817", width=3),
         marker=dict(size=8),
     ))
     # Relative froth (D1 restricted)
     fig.add_trace(go.Scatter(
         x=cn_thermo["as_of_date"], y=cn_thermo["count_froth"],
-        name="中股 — 相对泡沫数 (D1限制)", mode="lines+markers",
+        name="中股·相对(D1)", mode="lines+markers",
         line=dict(color="#e6a817", width=1.5, dash="dash"),
         marker=dict(size=6),
     ))
     # ARF >= 90 (D1 reference)
     fig.add_trace(go.Scatter(
         x=cn_thermo["as_of_date"], y=cn_thermo["count_arf_gte_90"],
-        name="中股 — ARF ≥ 90 (D1参考)", mode="lines+markers",
+        name="中股·ARF≥90", mode="lines+markers",
         line=dict(color="#e6a817", width=1, dash="dot"),
         marker=dict(size=4),
     ))
 
 fig.update_layout(
-    title="ARF绝对与相对泡沫个股数量趋势",
     xaxis_title="日期",
-    yaxis_title="股票数量",
+    yaxis=dict(title="股票数量", rangemode="tozero", dtick=1, tickformat="d"),
     hovermode="x unified",
-    height=420,
-    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+    height=440,
+    margin=dict(t=10, r=10, b=110, l=10),
+    legend=_LEGEND_BELOW,
 )
-st.plotly_chart(fig, use_container_width=True)
+st.subheader("ARF 绝对与相对泡沫个股数量趋势")
+show_plotly(fig)
 
 st.markdown("""
 **温度计图解读：**
@@ -97,15 +112,15 @@ for leg, leg_df, color in [("美股", us_thermo, "#d62728"), ("中股", cn_therm
         # EV/Sales 5yr percentile (primary y-axis)
         fig2.add_trace(go.Scatter(
             x=leg_df["as_of_date"], y=leg_df["median_ev_sales_pct"],
-            name=f"{leg} — EV/Sales 5年分位数中位数", mode="lines+markers",
+            name=f"{leg}·EV/S分位", mode="lines+markers",
             line=dict(color=color, width=2),
             marker=dict(size=6),
         ), secondary_y=False)
-        
+
         # Implied growth gap (secondary y-axis)
         fig2.add_trace(go.Scatter(
             x=leg_df["as_of_date"], y=leg_df["median_growth_gap_pct"],
-            name=f"{leg} — 隐含增长差值中位数 (%)", mode="lines+markers",
+            name=f"{leg}·增长差值", mode="lines+markers",
             line=dict(color=color, width=1.5, dash="dash"),
             marker=dict(size=5, symbol="square"),
         ), secondary_y=True)
@@ -115,17 +130,18 @@ fig2.add_hline(y=50, line_dash="dot", line_color="gray", opacity=0.5,
                annotation_text="估值历史中线 (50%)")
 
 fig2.update_layout(
-    title="各板块估值热度与隐含增长差值走势",
     xaxis_title="日期",
     hovermode="x unified",
-    height=380,
-    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+    height=440,
+    margin=dict(t=10, r=10, b=110, l=10),
+    legend=_LEGEND_BELOW,
 )
 
-fig2.update_yaxes(title_text="EV/Sales 5年历史分位数中位数 (0-100%)", range=[0, 100], secondary_y=False)
-fig2.update_yaxes(title_text="隐含永续增长率与共识差值中位数 (%)", secondary_y=True)
+fig2.update_yaxes(title_text="EV/S 5年分位 (%)", range=[0, 100], secondary_y=False)
+fig2.update_yaxes(title_text="增长差值 (%)", secondary_y=True)
 
-st.plotly_chart(fig2, use_container_width=True)
+st.subheader("各板块估值热度与隐含增长差值走势")
+show_plotly(fig2)
 
 st.markdown("""
 **估值与增长差值解读：**

@@ -2,6 +2,7 @@
 import streamlit as st
 
 from webapp.data import load_snapshot
+from webapp.mobile import is_mobile, show_plotly
 from webapp.ui import render_sidebar, render_table, scatter_plot
 
 st.set_page_config(page_title="ARF — 中股板块", layout="wide")
@@ -19,16 +20,14 @@ if china.empty:
     st.warning("该快照日期暂无中股数据。")
     st.stop()
 
-col_table, col_scatter = st.columns([3, 2], gap="large")
-
-with col_table:
+def _table_block():
     st.subheader(f"排名表 — {as_of}")
     render_table(china)
 
-with col_scatter:
+
+def _scatter_block():
     st.subheader("E分 vs V分 散点图")
-    fig = scatter_plot(china, "中股")
-    st.plotly_chart(fig, use_container_width=True)
+    show_plotly(scatter_plot(china, "中股"))
     st.markdown("""
 **散点图解读：**
 横轴 E分 = AI曝光度，纵轴 V分 = 估值拉伸程度，均为板块内百分位排名（0–100）。
@@ -38,6 +37,18 @@ with col_scatter:
 - ⚪ **左下角**（低E + 低V）：AI参与度低且估值合理，ARF最低
 - 气泡大小 = 市值；颜色由红（D1，泡沫最重）渐变至深绿（D10，最理性）
 """)
+
+
+# Phones get a single stacked column; desktop keeps table | scatter side-by-side.
+if is_mobile():
+    _table_block()
+    _scatter_block()
+else:
+    col_table, col_scatter = st.columns([3, 2], gap="large")
+    with col_table:
+        _table_block()
+    with col_scatter:
+        _scatter_block()
 
 with st.expander("评分指标定义"):
     st.markdown("""

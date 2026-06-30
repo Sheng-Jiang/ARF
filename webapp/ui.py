@@ -13,6 +13,7 @@ from webapp.data import (
     load_research_synthesis,
     refresh_data,
 )
+from webapp.mobile import is_mobile
 
 
 def render_sidebar() -> date | None:
@@ -93,10 +94,24 @@ def _row_style(row: pd.Series) -> list[str]:
 
 
 def render_table(df: pd.DataFrame) -> None:
-    """Render a ranked leg table with decile row colouring."""
+    """Render a ranked leg table with decile row colouring.
+
+    On phones the interactive ``st.dataframe`` widget captures touch and is awkward
+    to scroll past, so we emit a static HTML table (row colours preserved) inside a
+    horizontally-scrollable box — it flows with the page instead of floating.
+    """
     display = _build_display_df(df)
     styled = display.style.apply(_row_style, axis=1).hide(["_decile", "_froth"], axis="columns")
-    st.dataframe(styled, use_container_width=True, hide_index=True)
+    if is_mobile():
+        html = styled.hide(axis="index").to_html()
+        st.markdown(
+            '<div style="overflow-x:auto;-webkit-overflow-scrolling:touch;font-size:0.85rem">'
+            + html
+            + "</div>",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.dataframe(styled, use_container_width=True, hide_index=True)
 
 
 _DECILE_COLOR = {

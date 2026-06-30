@@ -2,6 +2,7 @@
 import streamlit as st
 
 from webapp.data import load_snapshot
+from webapp.mobile import is_mobile
 from webapp.ui import render_ask_gemini, render_sidebar
 
 st.title("AI相关性因子（ARF）仪表盘")
@@ -47,23 +48,28 @@ froth_china = int((china["froth_flag"] == True).sum()) if len(china) else 0  # n
 total = len(scored_df)
 scored = int(scored_df["arf"].notna().sum())
 
-c1, c2, c3, c4, c5 = st.columns(5)
-c1.metric("🇺🇸 美股 D1 数量", d1_us, help="美股中估值拉伸最大的股票数量")
-c2.metric("🇺🇸 美股泡沫预警 ★", froth_us, help="D1 + ROE < WACC + P/S > 25")
-c3.metric("🇨🇳 中股 D1 数量", d1_china, help="中股中估值拉伸最大的股票数量")
-c4.metric("🇨🇳 中股泡沫预警 ★", froth_china, help="D1 + ROE < WACC + P/S > 25")
-c5.metric("已评分股票数", f"{scored}/{total}")
+# 5 metrics in one row on desktop; 2-per-row on phones so they aren't squished.
+_metrics = [
+    ("🇺🇸 美股 D1 数量", d1_us, "美股中估值拉伸最大的股票数量"),
+    ("🇺🇸 美股泡沫预警 ★", froth_us, "D1 + ROE < WACC + P/S > 25"),
+    ("🇨🇳 中股 D1 数量", d1_china, "中股中估值拉伸最大的股票数量"),
+    ("🇨🇳 中股泡沫预警 ★", froth_china, "D1 + ROE < WACC + P/S > 25"),
+    ("已评分股票数", f"{scored}/{total}", None),
+]
+_per_row = 2 if is_mobile() else 5
+for _i in range(0, len(_metrics), _per_row):
+    _cols = st.columns(_per_row)
+    for _col, (_label, _val, _help) in zip(_cols, _metrics[_i:_i + _per_row], strict=False):
+        _col.metric(_label, _val, help=_help)
 
 st.markdown(f"**快照日期：** {as_of} — 使用左侧边栏切换日期，点击页面导航查看各板块详情。")
 
 st.divider()
 
-col_us, col_cn = st.columns(2)
-
-with col_us:
-    st.subheader("🇺🇸 美股 — ARF前5名")
-    if len(us):
-        top = us.sort_values("arf", ascending=False).head(5)[
+def _top5(leg_df, title):
+    st.subheader(title)
+    if len(leg_df):
+        top = leg_df.sort_values("arf", ascending=False).head(5)[
             ["ticker", "name", "decile", "arf", "froth_flag"]
         ].copy()
         top["D"] = top["decile"].apply(lambda d: int(d) if d == d else "—")
@@ -75,20 +81,17 @@ with col_us:
             use_container_width=True,
         )
 
-with col_cn:
-    st.subheader("🇨🇳 中股 — ARF前5名")
-    if len(china):
-        top = china.sort_values("arf", ascending=False).head(5)[
-            ["ticker", "name", "decile", "arf", "froth_flag"]
-        ].copy()
-        top["D"] = top["decile"].apply(lambda d: int(d) if d == d else "—")
-        top["ARF"] = top["arf"].apply(lambda v: f"{v:.1f}" if v == v else "—")
-        top["★"] = top["froth_flag"].apply(lambda f: "★" if f else "")
-        st.dataframe(
-            top[["ticker", "name", "D", "ARF", "★"]],
-            hide_index=True,
-            use_container_width=True,
-        )
+
+# Stack the two tables on phones; side-by-side on desktop.
+if is_mobile():
+    _top5(us, "🇺🇸 美股 — ARF前5名")
+    _top5(china, "🇨🇳 中股 — ARF前5名")
+else:
+    col_us, col_cn = st.columns(2)
+    with col_us:
+        _top5(us, "🇺🇸 美股 — ARF前5名")
+    with col_cn:
+        _top5(china, "🇨🇳 中股 — ARF前5名")
 
 st.divider()
 render_ask_gemini(
