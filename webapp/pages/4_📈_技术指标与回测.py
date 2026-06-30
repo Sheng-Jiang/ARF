@@ -25,7 +25,7 @@ from webapp import gemini
 from webapp.backtest import run_backtrader
 from webapp.charts import draw_pro_kline, draw_result_bar
 from webapp.data import _open_conn
-from webapp.mobile import is_mobile
+from webapp.mobile import inject_mobile_css, is_mobile
 from webapp.schemas import BacktraderParams, StrategyBase
 
 st.set_page_config(
@@ -34,6 +34,7 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+inject_mobile_css()
 
 st.title("📈 技术面多因子评分 & 策略回测仪表盘")
 st.caption("融合技术指标 (MAs/MACD/RSI/ATR)、筹码分布 (CYQ) 及 Backtrader 历史回测的一站式量化研究平台 — 支持 A股 / 港股 / 美股")

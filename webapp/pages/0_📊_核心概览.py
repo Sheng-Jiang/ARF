@@ -2,9 +2,10 @@
 import streamlit as st
 
 from webapp.data import load_snapshot
-from webapp.mobile import is_mobile
+from webapp.mobile import inject_mobile_css, is_mobile
 from webapp.ui import render_ask_gemini, render_sidebar
 
+inject_mobile_css()
 st.title("AI相关性因子（ARF）仪表盘")
 st.caption(
     "衡量AI叙事对股票估值的扭曲程度。D1 = 估值拉伸最大，D10 = 相对于AI敞口最为低估。"
