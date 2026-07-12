@@ -16,12 +16,34 @@ from webapp.data import (
 from webapp.mobile import is_mobile
 
 
+def render_freshness_badge(latest: date | None = None) -> None:
+    """Sidebar badge for how current the latest snapshot is (weekly cadence)."""
+    from arf.health import freshness_status, next_monday_utc
+
+    dates = list_dates() if latest is None else [latest]
+    latest_as_of = dates[0] if dates else None
+    status = freshness_status(latest_as_of)
+    icon = {
+        "fresh": "🟢",
+        "stale": "🟡",
+        "critical": "🔴",
+        "unknown": "⚪",
+    }.get(status.level, "⚪")
+    st.sidebar.markdown(f"**数据新鲜度** {icon} {status.label}")
+    st.sidebar.caption(status.detail)
+    if status.level in ("stale", "critical"):
+        nxt = next_monday_utc()
+        st.sidebar.caption(f"下次计划周更（周一 UTC）：{nxt}")
+
+
 def render_sidebar() -> date | None:
     """Render date selector + refresh button; return selected date."""
     dates = list_dates()
     if not dates:
         st.sidebar.warning("未找到快照数据，请先运行数据管道。")
+        render_freshness_badge(None)
         return None
+    render_freshness_badge(dates[0])
     date_strs = [str(d) for d in dates]
     sel = st.sidebar.selectbox("快照日期", date_strs, key="selected_date_str")
     if st.sidebar.button("刷新数据"):

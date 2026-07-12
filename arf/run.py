@@ -562,7 +562,7 @@ def run_pipeline(
                 storage.upload_artifact(thermo_html, "reports/thermometer.html")
             console.print("Synced artifacts to GCS")
 
-        _print_calibration_summary(df)
+        _print_health_summary(df, as_of)
         return df
     except Exception as exc:
         log.exception("Pipeline failed")
@@ -581,27 +581,48 @@ def run_pipeline(
         raise
 
 
-def _print_calibration_summary(df: pd.DataFrame) -> None:
-    console.print("\n[bold]Calibration check[/bold]")
-    targets = {
-        "NVDA": "D2–D4 (high E, not bubbly)",
-        "PLTR": "D1 (US froth flag)",
-        "CSCO": "D6–D10 (low AI, not bubbly)",
-        "688256.SH": "D1 China (Cambricon froth)",
-    }
-    scored = df[df["arf"].notna()]
-    for ticker, expectation in targets.items():
-        row = scored[scored["ticker"] == ticker]
-        if row.empty:
-            console.print(f"  {ticker}: [yellow]not found[/yellow]")
-        else:
-            r = row.iloc[0]
-            froth = "★" if r.get("froth_flag") else ""
-            console.print(
-                f"  {ticker}: D{r['decile']} ARF={r['arf']:.1f} "
-                f"E={r['e_score']:.1f} V={r['v_score']:.1f} {froth}  "
-                f"(expected: {expectation})"
+def _print_health_summary(df: pd.DataFrame, as_of: date) -> None:
+    """Console coverage + calibration gate after each pipeline run."""
+    from arf.health import calibration_check, coverage_report
+
+    cov = coverage_report(df, as_of=as_of)
+    console.print("\n[bold]Data coverage[/bold]")
+    for leg_name, leg in cov.legs.items():
+        console.print(
+            f"  {leg_name}: scored {leg.n_scored}/{leg.n_tickers}  "
+            f"V-C1={leg.v_c1_usable} C2={leg.v_c2_usable} C3={leg.v_c3_usable}"
+        )
+    if cov.warnings:
+        for w in cov.warnings:
+            console.print(f"  [yellow]⚠ {w}[/yellow]")
+    else:
+        console.print("  [green]no coverage warnings[/green]")
+
+    cal = calibration_check(df, as_of=as_of)
+    console.print(
+        f"\n[bold]Calibration suite[/bold]  "
+        f"{cal.n_pass} pass / {cal.n_fail} fail / {cal.n_missing} missing"
+    )
+    for r in cal.results:
+        band = f"D{r.expected_lo}–D{r.expected_hi}"
+        if r.status == "pass":
+            color = "green"
+            detail = f"D{r.decile} ARF={r.arf:.1f}" if r.arf is not None else f"D{r.decile}"
+        elif r.status == "fail":
+            color = "red"
+            detail = (
+                f"D{r.decile} ARF={r.arf:.1f} E={r.e_score:.0f} V={r.v_score:.0f}"
+                if r.arf is not None and r.e_score is not None and r.v_score is not None
+                else f"D{r.decile}"
             )
+        else:
+            color = "yellow"
+            detail = "not found / null decile"
+        froth = " ★" if r.froth_flag else ""
+        console.print(
+            f"  [{color}]{r.status.upper():7}[/{color}] {r.ticker:12} "
+            f"{detail}{froth}  (expected {band})"
+        )
 
 
 def main() -> None:

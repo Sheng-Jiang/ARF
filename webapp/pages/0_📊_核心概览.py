@@ -1,6 +1,7 @@
 """ARF 仪表盘 — 首页：所选快照日期的核心指标概览。"""
 import streamlit as st
 
+from arf.health import calibration_check, coverage_report
 from webapp.data import load_snapshot
 from webapp.mobile import inject_mobile_css, is_mobile
 from webapp.ui import render_ask_gemini, render_sidebar
@@ -41,6 +42,26 @@ df = load_snapshot(as_of)
 us = df[df["leg"] == "US"]
 china = df[df["leg"] == "China"]
 scored_df = df[df["leg"].isin(["US", "China"])]
+
+# Surface coverage / calibration issues for the selected snapshot (not just latest).
+_cov = coverage_report(scored_df, as_of=as_of)
+_cal = calibration_check(scored_df, as_of=as_of)
+if _cov.warnings or _cal.n_fail:
+    with st.expander(
+        f"⚠️ 数据质量提示 — {len(_cov.warnings)} 条覆盖告警 · "
+        f"校准 {_cal.n_fail} 失败 / {_cal.n_pass} 通过",
+        expanded=False,
+    ):
+        for w in _cov.warnings:
+            st.warning(w)
+        if _cal.n_fail:
+            fails = [r for r in _cal.results if r.status == "fail"]
+            lines = [
+                f"- **{r.ticker}** 实际 D{r.decile}，期望 D{r.expected_lo}–D{r.expected_hi}"
+                for r in fails
+            ]
+            st.markdown("校准未通过：\n" + "\n".join(lines))
+        st.caption("完整明细见「系统管理 → 健康检查」。")
 
 d1_us = int((us["decile"] == 1).sum()) if len(us) else 0
 d1_china = int((china["decile"] == 1).sum()) if len(china) else 0

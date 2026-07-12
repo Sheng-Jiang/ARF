@@ -1,15 +1,24 @@
-"""管理面板 — 运行历史、抓取状态、手动触发管道。"""
+"""管理面板 — 运行历史、抓取状态、数据覆盖、校准门禁、手动触发管道。"""
 from datetime import date
 
 import pandas as pd
 import streamlit as st
 
+from arf.health import (
+    calibration_check,
+    calibration_to_frame,
+    coverage_report,
+    coverage_to_frame,
+    freshness_status,
+    next_monday_utc,
+)
 from webapp import jobs
 from webapp.data import (
     list_dates,
     load_fetch_outcomes,
     load_latest_run,
     load_runs,
+    load_snapshot,
     refresh_data,
 )
 from webapp.mobile import inject_mobile_css
@@ -17,7 +26,7 @@ from webapp.mobile import inject_mobile_css
 st.set_page_config(page_title="ARF — 管理面板", layout="wide")
 inject_mobile_css()
 st.title("⚙️ 管理面板")
-st.caption("查看管道运行历史、抓取明细，并按需触发新一轮数据更新。")
+st.caption("查看管道运行历史、数据覆盖、校准门禁，并按需触发新一轮数据更新。")
 
 # ---------- Last run summary ----------
 latest = load_latest_run()
@@ -123,6 +132,121 @@ with col_refresh:
 with col_dates:
     dates = list_dates()
     st.caption(f"数据库中已存快照数：**{len(dates)}** 个 · 最近：{dates[0] if dates else '—'}")
+
+st.divider()
+
+# ---------- Health: freshness + coverage + calibration ----------
+st.subheader("健康检查（覆盖率 + 校准门禁）")
+dates = list_dates()
+if not dates:
+    st.info("尚无快照，无法评估覆盖率与校准。")
+else:
+    health_as_of = st.selectbox(
+        "评估快照日期",
+        dates,
+        index=0,
+        format_func=str,
+        key="health_as_of",
+    )
+    snap_df = load_snapshot(health_as_of)
+    fresh = freshness_status(dates[0])  # always vs latest in DB
+    cov = coverage_report(snap_df, as_of=health_as_of)
+    cal = calibration_check(snap_df, as_of=health_as_of)
+
+    f1, f2, f3, f4 = st.columns(4)
+    fresh_icon = {"fresh": "🟢", "stale": "🟡", "critical": "🔴", "unknown": "⚪"}[
+        fresh.level
+    ]
+    f1.metric("数据新鲜度", f"{fresh_icon} {fresh.label}", help=fresh.detail)
+    f2.metric(
+        "下次周更（周一 UTC）",
+        str(next_monday_utc()),
+        help="Cloud Scheduler: 0 4 * * MON Etc/UTC",
+    )
+    f3.metric(
+        "校准门禁",
+        f"{cal.n_pass}✅ / {cal.n_fail}❌ / {cal.n_missing}❔",
+        help="关键标的是否落在预期十分位区间",
+    )
+    n_warn = len(cov.warnings)
+    f4.metric("覆盖告警", n_warn if n_warn else "无", help="字段/V分量系统性缺失")
+
+    if fresh.level in ("stale", "critical"):
+        st.warning(fresh.detail)
+    if cov.warnings:
+        for w in cov.warnings:
+            st.warning(w)
+
+    # Per-leg V-component summary
+    if cov.legs:
+        st.markdown("**V分三组件可用率**（与 `scoring.py` 门槛一致）")
+        vc_rows = []
+        for leg in cov.legs.values():
+            vc_rows.append({
+                "板块": leg.leg,
+                "股票数": leg.n_tickers,
+                "已评分": leg.n_scored,
+                "C1 逆向DCF": f"{leg.v_c1_usable}/{leg.n_tickers}",
+                "C2 PEG": f"{leg.v_c2_usable}/{leg.n_tickers}",
+                "C3 EV/S五年": f"{leg.v_c3_usable}/{leg.n_tickers}",
+            })
+        st.dataframe(pd.DataFrame(vc_rows), use_container_width=True, hide_index=True)
+
+    with st.expander("字段覆盖明细", expanded=False):
+        cov_df = coverage_to_frame(cov)
+        if cov_df.empty:
+            st.info("无覆盖数据。")
+        else:
+            cov_df = cov_df.assign(
+                覆盖=lambda d: d.apply(
+                    lambda r: f"{r['present']}/{r['total']} ({r['pct']}%)", axis=1
+                )
+            )
+            show = cov_df.pivot_table(
+                index=["label", "field"],
+                columns="leg",
+                values="覆盖",
+                aggfunc="first",
+            ).reset_index()
+            show = show.rename(columns={"label": "字段", "field": "列名"})
+            st.dataframe(show, use_container_width=True, hide_index=True)
+
+    st.markdown("**校准套件**（PRD §7 + 生产经验区间）")
+    cal_df = calibration_to_frame(cal)
+    if cal_df.empty:
+        st.info("无校准结果。")
+    else:
+        status_map = {"pass": "✅ PASS", "fail": "❌ FAIL", "missing": "❔ MISSING"}
+        cal_df["结果"] = cal_df["status"].map(status_map)
+        cal_df["D"] = cal_df["decile"].apply(
+            lambda d: f"D{int(d)}" if pd.notna(d) else "—"
+        )
+        cal_df["ARF"] = cal_df["arf"].apply(
+            lambda v: f"{v:.1f}" if pd.notna(v) else "—"
+        )
+        cal_df["★"] = cal_df["froth"].apply(lambda f: "★" if f else "")
+        display_cal = cal_df[
+            ["ticker", "D", "expected", "ARF", "e_score", "v_score", "★", "结果"]
+        ].rename(columns={
+            "ticker": "代码",
+            "expected": "期望区间",
+            "e_score": "E",
+            "v_score": "V",
+        })
+        for col in ("E", "V"):
+            display_cal[col] = display_cal[col].apply(
+                lambda v: f"{v:.0f}" if pd.notna(v) else "—"
+            )
+        st.dataframe(display_cal, use_container_width=True, hide_index=True)
+        if cal.n_fail:
+            st.error(
+                f"{cal.n_fail} 只股票落在期望区间外 — 请核对抓取质量或公式漂移，"
+                "不要在未解释前对外分享该期排名。"
+            )
+        elif cal.n_missing:
+            st.warning(f"{cal.n_missing} 只校准标的缺失或未评分。")
+        else:
+            st.success("校准门禁全部通过。")
 
 st.divider()
 
