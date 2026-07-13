@@ -13,7 +13,7 @@ BUCKET="${BUCKET:-arf-data-ai-rf}"
 JOB_SA="${JOB_SA:-arf-pipeline-runner}"
 WEBAPP_SA="${WEBAPP_SA:-arf-webapp-runner}"
 SCHEDULER_SA="${SCHEDULER_SA:-arf-pipeline-scheduler}"
-SCHEDULE="${SCHEDULE:-0 4 * * MON}"           # Mondays 04:00 UTC = noon Beijing
+SCHEDULE="${SCHEDULE:-0 4 * * SUN}"           # Sundays 04:00 UTC = noon Beijing; both legs snapshot Friday close (A股 Fri 15:00 CST, 港股 Fri 16:00 HKT, US Fri 16:00 ET)
 TIMEZONE="${TIMEZONE:-Etc/UTC}"
 
 echo "== Phase 2 setup =="
