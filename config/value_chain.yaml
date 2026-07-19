@@ -1,0 +1,187 @@
+# 双价值链 (dual AI value-chain) market-cap snapshot — constituent registry.
+#
+# Line 1 = US-led chain, Line 2 = China-led chain, both broken into the same
+# 5-layer stack used on the 双价值链 webapp page. This taxonomy is bespoke to
+# this page (grouped by "who competes with whom", e.g. cloud hyperscalers are
+# grouped under L3 infra here) and intentionally does not reuse the layer
+# field in config/universe.yaml, which is assigned per ARF's own scoring
+# logic.
+#
+# Each constituent has a `source`:
+#   universe — ticker belongs to the *scored* US/China leg (36+36 names) that
+#              arf.run.fetch_all() already fetches every run; reuse that day's
+#              market_cap_usd instead of a second fetch. NOTE: universe.yaml's
+#              Europe-ref and Pre-IPO legs are NOT fetched by fetch_all (they
+#              return null "manual" StockData) even though they're tickers in
+#              that file — those must use `extra`, not `universe`.
+#   extra    — publicly traded but not covered by fetch_all above (includes
+#              Europe-ref tickers like ASML/SAP/ABB); fetched directly via
+#              fetch_us/fetch_china each run.
+#   static   — private / pre-IPO, no market price to fetch. static_usd_b is a
+#              manually maintained valuation (last funding round / secondary
+#              trade) — update by hand when better information is available,
+#              same convention as the Pre-IPO tier in universe.yaml.
+#
+# Companies the source report couldn't cleanly value (国家电网, 海光, 宇树,
+# KUKA/Universal Robots after going private/subsidiary) are omitted rather
+# than guessed, matching the original report's own "未计 / 未细列" caveats.
+#
+# Note: SMEGF (Siemens Energy) and ABBNY (ABB) are the yfinance-valid USD OTC
+# ADR tickers, which differ from universe.yaml's SMEGY/ABB — those entries are
+# never fetched by arf.run.fetch_all() (Europe-ref is skipped there), so the
+# ticker mismatch was never exercised until this page needed a live fetch.
+
+layers:
+  - layer: L1
+    name: "L1 能源"
+    US:
+      - name: "NextEra"
+        ticker: NEE
+        source: universe
+      - name: "Williams"
+        ticker: WMB
+        source: universe
+      - name: "GE Vernova"
+        ticker: GEV
+        source: extra
+      - name: "西门子能源"
+        ticker: SMEGF
+        source: extra
+      - name: "施耐德电气"
+        ticker: SBGSF
+        source: extra
+    China:
+      - name: "宁德时代（A股）"
+        ticker: "300750.SZ"
+        source: universe
+      - name: "中恒电气（A股）"
+        ticker: "002364.SZ"
+        source: extra
+
+  - layer: L2
+    name: "L2 芯片与设备"
+    US:
+      - name: "NVIDIA"
+        ticker: NVDA
+        source: universe
+      - name: "TSMC"
+        ticker: TSM
+        source: universe
+      - name: "Broadcom"
+        ticker: AVGO
+        source: universe
+      - name: "ASML"
+        ticker: ASML
+        source: extra
+      - name: "AMD"
+        ticker: AMD
+        source: universe
+      - name: "Intel"
+        ticker: INTC
+        source: universe
+    China:
+      - name: "华为（未上市估值）"
+        source: static
+        static_usd_b: 200
+      - name: "中芯国际（A股）"
+        ticker: "688981.SH"
+        source: universe
+      - name: "寒武纪（A股）"
+        ticker: "688256.SH"
+        source: universe
+
+  - layer: L3
+    name: "L3 基础设施"
+    US:
+      - name: "Google"
+        ticker: GOOGL
+        source: universe
+      - name: "Microsoft"
+        ticker: MSFT
+        source: universe
+      - name: "Amazon"
+        ticker: AMZN
+        source: extra
+      - name: "Meta"
+        ticker: META
+        source: universe
+      - name: "Equinix"
+        ticker: EQIX
+        source: universe
+      - name: "Digital Realty"
+        ticker: DLR
+        source: universe
+    China:
+      - name: "腾讯（港股）"
+        ticker: "0700.HK"
+        source: universe
+      - name: "阿里巴巴（美股）"
+        ticker: BABA
+        source: universe
+      - name: "百度（美股）"
+        ticker: BIDU
+        source: universe
+      - name: "万国数据（美股）"
+        ticker: GDS
+        source: universe
+      - name: "世纪互联（美股）"
+        ticker: VNET
+        source: universe
+
+  - layer: L4
+    name: "L4 基础模型"
+    US:
+      - name: "Anthropic（未上市估值）"
+        source: static
+        static_usd_b: 900
+      - name: "OpenAI（未上市估值）"
+        source: static
+        static_usd_b: 852
+      - name: "xAI（未上市估值）"
+        source: static
+        static_usd_b: 200
+      - name: "Mistral（未上市估值）"
+        source: static
+        static_usd_b: 15
+    China:
+      - name: "智谱（港股）"
+        ticker: "2513.HK"
+        source: universe
+      - name: "MiniMax（港股）"
+        ticker: "0100.HK"
+        source: extra
+      - name: "DeepSeek（未上市估值）"
+        source: static
+        static_usd_b: 45
+      - name: "月之暗面（未上市估值）"
+        source: static
+        static_usd_b: 18
+
+  - layer: L5
+    name: "L5 应用与物理 AI"
+    US:
+      - name: "Apple"
+        ticker: AAPL
+        source: universe
+      - name: "SAP"
+        ticker: SAP
+        source: extra
+      - name: "Salesforce"
+        ticker: CRM
+        source: universe
+      - name: "ABB"
+        ticker: ABBNY
+        source: extra
+    China:
+      - name: "字节跳动（未上市估值）"
+        source: static
+        static_usd_b: 550
+      - name: "美团（港股）"
+        ticker: "3690.HK"
+        source: universe
+      - name: "小鹏（港股）"
+        ticker: "9868.HK"
+        source: universe
+      - name: "优必选（港股）"
+        ticker: "9880.HK"
+        source: extra

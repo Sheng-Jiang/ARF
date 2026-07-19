@@ -465,6 +465,27 @@ def _run_research_pipeline(
     )
 
 
+def _run_value_chain_pipeline(conn, df: pd.DataFrame, as_of: date) -> None:
+    """Compute + persist the 双价值链 (dual AI value-chain) layer snapshot.
+
+    Reuses the day's already-fetched market caps for scored-universe tickers;
+    fetches a handful of extra tickers directly. Per-ticker failures are
+    tolerated; the whole stage never crashes the pipeline.
+    """
+    from arf.db import upsert_value_chain
+    from arf.value_chain import compute_value_chain
+
+    market_caps = (
+        df.dropna(subset=["market_cap_usd"])
+        .set_index("ticker")["market_cap_usd"]
+        .to_dict()
+    )
+    console.print("Computing 双价值链 market-cap snapshot…")
+    rows = compute_value_chain(as_of, market_caps)
+    upsert_value_chain(conn, as_of, rows)
+    console.print(f"Persisted {len(rows)} 双价值链 layer/leg rows for {as_of}")
+
+
 def run_pipeline(
     as_of: date,
     data_dir: Path = Path("data"),
@@ -526,6 +547,12 @@ def run_pipeline(
             _maybe_generate_research_synthesis(conn, df, as_of)
         except Exception:
             log.exception("Research synthesis failed - continuing main pipeline")
+
+        # Dual AI value-chain (双价值链) layer market-cap snapshot
+        try:
+            _run_value_chain_pipeline(conn, df, as_of)
+        except Exception:
+            log.exception("Value-chain snapshot failed - continuing main pipeline")
 
         _maybe_generate_gemini_summaries(conn, df, as_of)
 

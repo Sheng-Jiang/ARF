@@ -174,6 +174,19 @@ CREATE TABLE IF NOT EXISTS weekly_reports (
 )
 """
 
+_SCHEMA_VALUE_CHAIN = """
+CREATE TABLE IF NOT EXISTS value_chain_snapshot (
+    as_of_date          DATE        NOT NULL,
+    leg                 TEXT        NOT NULL,
+    layer               TEXT        NOT NULL,
+    layer_name          TEXT,
+    market_cap_usd      DOUBLE,
+    constituents_json   TEXT,
+    generated_at        TIMESTAMP   NOT NULL,
+    PRIMARY KEY (as_of_date, leg, layer)
+)
+"""
+
 
 def init_db(path: Path = Path("data/arf.db")) -> duckdb.DuckDBPyConnection:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -187,6 +200,7 @@ def init_db(path: Path = Path("data/arf.db")) -> duckdb.DuckDBPyConnection:
     conn.execute(_SCHEMA_RESEARCH_REPORTS)
     conn.execute(_SCHEMA_RESEARCH_SYNTHESIS)
     conn.execute(_SCHEMA_WEEKLY_REPORTS)
+    conn.execute(_SCHEMA_VALUE_CHAIN)
     return conn
 
 
@@ -561,5 +575,51 @@ def query_weekly_reports(
     """List weekly reports ordered by date descending."""
     return conn.execute(
         "SELECT * FROM weekly_reports ORDER BY as_of_date DESC LIMIT ?", [limit]
+    ).fetchdf()
+
+
+def upsert_value_chain(
+    conn: duckdb.DuckDBPyConnection,
+    as_of_date: date,
+    rows: list[dict],
+    generated_at: datetime | None = None,
+) -> None:
+    """Insert or overwrite the 双价值链 layer snapshot for a date.
+
+    Each row must have keys: leg, layer, layer_name, market_cap_usd,
+    constituents_json.
+    """
+    generated = generated_at or datetime.now(UTC).replace(tzinfo=None)
+    conn.execute("DELETE FROM value_chain_snapshot WHERE as_of_date = ?", [as_of_date])
+    if not rows:
+        conn.commit()
+        return
+    conn.executemany(
+        "INSERT INTO value_chain_snapshot (as_of_date, leg, layer, layer_name, "
+        "market_cap_usd, constituents_json, generated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [
+            (as_of_date, r["leg"], r["layer"], r["layer_name"],
+             r["market_cap_usd"], r["constituents_json"], generated)
+            for r in rows
+        ],
+    )
+    conn.commit()
+
+
+def query_value_chain(
+    conn: duckdb.DuckDBPyConnection,
+    as_of_date: date | None = None,
+) -> pd.DataFrame:
+    """Return the 双价值链 snapshot for a date, or the latest one if omitted."""
+    if as_of_date is not None:
+        return conn.execute(
+            "SELECT * FROM value_chain_snapshot WHERE as_of_date = ? "
+            "ORDER BY leg, layer",
+            [as_of_date],
+        ).fetchdf()
+    return conn.execute(
+        "SELECT * FROM value_chain_snapshot "
+        "WHERE as_of_date = (SELECT MAX(as_of_date) FROM value_chain_snapshot) "
+        "ORDER BY leg, layer"
     ).fetchdf()
 

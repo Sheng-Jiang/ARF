@@ -124,3 +124,25 @@ def load_research_synthesis(as_of: date) -> pd.DataFrame:
     return _open_conn().execute(
         "SELECT * FROM research_synthesis WHERE as_of_date = ?", [as_of]
     ).fetchdf()
+
+
+def list_value_chain_dates(limit: int = 2) -> list[date]:
+    rows = _open_conn().execute(
+        "SELECT DISTINCT as_of_date FROM value_chain_snapshot ORDER BY as_of_date DESC LIMIT ?",
+        [limit],
+    ).fetchall()
+    return [r[0] for r in rows]
+
+
+def load_value_chain(as_of: date | None = None) -> pd.DataFrame:
+    """Load the 双价值链 layer/leg snapshot for a date, or the latest one."""
+    if as_of is not None:
+        return _open_conn().execute(
+            "SELECT * FROM value_chain_snapshot WHERE as_of_date = ? ORDER BY leg, layer",
+            [as_of],
+        ).fetchdf()
+    return _open_conn().execute(
+        "SELECT * FROM value_chain_snapshot "
+        "WHERE as_of_date = (SELECT MAX(as_of_date) FROM value_chain_snapshot) "
+        "ORDER BY leg, layer"
+    ).fetchdf()
