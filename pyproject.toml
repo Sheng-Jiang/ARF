@@ -57,6 +57,7 @@ markers = [
     "integration: marks tests as integration tests (require network access)",
 ]
 testpaths = ["tests"]
+addopts = "-m 'not integration'"
 
 [tool.ruff]
 target-version = "py311"
