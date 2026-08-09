@@ -125,6 +125,32 @@ def _build_scoring_df(
     return pd.DataFrame(rows)
 
 
+def _archive_active_pools(conn, universe: list[UniverseEntry]) -> None:
+    """Record the active quarter's pool membership (idempotent, per pool_id).
+
+    Runs at the end of every pipeline so the 组合管理 page has the quarterly
+    roster (pool_membership) even before the first rotation executes —
+    rotations extend the same table with their own pool ids. Watchlist and
+    Pre-IPO observation entries (pool=None) are excluded.
+    """
+    from arf.db import upsert_pool_membership
+
+    active_pools = {e.pool for e in universe if e.pool}
+    for pool_id in active_pools:
+        membership = [
+            {
+                "ticker": e.ticker,
+                "leg": e.leg,
+                "cohort": e.cohort,
+                "listed_at": e.listed_at,
+                "reason": "pipeline archive",
+            }
+            for e in universe
+            if e.pool == pool_id
+        ]
+        upsert_pool_membership(conn, pool_id, membership)
+
+
 def _maybe_generate_gemini_summaries(
     conn,
     df: pd.DataFrame,
@@ -543,6 +569,10 @@ def run_pipeline(
         upsert_snapshot(conn, df, as_of)
         record_fetch_outcomes(conn, run_id, outcomes)
         console.print(f"Snapshot saved to {db_path}")
+
+        # Archive the active quarterly pool so the 组合管理 page has the roster
+        # even before the first rotation (idempotent per pool_id).
+        _archive_active_pools(conn, universe)
 
         # Pre-calculate and cache technical indicators for A-shares
         try:
