@@ -76,9 +76,16 @@ def _fetch_one(entry: UniverseEntry, as_of: date) -> StockData:
 
 
 def fetch_all(universe: list[UniverseEntry], as_of: date) -> list[StockData]:
+    """Fetch market data for in-pool US/China names; Pre-IPO passes through as
+    manual rows. Watchlist names (pool=null, not Pre-IPO) are not fetched this
+    quarter — they are rotation candidates only."""
     results: list[StockData] = []
+    to_fetch = [
+        e for e in universe
+        if (e.pool is not None and e.leg in ("US", "China")) or e.leg == "Pre-IPO"
+    ]
     with ThreadPoolExecutor(max_workers=12) as pool:
-        futures = {pool.submit(_fetch_one, entry, as_of): entry for entry in universe}
+        futures = {pool.submit(_fetch_one, entry, as_of): entry for entry in to_fetch}
         for future in as_completed(futures):
             entry = futures[future]
             try:
@@ -104,12 +111,14 @@ def _build_scoring_df(
             d["name"] = e.name
             d["pure_play_pct"] = e.pure_play_pct
             d["policy_premium"] = e.policy_premium
+            d["cohort"] = e.cohort
         else:
             d["leg"] = "Unknown"
             d["layer"] = None
             d["name"] = sd.ticker
             d["pure_play_pct"] = 0.0
             d["policy_premium"] = False
+            d["cohort"] = "watch"
         # Alias revenue_yoy_growth as revenue_ntm_growth for e_score
         d["revenue_ntm_growth"] = d.get("revenue_yoy_growth")
         rows.append(d)
@@ -128,6 +137,7 @@ def _maybe_generate_gemini_summaries(
     """
     if not os.getenv("GEMINI_API_KEY"):
         log.info("GEMINI_API_KEY not set — skipping Gemini summarisation")
+        console.print("[dim]GEMINI_API_KEY not set — skipping Gemini summarisation[/dim]")
         return
 
     try:
@@ -137,6 +147,7 @@ def _maybe_generate_gemini_summaries(
         from webapp import gemini
     except ImportError as exc:
         log.warning("Gemini imports unavailable, skipping summarisation: %s", exc)
+        console.print(f"[dim]Gemini imports unavailable, skipping summarisation: {exc}[/dim]")
         return
 
     scored = df[df["leg"].isin(["US", "China"])]
@@ -182,6 +193,7 @@ def _maybe_generate_research_synthesis(
     """
     if not os.getenv("GEMINI_API_KEY"):
         log.info("GEMINI_API_KEY not set — skipping research synthesis")
+        console.print("[dim]GEMINI_API_KEY not set — skipping research synthesis[/dim]")
         return
 
     try:
@@ -194,11 +206,13 @@ def _maybe_generate_research_synthesis(
         from webapp import gemini
     except ImportError as exc:
         log.warning("Research synthesis imports unavailable, skipping: %s", exc)
+        console.print(f"[dim]Research synthesis imports unavailable, skipping: {exc}[/dim]")
         return
 
     research_df = query_research_reports(conn, as_of)
     if research_df.empty:
         log.info("No research rows for %s — skipping research synthesis", as_of)
+        console.print(f"[dim]No research rows for {as_of} — skipping research synthesis[/dim]")
         return
 
     scored = df[df["leg"].isin(["US", "China"])]

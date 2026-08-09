@@ -1,8 +1,9 @@
 import base64
-import json
 import os
 import re
+
 import requests
+
 
 def main():
     md_path = "ARF_Investor_Whitepaper.md"
@@ -10,7 +11,7 @@ def main():
         print(f"Error: {md_path} not found")
         return
 
-    with open(md_path, "r", encoding="utf-8") as f:
+    with open(md_path, encoding="utf-8") as f:
         content = f.read()
 
     # Find the mermaid code block

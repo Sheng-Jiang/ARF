@@ -187,6 +187,31 @@ CREATE TABLE IF NOT EXISTS value_chain_snapshot (
 )
 """
 
+_SCHEMA_POOL_MEMBERSHIP = """
+CREATE TABLE IF NOT EXISTS pool_membership (
+    pool_id      TEXT        NOT NULL,
+    ticker       TEXT        NOT NULL,
+    leg          TEXT,
+    cohort       TEXT,       -- core | newcomer
+    listed_at    DATE,
+    added_at     TIMESTAMP   NOT NULL,
+    reason       TEXT,
+    PRIMARY KEY (pool_id, ticker)
+)
+"""
+
+_SCHEMA_POOL_CHANGES = """
+CREATE TABLE IF NOT EXISTS pool_changes (
+    pool_id     TEXT        NOT NULL,
+    ticker      TEXT        NOT NULL,
+    direction   TEXT        NOT NULL,  -- in | out
+    cohort      TEXT,
+    reason      TEXT,
+    applied_at  TIMESTAMP   NOT NULL,
+    PRIMARY KEY (pool_id, ticker, direction)
+)
+"""
+
 
 def init_db(path: Path = Path("data/arf.db")) -> duckdb.DuckDBPyConnection:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -201,7 +226,29 @@ def init_db(path: Path = Path("data/arf.db")) -> duckdb.DuckDBPyConnection:
     conn.execute(_SCHEMA_RESEARCH_SYNTHESIS)
     conn.execute(_SCHEMA_WEEKLY_REPORTS)
     conn.execute(_SCHEMA_VALUE_CHAIN)
+    conn.execute(_SCHEMA_POOL_MEMBERSHIP)
+    conn.execute(_SCHEMA_POOL_CHANGES)
+    _mark_stale_runs_interrupted(conn)
     return conn
+
+
+def _mark_stale_runs_interrupted(conn: duckdb.DuckDBPyConnection) -> None:
+    """Migration: close out zombie 'running' rows left by crashed executions.
+
+    A run stuck in 'running' for >6 hours is a crashed process (pipelines take
+    ~3–5 minutes), not a live one. Marking it 'interrupted' keeps the admin UI
+    from showing a perpetual spinner. Idempotent — safe on every connect.
+    """
+    conn.execute(
+        """
+        UPDATE runs
+        SET status = 'interrupted'
+        WHERE status = 'running'
+          AND finished_at IS NULL
+          AND started_at < now() - INTERVAL '6 hours'
+        """
+    )
+    conn.commit()
 
 
 def start_run(
@@ -621,5 +668,118 @@ def query_value_chain(
         "SELECT * FROM value_chain_snapshot "
         "WHERE as_of_date = (SELECT MAX(as_of_date) FROM value_chain_snapshot) "
         "ORDER BY leg, layer"
+    ).fetchdf()
+
+
+def upsert_pool_membership(
+    conn: duckdb.DuckDBPyConnection,
+    pool_id: str,
+    rows: list[dict],
+    generated_at: datetime | None = None,
+) -> None:
+    """Replace all memberships for ``pool_id`` with ``rows`` (idempotent).
+
+    Each row must have keys: ticker, leg, cohort, listed_at (date | None),
+    reason (str). ``added_at`` defaults to now. Used by the rotation stage to
+    record which names were in each quarter's pool — the percentile rankings
+    are pool-relative, so this table is the audit trail for comparability.
+    """
+    added = generated_at or datetime.now(UTC).replace(tzinfo=None)
+    conn.execute("DELETE FROM pool_membership WHERE pool_id = ?", [pool_id])
+    if not rows:
+        conn.commit()
+        return
+    conn.executemany(
+        "INSERT INTO pool_membership (pool_id, ticker, leg, cohort, listed_at, "
+        "added_at, reason) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [
+            (
+                pool_id,
+                r["ticker"],
+                r.get("leg"),
+                r.get("cohort"),
+                r.get("listed_at"),
+                added,
+                r.get("reason", ""),
+            )
+            for r in rows
+        ],
+    )
+    conn.commit()
+
+
+def query_pool_membership(
+    conn: duckdb.DuckDBPyConnection,
+    pool_id: str | None = None,
+) -> pd.DataFrame:
+    """Return memberships for a pool id, or the latest pool if omitted."""
+    if pool_id is not None:
+        return conn.execute(
+            "SELECT * FROM pool_membership WHERE pool_id = ? ORDER BY leg, cohort, ticker",
+            [pool_id],
+        ).fetchdf()
+    return conn.execute(
+        "SELECT * FROM pool_membership "
+        "WHERE pool_id = (SELECT MAX(pool_id) FROM pool_membership) "
+        "ORDER BY leg, cohort, ticker"
+    ).fetchdf()
+
+
+def list_pool_ids(conn: duckdb.DuckDBPyConnection) -> list[str]:
+    """Distinct pool ids, newest first (e.g. ['2026Q3', '2026Q2'])."""
+    rows = conn.execute(
+        "SELECT DISTINCT pool_id FROM pool_membership ORDER BY pool_id DESC"
+    ).fetchall()
+    return [r[0] for r in rows]
+
+
+def upsert_pool_changes(
+    conn: duckdb.DuckDBPyConnection,
+    pool_id: str,
+    changes: list[dict],
+    generated_at: datetime | None = None,
+) -> None:
+    """Record the in/out swaps of one rotation (replace per pool_id).
+
+    Each change dict must have keys: ticker, direction ('in'|'out'),
+    cohort, reason. Used by the rotation stage to audit every quarterly swap.
+    """
+    applied = generated_at or datetime.now(UTC).replace(tzinfo=None)
+    conn.execute("DELETE FROM pool_changes WHERE pool_id = ?", [pool_id])
+    if not changes:
+        conn.commit()
+        return
+    conn.executemany(
+        "INSERT INTO pool_changes (pool_id, ticker, direction, cohort, reason, "
+        "applied_at) VALUES (?, ?, ?, ?, ?, ?)",
+        [
+            (
+                pool_id,
+                c["ticker"],
+                c["direction"],
+                c.get("cohort"),
+                c.get("reason", ""),
+                applied,
+            )
+            for c in changes
+        ],
+    )
+    conn.commit()
+
+
+def query_pool_changes(
+    conn: duckdb.DuckDBPyConnection,
+    pool_id: str | None = None,
+) -> pd.DataFrame:
+    """Return rotation changes for a pool, or the latest pool if omitted."""
+    if pool_id is not None:
+        return conn.execute(
+            "SELECT * FROM pool_changes WHERE pool_id = ? ORDER BY direction, ticker",
+            [pool_id],
+        ).fetchdf()
+    return conn.execute(
+        "SELECT * FROM pool_changes "
+        "WHERE pool_id = (SELECT MAX(pool_id) FROM pool_changes) "
+        "ORDER BY direction, ticker"
     ).fetchdf()
 

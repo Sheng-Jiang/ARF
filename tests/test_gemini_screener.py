@@ -1,8 +1,9 @@
 """Unit tests for the AI stock screener query compiler in webapp/gemini.py."""
-from unittest.mock import MagicMock, patch
 from datetime import date
-import pytest
+from unittest.mock import MagicMock, patch
+
 from webapp.gemini import parse_nlp_screener_query
+
 
 def test_parse_nlp_screener_query_success():
     """Verify that parse_nlp_screener_query correctly initializes the client and returns clean SQL."""

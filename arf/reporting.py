@@ -61,15 +61,79 @@ def _preipo_table(df: pd.DataFrame) -> str:
     return "\n".join([header, sep] + rows)
 
 
+def _newcomer_table(df: pd.DataFrame) -> str:
+    """Newcomer leaderboard — no decile/froth columns (they rank in their own
+    small group, see compute_arf cohort handling)."""
+    cols = [
+        ("Ticker", lambda r: r["ticker"]),
+        ("Name", lambda r: r.get("name", "")),
+        ("Layer", lambda r: r.get("layer", "")),
+        ("ARF", lambda r: _fmt(r.get("arf"))),
+        ("E", lambda r: _fmt(r.get("e_score"))),
+        ("V", lambda r: _fmt(r.get("v_score"))),
+        ("Fwd P/E", lambda r: _fmt(r.get("forward_pe"))),
+        ("P/S", lambda r: _fmt(r.get("ps_ratio"))),
+        ("Rev YoY", lambda r: _pct(r.get("revenue_yoy_growth"))),
+        ("ROE", lambda r: _pct(r.get("roe"))),
+    ]
+    header = " | ".join(c[0] for c in cols)
+    sep = " | ".join("---" for _ in cols)
+    rows = []
+    for _, row in df.sort_values("arf", ascending=False, na_position="last").iterrows():
+        rows.append(" | ".join(fn(row) for _, fn in cols))
+    return "\n".join([header, sep] + rows)
+
+
 def _europe_table(df: pd.DataFrame) -> str:
     return _preipo_table(df)
 
 
 def render_markdown(df: pd.DataFrame, as_of: date) -> str:
+    use_cohort = "cohort" in df.columns
     us = df[df["leg"] == "US"]
     china = df[df["leg"] == "China"]
     preipo = df[df["leg"] == "Pre-IPO"]
     europe = df[df["leg"] == "Europe-ref"]
+
+    if use_cohort:
+        us_core = us[us["cohort"] == "core"]
+        us_new = us[us["cohort"] == "newcomer"]
+        china_core = china[china["cohort"] == "core"]
+        china_new = china[china["cohort"] == "newcomer"]
+
+        d1_us = int((us_core["decile"] == 1).sum()) if len(us_core) else 0
+        d1_china = int((china_core["decile"] == 1).sum()) if len(china_core) else 0
+        froth_us = int((us_core["froth_flag"] == True).sum()) if len(us_core) else 0  # noqa: E712
+        froth_china = int((china_core["froth_flag"] == True).sum()) if len(china_core) else 0  # noqa: E712
+
+        lines = [
+            f"# AI Relevance Factor Report — {as_of}",
+            "",
+            f"**As of:** {as_of}  |  **US core:** {len(us_core)} + 新秀 {len(us_new)}"
+            f"  |  **China core:** {len(china_core)} + 新秀 {len(china_new)}",
+            "",
+            "## Bubble Thermometer Summary (核心榜)",
+            "",
+            "| Leg | D1 count | Froth flags |",
+            "| --- | --- | --- |",
+            f"| US | {d1_us} | {froth_us} |",
+            f"| China | {d1_china} | {froth_china} |",
+            "",
+            "> ★ = froth flag (D1 + ROE < cost-of-equity + P/S > 25)；新秀独立排名、不占 D1–D10。",
+            "",
+        ]
+
+        if len(us_core):
+            lines += ["## US Leg — 核心榜 (45)", "", _leg_table(us_core), ""]
+        if len(china_core):
+            lines += ["## China Leg — 核心榜 (45)", "", _leg_table(china_core), ""]
+        if len(us_new):
+            lines += ["## US Leg — 新秀榜", "", _newcomer_table(us_new), ""]
+        if len(china_new):
+            lines += ["## China Leg — 新秀榜", "", _newcomer_table(china_new), ""]
+        if len(preipo):
+            lines += ["## 新秀观察 (Pre-IPO)", "", _preipo_table(preipo), ""]
+        return "\n".join(lines)
 
     d1_us = int((us["decile"] == 1).sum()) if len(us) else 0
     d1_china = int((china["decile"] == 1).sum()) if len(china) else 0

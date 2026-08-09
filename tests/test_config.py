@@ -2,9 +2,17 @@ from pathlib import Path
 
 import pytest
 
-from arf.config import UniverseEntry, get_leg, load_universe
+from arf.config import (
+    UniverseEntry,
+    get_leg,
+    get_pool_entries,
+    load_universe,
+)
 
 UNIVERSE_PATH = Path(__file__).parent.parent / "config" / "universe.yaml"
+
+# The active quarterly pool — keep in sync with scripts/build_pool_universe.py.
+ACTIVE_POOL = "2026Q3"
 
 
 @pytest.fixture(scope="module")
@@ -17,13 +25,52 @@ def test_load_universe_returns_all_entries(universe):
 
 
 def test_us_leg_count(universe):
+    # US leg holds 54 entries total; 50 are in the active pool.
     us = get_leg(universe, "US")
-    assert len(us) == 36
+    assert len(us) == 54
+    us_pool = get_pool_entries(us, ACTIVE_POOL)
+    assert len(us_pool) == 50
 
 
 def test_china_leg_count(universe):
     china = get_leg(universe, "China")
-    assert len(china) == 37
+    assert len(china) == 50
+    china_pool = get_pool_entries(china, ACTIVE_POOL)
+    assert len(china_pool) == 50
+
+
+def test_pool_is_50_50_with_45_5_split(universe):
+    for leg_name in ("US", "China"):
+        pool = get_pool_entries(get_leg(universe, leg_name), ACTIVE_POOL)
+        core = [e for e in pool if e.cohort == "core"]
+        newcomers = [e for e in pool if e.cohort == "newcomer"]
+        assert len(core) == 45, f"{leg_name} core = {len(core)}, expected 45"
+        assert len(newcomers) == 5, f"{leg_name} newcomers = {len(newcomers)}, expected 5"
+
+
+def test_europe_adrs_moved_into_us_leg(universe):
+    tickers = {e.ticker for e in get_leg(universe, "US")}
+    assert {"ASML", "ARM", "SAP", "ABBNY", "SMEGF", "SBGSF", "STM", "IFNNY"} <= tickers
+    assert get_leg(universe, "Europe-ref") == []
+
+
+def test_watchlist_not_scored(universe):
+    watch = [e for e in universe if e.cohort == "watch" and e.pool is None]
+    assert len(watch) >= 8  # 4 US candidates + Pre-IPO observation tier
+    assert all(e.pool is None for e in watch)
+
+
+def test_preipo_observation_tier_includes_new_names(universe):
+    preipo = {e.ticker for e in get_leg(universe, "Pre-IPO")}
+    assert {"SPACEX", "CXMT", "UNITREE"} <= preipo
+
+
+def test_newcomer_listed_dates_parse(universe):
+    newcomers = [e for e in universe if e.cohort == "newcomer"]
+    assert len(newcomers) == 10
+    for e in newcomers:
+        assert e.listed_at is not None, f"{e.ticker} missing listed_at"
+        assert e.pool == ACTIVE_POOL
 
 
 def test_pure_play_pct_range(universe):

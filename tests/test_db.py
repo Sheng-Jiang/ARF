@@ -7,15 +7,18 @@ import pytest
 from arf.db import (
     finish_run,
     init_db,
+    list_pool_ids,
     query_fetch_outcomes,
     query_gemini_summaries,
     query_latest,
     query_latest_run,
+    query_pool_membership,
     query_runs,
     query_snapshot,
     record_fetch_outcomes,
     start_run,
     upsert_gemini_summaries,
+    upsert_pool_membership,
     upsert_snapshot,
 )
 
@@ -345,3 +348,83 @@ class TestGeminiSerialization:
     def test_db_rows_to_report_empty_df_returns_none(self):
         from webapp.gemini import db_rows_to_report
         assert db_rows_to_report(pd.DataFrame(), date(2026, 5, 28)) is None
+
+
+class TestZombieRunMigration:
+    """init_db() closes out stale 'running' rows left by crashed executions."""
+
+    def test_stale_running_marked_interrupted_on_reopen(self, tmp_path):
+        db_path = tmp_path / "zombie.db"
+        c = init_db(db_path)
+        c.execute(
+            "INSERT INTO runs (run_id, as_of_date, started_at, status) "
+            "VALUES ('old', '2026-06-26', now() - INTERVAL '1 day', 'running')"
+        )
+        c.execute(
+            "INSERT INTO runs (run_id, as_of_date, started_at, status) "
+            "VALUES ('fresh', '2026-07-19', now(), 'running')"
+        )
+        c.commit()
+        # The migration must run on every init, not just the first connect.
+        c.close()
+        c2 = init_db(db_path)
+        statuses = dict(c2.execute("SELECT run_id, status FROM runs").fetchall())
+        c2.close()
+        assert statuses["old"] == "interrupted"
+        assert statuses["fresh"] == "running"
+
+    def test_mark_stale_runs_idempotent(self, conn):
+        from arf.db import _mark_stale_runs_interrupted
+
+        conn.execute(
+            "INSERT INTO runs (run_id, as_of_date, started_at, status) "
+            "VALUES ('old', '2026-06-26', now() - INTERVAL '2 days', 'running')"
+        )
+        conn.commit()
+        _mark_stale_runs_interrupted(conn)
+        _mark_stale_runs_interrupted(conn)  # second pass must not raise
+        row = conn.execute("SELECT status FROM runs WHERE run_id = 'old'").fetchone()
+        assert row[0] == "interrupted"
+
+
+class TestPoolMembership:
+    """Quarterly pool audit trail: upsert idempotency + query by pool."""
+
+    def _sample_rows(self):
+        return [
+            {"ticker": "NVDA", "leg": "US", "cohort": "core",
+             "listed_at": None, "reason": "initial"},
+            {"ticker": "CRWV", "leg": "US", "cohort": "newcomer",
+             "listed_at": date(2025, 3, 28), "reason": "new listing"},
+            {"ticker": "688041.SH", "leg": "China", "cohort": "core",
+             "listed_at": date(2022, 8, 12), "reason": "initial"},
+        ]
+
+    def test_upsert_and_query_round_trip(self, conn):
+        upsert_pool_membership(conn, "2026Q3", self._sample_rows())
+        df = query_pool_membership(conn, "2026Q3")
+        assert len(df) == 3
+        by_ticker = {r["ticker"]: r for _, r in df.iterrows()}
+        assert by_ticker["NVDA"]["cohort"] == "core"
+        assert by_ticker["CRWV"]["cohort"] == "newcomer"
+        assert by_ticker["688041.SH"]["leg"] == "China"
+
+    def test_upsert_replaces_same_pool(self, conn):
+        upsert_pool_membership(conn, "2026Q3", self._sample_rows())
+        upsert_pool_membership(conn, "2026Q3", [self._sample_rows()[0]])
+        df = query_pool_membership(conn, "2026Q3")
+        assert len(df) == 1  # replaced, not appended
+        assert df.iloc[0]["ticker"] == "NVDA"
+
+    def test_query_latest_pool(self, conn):
+        upsert_pool_membership(conn, "2026Q2", self._sample_rows()[:1])
+        upsert_pool_membership(conn, "2026Q3", self._sample_rows()[:2])
+        df = query_pool_membership(conn)  # latest = 2026Q3
+        assert set(df["pool_id"]) == {"2026Q3"}
+        assert len(df) == 2
+        assert list_pool_ids(conn) == ["2026Q3", "2026Q2"]
+
+    def test_upsert_empty_clears_pool(self, conn):
+        upsert_pool_membership(conn, "2026Q3", self._sample_rows())
+        upsert_pool_membership(conn, "2026Q3", [])
+        assert query_pool_membership(conn, "2026Q3").empty

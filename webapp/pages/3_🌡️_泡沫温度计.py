@@ -16,6 +16,10 @@ _LEGEND_BELOW = dict(orientation="h", yanchor="top", y=-0.25, xanchor="left", x=
 
 st.title("泡沫温度计")
 st.caption("AI估值泡沫的周度演变。多次运行数据管道后，趋势线将逐渐清晰。")
+st.caption(
+    "⚠️ 口径说明：2026-06-26 之前的快照为旧版小池（32只），之后为 73 只完整池——"
+    "早期绝对泡沫计数与当前口径不可直接比较，趋势图跨过该日期时应谨慎解读。"
+)
 
 as_of = render_sidebar()
 

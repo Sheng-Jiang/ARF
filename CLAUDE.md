@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-ARF (AI Relevance Factor) is a Python data pipeline that computes a single 0–100 score per stock measuring how much a company's valuation is bent by the AI narrative. It covers 72 scored companies (36 in the US leg and 36 in the China leg) of Jensen Huang's "5-layer cake" AI stack, produces weekly ranked reports, and generates a bubble-thermometer chart over time.
+ARF (AI Relevance Factor) is a Python data pipeline that computes a single 0–100 score per stock measuring how much a company's valuation is bent by the AI narrative. It covers 73 scored companies (36 in the US leg and 37 in the China leg — the China leg includes 0100.HK MiniMax) of Jensen Huang's "5-layer cake" AI stack, produces weekly ranked reports, and generates a bubble-thermometer chart over time.
 
 The full spec is in `ARF_PRD.md`. The reference research is in `Reference/`.
 
@@ -40,14 +40,15 @@ ruff check arf/
 4. **Render** — emit `data/snapshots/arf_<date>.parquet`, `reports/arf_<date>.md`, and `reports/thermometer.html`
 
 ### Scoring formula (`arf/scoring.py` — primary test target)
-- **E_score** (AI Exposure): weighted sum of layer (30%), pure-play % (40%), supply-chain criticality (20%), forward AI revenue growth capped at 200% (10%) → z-score → winsorize ±3σ → percentile-rank 0–100 within leg
-- **V_score** (Valuation Stretch): equal-weighted sum of reverse-DCF implied growth gap, PEG-like ratio, EV/Sales 5yr percentile → subtract ROE quality adjustment (±20 pts) → z-score → winsorize ±3σ → percentile-rank 0–100 within leg
-- **ARF**: `sqrt(E_score × V_score)` → percentile-rank within leg → `decile = ceil(ARF / 10)`
+- **E_score** (AI Exposure): weighted sum of layer (30%), pure-play % (40%), supply-chain criticality (20%), forward AI revenue growth capped at 200% (10%) → percentile-rank 0–100 within leg. (`z_score`/`winsorize` helpers exist and are unit-tested, but are not applied — percentile ranking is invariant to monotone transforms, so the PRD's z-score/winsorize step is a no-op for rankings.)
+- **V_score** (Valuation Stretch): equal-weighted sum of reverse-DCF implied growth (local-currency basis), PEG-like ratio, EV/Sales 5yr percentile → subtract ROE quality adjustment (±20 pts) → percentile-rank 0–100 within leg
+- **ARF**: `sqrt(E_score × V_score)` → percentile-rank within leg → `decile = 10 − floor(ARF/10)` (ARF ≥ 90 → D1; note this differs from `ceil(ARF/10)` at exact boundaries)
+- **Implied growth**: `implied_growth` (g*) and `implied_growth_gap` (g* − eps_2yr_cagr consensus proxy) are computed per row in `compute_arf` on a local-currency basis and written to `snapshots`; the thermometer's "growth gap" line reads them via `MEDIAN(implied_growth_gap)`
 - **Froth flag**: `ARF in D1 AND ROE < cost_of_equity AND P/S > 25`
 
 ### Universe legs — scored separately, never pooled
 - **US leg (36 names)**: NVDA, AMD, INTC, MSFT, CRM, EQIX, DLR, ANET, CSCO, NEE, WMB, COHR, LITE, AVGO, MRVL, PLTR, TSM, MU, QCOM, KLAC, LRCX, AMAT, GOOGL, META, AAPL, TSLA, ORCL, NOW, DELL, VRT, CEG, VST, SMCI, ADBE, PANW, SNPS
-- **China leg (36 names)**: 300308.SZ, 300502.SZ, 300394.SZ, 688498.SH, 002281.SZ, 688256.SH, 688981.SH, 000977.SZ, GDS, VNET, 300750.SZ, BIDU, BABA, 0700.HK, 9868.HK, 2513.HK, 601138.SH, 002463.SZ, 300496.SZ, 002230.SZ, 688111.SH, 1810.HK, 3690.HK, 002415.SZ, 300033.SZ, 688787.SH, 603501.SH, 603986.SH, 688012.SH, 0981.HK, 1347.HK, 600584.SH, 000063.SZ, 300017.SZ, 300151.SZ, 600268.SH
+- **China leg (37 names)**: 300308.SZ, 300502.SZ, 300394.SZ, 688498.SH, 002281.SZ, 688256.SH, 688981.SH, 000977.SZ, GDS, VNET, 300750.SZ, BIDU, BABA, 0700.HK, 9868.HK, 2513.HK, 0100.HK, 601138.SH, 002463.SZ, 300496.SZ, 002230.SZ, 688111.SH, 1810.HK, 3690.HK, 002415.SZ, 300033.SZ, 688787.SH, 603501.SH, 603986.SH, 688012.SH, 0981.HK, 1347.HK, 600584.SH, 000063.SZ, 300017.SZ, 300151.SZ, 600268.SH
 - **Pre-IPO**: Anthropic, OpenAI, ByteDance, Moonshot AI, Huawei — manual tier only, no numeric ARF
 - **Europe chokepoint**: ASML, ARM, Siemens Energy, Schneider Electric, STMicro, Infineon, SAP, ABB — display-only reference
 
@@ -66,7 +67,7 @@ All `yfinance` and scraper calls must use retry + exponential backoff. A single 
 
 1. **Cambricon (688256) revenue growth** hits +2386% YoY off a tiny base — cap forward growth at 200% in E_score input.
 2. **Chinese names use 扣非 (after non-recurring items) net profit** for ROE — not reported net income. AkShare exposes this as a separate field.
-3. **FX**: compute all valuation multiples in local currency (CNY/HKD); convert market cap to USD only for cross-leg display. Innolight/Eoptolink had ~¥2.7B FX losses in 2025 that distort GAAP net income.
+3. **FX**: compute all valuation multiples in local currency (CNY/HKD); convert market cap to USD only for cross-leg display. Innolight/Eoptolink had ~¥2.7B FX losses in 2025 that distort GAAP net income. The reverse-DCF (V_score C1 and `implied_growth`) uses the **local-currency market cap** (`market_cap_usd × fx_rate_usd`) so it matches the local-currency FCF — mixing USD market cap with CNY/HKD FCF biases g* by the FX rate.
 4. **SMIC dual-listing** (0981.HK + 688981.SH): prefer A-share (688981.SH) for the China leg's valuation; HK for liquidity reference. Document in `universe.yaml`.
 5. **Policy-premium flag**: Cambricon and SMIC get `policy_premium = True` in output — informational only, not used in the formula.
 6. **WACC**: 10% for US, 12% for China in the reverse-DCF calculation.

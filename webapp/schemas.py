@@ -1,6 +1,8 @@
 import datetime
-from typing import Any, Dict
+from typing import Any
+
 from pydantic import BaseModel
+
 
 class AkshareParams(BaseModel):
     """Parameters for AkShare market data fetching."""
@@ -26,4 +28,4 @@ class BacktraderParams(BaseModel):
 class StrategyBase(BaseModel):
     """Schema representing a trading strategy and its parameter ranges for optimization."""
     name: str
-    params: Dict[str, Any]
+    params: dict[str, Any]

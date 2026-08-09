@@ -9,7 +9,9 @@ from arf.scoring import (
     decile_assignment,
     e_score,
     froth_flag,
+    implied_growth_for_row,
     implied_growth_gap,
+    implied_growth_gap_for_row,
     percentile_rank,
     reverse_dcf,
     v_score,
@@ -395,10 +397,12 @@ class TestCalibrationSanityChecks:
     of universe size.
     """
 
-    @pytest.fixture(scope="class")
-    def calibration_result(self):
-        df = _make_calibration_universe()
-        return compute_arf(df, wacc_us=0.10, wacc_china=0.12)
+
+@pytest.fixture(scope="module")
+def calibration_result():
+    """Scored calibration universe, computed once per module."""
+    df = _make_calibration_universe()
+    return compute_arf(df, wacc_us=0.10, wacc_china=0.12)
 
     def test_nvda_not_in_d1(self, calibration_result):
         nvda = calibration_result[calibration_result["ticker"] == "NVDA"].iloc[0]
@@ -435,3 +439,152 @@ class TestCalibrationSanityChecks:
     def test_csco_lands_d6_to_d10(self, calibration_result):
         csco = calibration_result[calibration_result["ticker"] == "CSCO"].iloc[0]
         assert csco["decile"] >= 6, f"CSCO decile={csco['decile']}, expected D6–D10"
+
+
+# ── Implied growth (local-currency reverse-DCF) ──────────────────────────────
+
+class TestImpliedGrowth:
+    def test_local_currency_equivalence(self):
+        # A CNY name ($100 market cap × fx 7.2 = ¥720) and a USD name ($720)
+        # with identical local FCF must imply the same g*.
+        cny = pd.Series({"market_cap_usd": 100.0, "free_cash_flow": 5.0, "fx_rate_usd": 7.2})
+        usd = pd.Series({"market_cap_usd": 720.0, "free_cash_flow": 5.0, "fx_rate_usd": 1.0})
+        g_cny = implied_growth_for_row(cny, 0.10)
+        g_usd = implied_growth_for_row(usd, 0.10)
+        assert g_cny == pytest.approx(g_usd)
+        # g* = 0.10 − 5/720
+        assert g_cny == pytest.approx(0.10 - 5 / 720)
+
+    def test_negative_fcf_returns_none(self):
+        row = pd.Series({"market_cap_usd": 100.0, "free_cash_flow": -1.0, "fx_rate_usd": 1.0})
+        assert implied_growth_for_row(row, 0.10) is None
+
+    def test_missing_fx_defaults_to_usd(self):
+        row = pd.Series({"market_cap_usd": 100.0, "free_cash_flow": 5.0})
+        assert implied_growth_for_row(row, 0.10) == pytest.approx(0.10 - 5 / 100)
+
+    def test_missing_fcf_returns_none(self):
+        row = pd.Series({"market_cap_usd": 100.0, "fx_rate_usd": 1.0})
+        assert implied_growth_for_row(row, 0.10) is None
+
+    def test_gap_uses_eps_consensus(self):
+        row = pd.Series({"market_cap_usd": 100.0, "free_cash_flow": 5.0,
+                         "fx_rate_usd": 1.0, "eps_2yr_cagr": 0.03})
+        # g* = 0.05, gap = 0.05 − 0.03 = 0.02
+        assert implied_growth_gap_for_row(row, 0.10) == pytest.approx(0.02)
+
+    def test_gap_none_when_consensus_missing(self):
+        row = pd.Series({"market_cap_usd": 100.0, "free_cash_flow": 5.0, "fx_rate_usd": 1.0})
+        assert implied_growth_gap_for_row(row, 0.10) is None
+
+    def test_v_score_c1_currency_consistency(self):
+        # Identical valuation metrics except currency basis — the two rows must
+        # rank identically because their local-currency g* is the same.
+        base = dict(forward_pe=40.0, eps_2yr_cagr=0.20, ev_sales_5yr_percentile=70.0, roe=0.10)
+        df = pd.DataFrame([
+            {"ticker": "CNY_NAME", "market_cap_usd": 100.0, "free_cash_flow": 5.0,
+             "fx_rate_usd": 7.2, **base},
+            {"ticker": "USD_NAME", "market_cap_usd": 720.0, "free_cash_flow": 5.0,
+             "fx_rate_usd": 1.0, **base},
+        ])
+        result = v_score(df, wacc=0.10)
+        assert result.iloc[0] == result.iloc[1]
+
+
+class TestComputeArfImpliedColumns:
+    def test_implied_growth_columns_populated(self):
+        df = _make_arf_df(5)
+        df["fx_rate_usd"] = 1.0
+        result = compute_arf(df, wacc_us=0.10, wacc_china=0.12)
+        assert "implied_growth" in result.columns
+        assert "implied_growth_gap" in result.columns
+        # All rows have positive FCF → g* defined for every row
+        assert result["implied_growth"].notna().all()
+        assert result["implied_growth_gap"].notna().all()
+
+    def test_negative_fcf_gives_null_implied_growth(self):
+        df = _make_arf_df(5)
+        df["fx_rate_usd"] = 1.0
+        df.loc[0, "free_cash_flow"] = -100.0
+        result = compute_arf(df, wacc_us=0.10, wacc_china=0.12)
+        assert pd.isna(result.loc[0, "implied_growth"])
+        assert pd.isna(result.loc[0, "implied_growth_gap"])
+
+    def test_non_scored_legs_pass_null_implied_growth(self):
+        df = _make_arf_df(3)
+        df["fx_rate_usd"] = 1.0
+        other = df.iloc[:1].copy()
+        other["leg"] = "Pre-IPO"
+        other["ticker"] = "OPENAI"
+        combined = pd.concat([df, other], ignore_index=True)
+        result = compute_arf(combined, wacc_us=0.10, wacc_china=0.12)
+        pre = result[result["leg"] == "Pre-IPO"].iloc[0]
+        assert pd.isna(pre["implied_growth"])
+        assert pd.isna(pre["implied_growth_gap"])
+
+
+class TestFrothDefensive:
+    def test_missing_roe_and_ps_do_not_trigger_froth(self):
+        df = _make_arf_df(4)
+        df["fx_rate_usd"] = 1.0
+        # Force the strongest row into D1, then blank its ROE and P/S.
+        df.loc[0, "roe"] = float("nan")
+        df.loc[0, "ps_ratio"] = float("nan")
+        result = compute_arf(df, wacc_us=0.10, wacc_china=0.12)
+        # Missing values must default to non-triggering (1.0 ROE, 0 P/S).
+        assert not result.loc[0, "froth_flag"]
+
+
+class TestComputeArfCohort:
+    """With a cohort column, core and newcomer rank in independent groups."""
+
+    @staticmethod
+    def _cohort_df():
+        base = {
+            "leg": "US", "layer": "L2",
+            "market_cap_usd": 1000.0, "free_cash_flow": 10.0,
+            "forward_pe": 30.0, "eps_2yr_cagr": 0.2,
+            "ev_sales_5yr_percentile": 60.0, "roe": 0.2,
+        }
+        rows = [
+            {"ticker": "CORE1", "cohort": "core", "pure_play_pct": 80.0,
+             "gross_margin": 0.7, "revenue_ntm_growth": 0.5, **base},
+            {"ticker": "CORE2", "cohort": "core", "pure_play_pct": 50.0,
+             "gross_margin": 0.5, "revenue_ntm_growth": 0.3, **base},
+            {"ticker": "CORE3", "cohort": "core", "pure_play_pct": 20.0,
+             "gross_margin": 0.3, "revenue_ntm_growth": 0.1, **base},
+            {"ticker": "NEW1", "cohort": "newcomer", "pure_play_pct": 10.0,
+             "gross_margin": 0.1, "revenue_ntm_growth": 0.05, **base},
+            {"ticker": "NEW2", "cohort": "newcomer", "pure_play_pct": 15.0,
+             "gross_margin": 0.15, "revenue_ntm_growth": 0.08, **base},
+        ]
+        return pd.DataFrame(rows)
+
+    def test_newcomer_ranks_within_own_group(self):
+        df = self._cohort_df()
+        result = compute_arf(df, wacc_us=0.10, wacc_china=0.12)
+
+        new = result[result["cohort"] == "newcomer"].sort_values("arf")
+        core = result[result["cohort"] == "core"]
+        # Newcomers are absolutely weaker than every core name on E inputs,
+        # yet the stronger newcomer must still get 100 within its own group —
+        # proving independent ranking rather than pooling with core.
+        assert new["arf"].iloc[-1] == 100.0   # strongest newcomer, own group
+        assert core["arf"].max() == 100.0     # strongest core, own group
+        assert new["decile"].isna().all()     # newcomers have no D1–D10
+        assert not new["froth_flag"].any()    # no decile → never froth-flagged
+
+    def test_without_cohort_ranks_by_leg(self):
+        # Legacy behaviour: no cohort column → whole leg ranked together.
+        df = _make_arf_df(5)
+        result = compute_arf(df, wacc_us=0.10, wacc_china=0.12)
+        assert result["arf"].max() == 100.0
+        assert result["decile"].notna().all()
+
+    def test_watch_rows_pass_through_null(self):
+        df = _make_arf_df(3)
+        df["cohort"] = ["core", "watch", "core"]
+        result = compute_arf(df, wacc_us=0.10, wacc_china=0.12)
+        watch = result[result["cohort"] == "watch"].iloc[0]
+        assert pd.isna(watch["arf"])
+        assert pd.isna(watch["decile"])

@@ -1,10 +1,9 @@
 """Backtrader backtesting runner for the Streamlit webapp."""
 import logging
-import datetime
+
 import backtrader as bt
 import backtrader.analyzers as btanalyzers
 import pandas as pd
-from typing import Dict, Any
 
 from arf.strategy import STRATEGIES, TechnicalPandasData
 from webapp.schemas import BacktraderParams, StrategyBase
@@ -115,7 +114,7 @@ def run_backtrader(
         
         # Extract parameter values for this run
         row = {}
-        for param in strategy.params.keys():
+        for param in strategy.params:
             row[param] = run.params._getkwargs()[param]
             
         # Extract performance metrics safely (handle potential NaNs/Zeros)

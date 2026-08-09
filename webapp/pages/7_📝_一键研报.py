@@ -1,11 +1,10 @@
 """Streamlit page: One-Click Weekly Report — 一键生成综合研报."""
 import json
-from datetime import date
 from pathlib import Path
 
 import streamlit as st
 
-from webapp.data import _open_conn, list_dates
+from webapp.data import _open_conn
 from webapp.mobile import inject_mobile_css
 from webapp.ui import render_sidebar
 

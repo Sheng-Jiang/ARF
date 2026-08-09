@@ -559,9 +559,10 @@ def synthesize_research(
     if not is_enabled():
         raise RuntimeError("GEMINI_API_KEY not set")
 
-    from arf.fetchers.research import compute_consensus
     from google import genai
     from google.genai import types
+
+    from arf.fetchers.research import compute_consensus
 
     if cohort is None:
         cohort = cohort_for_overview(snapshot_df)

@@ -1,6 +1,5 @@
 """Streamlit page: AI-Screener - Natural Language Multi-Factor Stock Selector."""
-from datetime import date
-from pathlib import Path
+import logging
 
 import pandas as pd
 import streamlit as st
@@ -8,7 +7,7 @@ import streamlit as st
 from webapp import gemini
 
 # Local imports
-from webapp.data import _open_conn, list_dates, refresh_data
+from webapp.data import _open_conn
 from webapp.mobile import inject_mobile_css
 from webapp.ui import render_sidebar
 
@@ -29,8 +28,6 @@ if as_of is None:
     st.stop()
 
 # ── Screener Pool Display ───────────────────────────────────────────────────
-import logging
-
 log = logging.getLogger(__name__)
 
 try:
@@ -186,6 +183,6 @@ if submit_button and query_input.strip():
                             
                     st.dataframe(styled_df, use_container_width=True, hide_index=True)
             except Exception as e:
-                st.error(f"❌ 数据库执行失败。这可能是由于 AI 生成了非法的 SQL 语法。")
+                st.error("❌ 数据库执行失败。这可能是由于 AI 生成了非法的 SQL 语法。")
                 st.exception(e)
                 st.info("💡 建议：请尝试使用更简单的语句，例如：'技术评分大于70且RSI小于50'")

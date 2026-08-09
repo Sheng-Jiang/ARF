@@ -15,6 +15,11 @@ _LAYER_VALUES: dict[str, float] = {
 _GROWTH_CAP = 2.0  # 200% — Cambricon guard
 
 
+# NOTE: z_score/winsorize are retained as tested utilities from the PRD's
+# original flow ("z-score → winsorize ±3σ → percentile-rank"). They are NOT
+# applied inside e_score()/v_score(): percentile_rank() is invariant to
+# monotone transforms, so standardising first is a no-op for rankings. Keep
+# them for analytical use / future non-percentile score variants.
 def z_score(s: pd.Series) -> pd.Series:
     """Compute z-score, treating NaN as missing. Constant series → all zeros."""
     std = s.std(ddof=1)
@@ -66,6 +71,51 @@ def implied_growth_gap(
     if g_star is None:
         return None
     return g_star - consensus_cagr
+
+
+def _local_market_cap(row: pd.Series) -> float | None:
+    """Market cap in the stock's local currency, matching local-currency FCF.
+
+    ``market_cap_usd`` comes from yfinance/Baostock converted to USD, while
+    ``free_cash_flow`` for A-shares/HK names is in CNY/HKD — mixing the two in
+    the Gordon Growth formula (P = FCF / (wacc − g)) biases g* by the FX rate.
+    Multiplying by ``fx_rate_usd`` (local per USD) restores unit consistency.
+    Missing/invalid fx falls back to 1.0 (US names have no conversion).
+    """
+    mkt_cap = row.get("market_cap_usd")
+    if mkt_cap is None or (isinstance(mkt_cap, float) and math.isnan(mkt_cap)):
+        return None
+    fx = row.get("fx_rate_usd")
+    if fx is None or (isinstance(fx, float) and math.isnan(fx)) or fx <= 0:
+        fx = 1.0
+    return float(mkt_cap) * float(fx)
+
+
+def implied_growth_for_row(row: pd.Series, wacc: float) -> float | None:
+    """Reverse-DCF implied perpetual growth g* for one snapshot row.
+
+    Uses the local-currency market cap so units match local-currency FCF
+    (see :func:`_local_market_cap`). Returns None when undefined (negative FCF
+    or missing inputs) — the same gate as V_score component C1.
+    """
+    mkt_cap_local = _local_market_cap(row)
+    fcf = row.get("free_cash_flow")
+    if mkt_cap_local is None or fcf is None or (isinstance(fcf, float) and math.isnan(fcf)):
+        return None
+    return reverse_dcf(mkt_cap_local, float(fcf), wacc)
+
+
+def implied_growth_gap_for_row(row: pd.Series, wacc: float) -> float | None:
+    """g* − consensus growth (``eps_2yr_cagr`` proxy), or None when undefined.
+
+    ``eps_2yr_cagr`` is the only consensus-growth field currently available;
+    for US/HK names it is 1yr forward EPS growth, for A-shares net-income YoY.
+    """
+    g_star = implied_growth_for_row(row, wacc)
+    consensus = row.get("eps_2yr_cagr")
+    if g_star is None or consensus is None or (isinstance(consensus, float) and math.isnan(consensus)):
+        return None
+    return g_star - float(consensus)
 
 
 # ── E_score ───────────────────────────────────────────────────────────────────
@@ -129,15 +179,17 @@ def v_score(df: pd.DataFrame, wacc: float = 0.10) -> pd.Series:
     df = df.copy()
 
     # Component 1: Reverse-DCF implied g* (higher → closer to WACC → more stretched)
-    # Uses market_cap_usd (total) with total FCF so units match in the Gordon Growth formula.
+    # Uses local-currency market cap with local-currency FCF so units match in
+    # the Gordon Growth formula (see _local_market_cap) — A-share/HK FCF is in
+    # CNY/HKD while market_cap_usd is USD; mixing them biases g* by the FX rate.
     gaps = pd.Series(index=df.index, dtype=float)
     for i, row in df.iterrows():
-        mkt_cap = row.get("market_cap_usd")
+        mkt_cap_local = _local_market_cap(row)
         fcf = row.get("free_cash_flow")
-        if any(pd.isna(x) or x is None for x in [mkt_cap, fcf]):
+        if mkt_cap_local is None or fcf is None or (isinstance(fcf, float) and math.isnan(fcf)):
             gaps[i] = float("nan")
         else:
-            g_star = reverse_dcf(float(mkt_cap), float(fcf), wacc)
+            g_star = reverse_dcf(mkt_cap_local, float(fcf), wacc)
             gaps[i] = g_star if g_star is not None else float("nan")
 
     # Component 2: PEG-like ratio (higher → more stretched)
@@ -210,8 +262,12 @@ def compute_arf(
 ) -> pd.DataFrame:
     """Compute E_score, V_score, ARF, decile, and froth_flag per row.
 
-    Legs are scored separately (US and China). Europe-ref and Pre-IPO are
-    passed through with null ARF.
+    Legs are scored separately (US and China). When the input carries a
+    ``cohort`` column, each (leg, cohort) group is ranked independently —
+    core names produce the D1–D10 main board, newcomers rank within their own
+    small group and get no decile (they have their own leaderboard). Without
+    the column (legacy data / unit tests), the whole leg is ranked as before.
+    Pre-IPO and other non-scored rows pass through with null ARF.
 
     Required input columns: all columns needed by e_score() and v_score(),
     plus: leg, roe, ps_ratio (for froth flag).
@@ -219,11 +275,24 @@ def compute_arf(
     df = df.copy()
     result_frames = []
 
-    for leg_name, wacc in [("US", wacc_us), ("China", wacc_china)]:
-        mask = df["leg"] == leg_name
-        if mask.sum() == 0:
-            continue
+    use_cohort = "cohort" in df.columns
+    groups: list[tuple[str, str | None, pd.Series]] = []
+    for leg_name in ("US", "China"):
+        if use_cohort:
+            for cohort in ("core", "newcomer"):
+                mask = (df["leg"] == leg_name) & (df["cohort"] == cohort)
+                if mask.sum() == 0:
+                    continue
+                groups.append((leg_name, cohort, mask))
+        else:
+            mask = df["leg"] == leg_name
+            if mask.sum() == 0:
+                continue
+            groups.append((leg_name, None, mask))
+
+    for leg_name, cohort, mask in groups:
         leg_df = df[mask].copy()
+        wacc = wacc_us if leg_name == "US" else wacc_china
 
         e = e_score(leg_df)
         v = v_score(leg_df, wacc=wacc)
@@ -237,8 +306,22 @@ def compute_arf(
         leg_df["e_score"] = e.values
         leg_df["v_score"] = v.values
         leg_df["arf"] = arf_final.values
-        leg_df["decile"] = leg_df["arf"].apply(
-            lambda x: decile_assignment(x) if not math.isnan(x) else None
+        if cohort == "newcomer":
+            # Newcomers rank within their own group; no D1–D10 decile.
+            leg_df["decile"] = None
+        else:
+            leg_df["decile"] = leg_df["arf"].apply(
+                lambda x: decile_assignment(x) if not math.isnan(x) else None
+            )
+
+        # Reverse-DCF implied growth + gap vs consensus (local-currency basis,
+        # same g* as V_score C1). Feeds the thermometer's median growth-gap line.
+        # Default args bind the per-leg wacc into the lambdas (B023).
+        leg_df["implied_growth"] = leg_df.apply(
+            lambda r, w=wacc: implied_growth_for_row(r, w), axis=1
+        )
+        leg_df["implied_growth_gap"] = leg_df.apply(
+            lambda r, w=wacc: implied_growth_gap_for_row(r, w), axis=1
         )
 
         _wacc = wacc_us if leg_name == "US" else wacc_china
@@ -256,11 +339,18 @@ def compute_arf(
         leg_df["froth_flag"] = leg_df.apply(_froth, axis=1)
         result_frames.append(leg_df)
 
-    # Non-scored legs pass through
-    other_mask = ~df["leg"].isin(["US", "China"])
+    # Non-scored rows pass through (Pre-IPO, watchlist, unknown cohorts).
+    if use_cohort:
+        other_mask = ~(
+            df["leg"].isin(["US", "China"])
+            & df["cohort"].isin(["core", "newcomer"])
+        )
+    else:
+        other_mask = ~df["leg"].isin(["US", "China"])
     if other_mask.any():
         other_df = df[other_mask].copy()
-        for col in ("e_score", "v_score", "arf", "decile", "froth_flag"):
+        for col in ("e_score", "v_score", "arf", "decile", "froth_flag",
+                    "implied_growth", "implied_growth_gap"):
             other_df[col] = None
         result_frames.append(other_df)
 

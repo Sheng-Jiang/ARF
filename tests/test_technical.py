@@ -1,13 +1,13 @@
 """Unit tests for arf.technical indicators and scoring."""
-import numpy as np
 import pandas as pd
-import pytest
+
 from arf.technical import (
-    calculate_technical_indicators,
     calculate_chip_distribution,
+    calculate_technical_indicators,
     score_history,
-    score_stock_technical
+    score_stock_technical,
 )
+
 
 def test_calculate_technical_indicators():
     """Verify that technical indicators are computed correctly and without errors."""
@@ -44,7 +44,7 @@ def test_calculate_technical_indicators():
     assert latest["close"] > latest["ma5"]
     assert latest["close"] > latest["ma20"]
     assert latest["close"] > latest["ma120"]
-    assert latest["ma_bullish_alignment"] == True
+    assert latest["ma_bullish_alignment"]
     
     # 2. RSI should be highly bullish (typically > 70 for strong steady uptrend)
     assert latest["rsi"] > 70.0

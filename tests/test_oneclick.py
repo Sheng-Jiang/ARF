@@ -1,16 +1,15 @@
 from datetime import date
+
 import pandas as pd
-import pytest
-from unittest.mock import MagicMock, patch
 
 from arf.oneclick import (
-    select_top_china_stocks,
-    _compute_thermo_deltas,
-    _backtest_summary_for_gemini,
-    generate_report_html,
     ReportData,
     StockBacktestResult,
     ThermometerDelta,
+    _backtest_summary_for_gemini,
+    _compute_thermo_deltas,
+    generate_report_html,
+    select_top_china_stocks,
 )
 
 

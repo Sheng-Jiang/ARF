@@ -11,6 +11,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 from arf.config import UniverseEntry
 from arf.fetchers.base import StockData
+from arf.fetchers.fx import get_fx_rates
 from arf.fetchers.us import calculate_ev_sales_5yr_percentile
 
 log = logging.getLogger(__name__)
@@ -18,6 +19,7 @@ log = logging.getLogger(__name__)
 # Baostock uses a global singleton connection — serialise all calls.
 _bs_lock = threading.Lock()
 
+# Fallback rates used by fx.py when yfinance is unreachable.
 _FX_CNY_TO_USD = 7.20
 _FX_HKD_TO_USD = 7.78
 
@@ -64,7 +66,7 @@ def _pct_to_decimal(val: float | None) -> float | None:
 def _fetch_a_share(entry: UniverseEntry, as_of: date) -> StockData:
     """Fetch A-share data from Baostock (works outside China, no API token needed)."""
     result = StockData(ticker=entry.ticker, as_of_date=as_of, currency="CNY",
-                       fx_rate_usd=_FX_CNY_TO_USD)
+                       fx_rate_usd=get_fx_rates()["CNY"])
     code = _bs_code(entry.ticker)
 
     with _bs_lock:
@@ -155,10 +157,12 @@ def _populate_a_share(result: StockData, code: str, as_of: date) -> None:
         result.revenue_ttm = _safe(profit_row.get("MBRevenue"))
         # netProfit is the closest Baostock provides to 扣非 at the free tier
         result.net_income_excl_nonrecurring = _safe(profit_row.get("netProfit"))
-        # Market cap from price × total shares
+        # Market cap from price × total shares (local currency → USD via the
+        # same fx rate carried on the result, so V_score C1's local-currency
+        # re-conversion round-trips to the true local market cap).
         total_shares = _safe(profit_row.get("totalShare"))
         if result.price and total_shares:
-            result.market_cap_usd = result.price * total_shares / _FX_CNY_TO_USD
+            result.market_cap_usd = result.price * total_shares / result.fx_rate_usd
 
     # ── 4. Revenue YoY growth ─────────────────────────────────────────────────
     if profit_row and result.revenue_ttm:
@@ -221,7 +225,8 @@ def _fetch_hk_or_adr(entry: UniverseEntry, as_of: date) -> StockData:
 
         currency = info.get("currency", "HKD" if entry.ticker.endswith(".HK") else "USD")
         result.currency = currency
-        fx = _FX_HKD_TO_USD if currency == "HKD" else (_FX_CNY_TO_USD if currency == "CNY" else 1.0)
+        rates = get_fx_rates()
+        fx = rates["HKD"] if currency == "HKD" else (rates["CNY"] if currency == "CNY" else 1.0)
         result.fx_rate_usd = fx
 
         result.price = _safe(info.get("currentPrice") or info.get("regularMarketPrice"))

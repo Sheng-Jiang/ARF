@@ -146,3 +146,39 @@ def load_value_chain(as_of: date | None = None) -> pd.DataFrame:
         "WHERE as_of_date = (SELECT MAX(as_of_date) FROM value_chain_snapshot) "
         "ORDER BY leg, layer"
     ).fetchdf()
+
+
+def list_pool_ids() -> list[str]:
+    """Quarterly pool ids present in pool_membership, newest first."""
+    rows = _open_conn().execute(
+        "SELECT DISTINCT pool_id FROM pool_membership ORDER BY pool_id DESC"
+    ).fetchall()
+    return [r[0] for r in rows]
+
+
+def load_pool_membership(pool_id: str | None = None) -> pd.DataFrame:
+    """Members of a pool (or the latest one if omitted)."""
+    if pool_id is not None:
+        return _open_conn().execute(
+            "SELECT * FROM pool_membership WHERE pool_id = ? ORDER BY leg, cohort, ticker",
+            [pool_id],
+        ).fetchdf()
+    return _open_conn().execute(
+        "SELECT * FROM pool_membership "
+        "WHERE pool_id = (SELECT MAX(pool_id) FROM pool_membership) "
+        "ORDER BY leg, cohort, ticker"
+    ).fetchdf()
+
+
+def load_pool_changes(pool_id: str | None = None) -> pd.DataFrame:
+    """Rotation in/out changes for a pool (or the latest one if omitted)."""
+    if pool_id is not None:
+        return _open_conn().execute(
+            "SELECT * FROM pool_changes WHERE pool_id = ? ORDER BY direction, ticker",
+            [pool_id],
+        ).fetchdf()
+    return _open_conn().execute(
+        "SELECT * FROM pool_changes "
+        "WHERE pool_id = (SELECT MAX(pool_id) FROM pool_changes) "
+        "ORDER BY direction, ticker"
+    ).fetchdf()

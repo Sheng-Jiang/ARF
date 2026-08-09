@@ -43,11 +43,14 @@ def _make_report_df() -> pd.DataFrame:
     return pd.DataFrame(us + china + preipo + europe)
 
 
+@pytest.fixture(scope="module")
+def report():
+    """Markdown report for the sample universe, computed once per module."""
+    df = _make_report_df()
+    return render_markdown(df, as_of=date(2026, 5, 28))
+
+
 class TestRenderMarkdown:
-    @pytest.fixture(scope="class")
-    def report(self):
-        df = _make_report_df()
-        return render_markdown(df, as_of=date(2026, 5, 28))
 
     def test_contains_us_leg_section(self, report):
         assert "US Leg" in report or "## US" in report
@@ -114,3 +117,58 @@ class TestRenderThermometerHtml:
         ])
         result = render_thermometer_html(thermo)
         assert "plotly" in result.lower() or "Plotly" in result
+
+
+def _make_cohort_df() -> pd.DataFrame:
+    base = {
+        "name": "X", "layer": "L2", "arf": 50.0, "decile": 5,
+        "e_score": 50.0, "v_score": 50.0, "froth_flag": False,
+        "forward_pe": 20.0, "ps_ratio": 10.0, "revenue_yoy_growth": 0.2,
+        "roe": 0.2, "policy_premium": False,
+    }
+    newcomer = {**base, "arf": 90.0, "decile": None, "froth_flag": False}
+    preipo = {
+        "ticker": "SPACEX", "name": "SpaceX", "leg": "Pre-IPO", "layer": "L3",
+        "cohort": "watch", "arf": None, "decile": None, "e_score": None,
+        "v_score": None, "froth_flag": None, "forward_pe": None, "ps_ratio": None,
+        "revenue_yoy_growth": None, "roe": None, "policy_premium": False,
+    }
+    return pd.DataFrame([
+        {"ticker": "USC1", "leg": "US", "cohort": "core", **base},
+        {"ticker": "USC2", "leg": "US", "cohort": "core", **base},
+        {"ticker": "USN1", "leg": "US", "cohort": "newcomer", **newcomer},
+        {"ticker": "CNC1", "leg": "China", "cohort": "core", **base},
+        {"ticker": "CNN1", "leg": "China", "cohort": "newcomer", **newcomer},
+        preipo,
+    ])
+
+
+class TestRenderMarkdownCohort:
+    def test_splits_core_newcomer_observation(self):
+        md = render_markdown(_make_cohort_df(), as_of=date(2026, 8, 9))
+        assert "US Leg — 核心榜" in md
+        assert "China Leg — 核心榜" in md
+        assert "USC1" in md and "CNC1" in md
+        assert "US Leg — 新秀榜" in md
+        assert "China Leg — 新秀榜" in md
+        assert "USN1" in md and "CNN1" in md
+        assert "新秀观察 (Pre-IPO)" in md
+        assert "SpaceX" in md  # _preipo_table shows name, not ticker
+
+    def test_core_board_has_decile_and_froth(self):
+        md = render_markdown(_make_cohort_df(), as_of=date(2026, 8, 9))
+        us_core_section = md.split("US Leg — 核心榜")[1].split("US Leg — 新秀榜")[0]
+        assert "| D |" in us_core_section
+        assert "Froth" in us_core_section
+
+    def test_newcomer_board_has_no_decile_column(self):
+        md = render_markdown(_make_cohort_df(), as_of=date(2026, 8, 9))
+        us_new_section = md.split("US Leg — 新秀榜")[1].split("China Leg — 新秀榜")[0]
+        assert "| D |" not in us_new_section
+        assert "Froth" not in us_new_section
+        assert "USN1" in us_new_section
+
+    def test_no_europe_section_in_cohort_mode(self):
+        md = render_markdown(_make_cohort_df(), as_of=date(2026, 8, 9))
+        assert "Europe" not in md
+        assert "Bubble Thermometer Summary" in md
