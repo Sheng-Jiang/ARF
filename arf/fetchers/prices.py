@@ -130,6 +130,61 @@ def _fetch_yf_shares(ticker: str) -> float:
     return _SHARES_FALLBACK
 
 
+def _fetch_a_prices_baostock(ticker: str, start_date: str, end_date: str) -> pd.DataFrame:
+    """Baostock daily OHLCV fallback for A-shares when Tencent/AkShare fails.
+
+    The AkShare/Tencent endpoint (``stock_zh_a_hist_tx``) is geo-blocked or
+    rate-limited from cloud datacenter IPs (Cloud Run) — the weekly pipeline's
+    primary A-share source (Baostock) is reachable there, so the 技术指标与回测
+    page falls back to it instead of showing "获取历史数据失败".
+
+    Returns the standard ['ticker','date','open','high','low','close','volume']
+    frame with volume in HANDS (÷100) to match the AkShare/Tencent convention
+    the rest of the app assumes for A-shares. ``adjustflag="3"`` is 前复权 (≈ qfq),
+    matching the page's default adjustment basis.
+    """
+    import threading
+
+    import baostock as bs
+
+    if "." not in ticker:
+        return pd.DataFrame()
+    code, exchange = ticker.split(".")
+    bs_code = f"sh.{code}" if exchange == "SH" else f"sz.{code}"
+
+    rows: list[dict] = []
+    lock = threading.Lock()  # Baostock uses a global singleton connection.
+    with lock:
+        lg = bs.login()
+        if lg.error_code != "0":
+            log.warning("Baostock fallback login failed for %s", ticker)
+            return pd.DataFrame()
+        try:
+            rs = bs.query_history_k_data_plus(
+                bs_code, "date,open,high,low,close,volume",
+                start_date=start_date, end_date=end_date,
+                frequency="d", adjustflag="3",
+            )
+            while rs.error_code == "0" and rs.next():
+                rows.append(dict(zip(rs.fields, rs.get_row_data(), strict=False)))
+        except Exception as exc:  # noqa: BLE001 — never break the page on a source failure
+            log.warning("Baostock fallback fetch failed for %s: %s", ticker, exc)
+        finally:
+            bs.logout()
+
+    if not rows:
+        return pd.DataFrame()
+    df = pd.DataFrame(rows)
+    df["ticker"] = ticker
+    for col in ("open", "high", "low", "close", "volume"):
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    df["volume"] = df["volume"] / 100.0  # 股 → 手 (A-share convention)
+    df["date"] = pd.to_datetime(df["date"]).dt.date
+    return df[["ticker", "date", "open", "high", "low", "close", "volume"]].dropna(
+        subset=["close"]
+    ).reset_index(drop=True)
+
+
 def fetch_daily_prices_any(
     ticker: str, start_date: str, end_date: str, adjust: str = "qfq"
 ) -> pd.DataFrame:
@@ -138,6 +193,8 @@ def fetch_daily_prices_any(
     A-shares use AkShare; HK/US use yfinance. For HK, if yfinance returns too few
     bars (Yahoo throttles newly-listed names like MiniMax 0100.HK to a 1d/5d
     window), fall back to AkShare's Eastmoney history.
+    For A-shares, if AkShare/Tencent returns nothing (geo-blocked / rate-limited
+    from cloud IPs), fall back to Baostock (the weekly pipeline's A-share source).
 
     `adjust` applies only to the A-share path. yfinance always auto-adjusts
     (forward split/dividend adjustment ≈ 前复权/qfq), so the HK AkShare fallback is
@@ -146,7 +203,13 @@ def fetch_daily_prices_any(
     """
     market = detect_market(ticker)
     if market == "A":
-        return _fetch_a_prices(ticker, start_date, end_date, adjust)
+        df = _fetch_a_prices(ticker, start_date, end_date, adjust)
+        if df.empty:
+            log.warning(
+                "AkShare/Tencent returned no prices for %s — trying Baostock fallback", ticker
+            )
+            df = _fetch_a_prices_baostock(ticker, start_date, end_date)
+        return df
     if market == "HK":
         df = _fetch_yf_prices(ticker, start_date, end_date)
         if len(df) >= _HK_MIN_HISTORY_ROWS:

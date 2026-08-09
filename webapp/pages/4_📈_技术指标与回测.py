@@ -170,7 +170,13 @@ with st.spinner("正在获取股票历史行情..."):
     df_raw = load_prices(ticker, start_str, end_str, adjust)
 
 if df_raw.empty:
-    st.error(f"❌ 获取股票 {ticker} 的历史数据失败，请检查网络或确认代码是否正确（部分退市/停牌标的或数据源不支持）。")
+    # A transient source failure must not be pinned by the 1h cache: evict this
+    # key so a page refresh actually re-fetches instead of replaying the error.
+    load_prices.clear(ticker, start_str, end_str, adjust)
+    st.error(
+        f"❌ 获取股票 {ticker} 的历史数据失败，请检查网络或确认代码是否正确"
+        "（部分退市/停牌标的或数据源不支持）。A 股已自动尝试腾讯 + Baostock 双源。"
+    )
     st.stop()
 
 # Newly-listed names (e.g. MiniMax 0100.HK) may only have a few months of bars.
