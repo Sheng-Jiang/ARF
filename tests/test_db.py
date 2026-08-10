@@ -1,5 +1,5 @@
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import pandas as pd
 import pytest
@@ -373,6 +373,33 @@ class TestZombieRunMigration:
         assert statuses["old"] == "interrupted"
         assert statuses["fresh"] == "running"
 
+    def test_live_run_survives_an_eastern_session_timezone(self, tmp_path):
+        """started_at is naive UTC; the cutoff must be too.
+
+        Compared against bare now() (a TIMESTAMPTZ), DuckDB reads the naive
+        column in the session time zone. At UTC+8 that shifts it 8 hours
+        forward, so a run started this instant already looks stale and every
+        connect would mark the *live* pipeline interrupted.
+        """
+        from datetime import UTC, datetime
+
+        from arf.db import _mark_stale_runs_interrupted, start_run
+
+        db_path = tmp_path / "tz.db"
+        c = init_db(db_path)
+        c.execute("SET TimeZone='Asia/Shanghai'")
+        start_run(c, "live", date(2026, 8, 10), "manual")
+        start_run(
+            c, "zombie", date(2026, 8, 9), "manual",
+            started_at=datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=9),
+        )
+
+        _mark_stale_runs_interrupted(c)
+        statuses = dict(c.execute("SELECT run_id, status FROM runs").fetchall())
+        c.close()
+        assert statuses["live"] == "running"
+        assert statuses["zombie"] == "interrupted"
+
     def test_mark_stale_runs_idempotent(self, conn):
         from arf.db import _mark_stale_runs_interrupted
 
@@ -385,6 +412,68 @@ class TestZombieRunMigration:
         _mark_stale_runs_interrupted(conn)  # second pass must not raise
         row = conn.execute("SELECT status FROM runs WHERE run_id = 'old'").fetchone()
         assert row[0] == "interrupted"
+
+
+class TestThermometerCohortFilter:
+    """The thermometer aggregates the core board only.
+
+    Newcomers are percentile-ranked inside their own 5-name cohort, so the top
+    one always scores arf = 100. Pooling them with the core board adds a
+    guaranteed phantom D1 per leg every week and drags MEDIAN(arf) upward —
+    and disagrees with render_markdown, which already counts core only.
+    """
+
+    def _rows(self, cohorts: list[tuple[str, str, float]]) -> pd.DataFrame:
+        return pd.DataFrame([
+            {"ticker": f"T{i}", "leg": "US", "cohort": cohort, "arf": arf,
+             "froth_flag": False, "roe": 0.5, "ps_ratio": 3.0,
+             "ev_sales_5yr_percentile": 50.0, "implied_growth_gap": 0.01,
+             "name": name}
+            for i, (name, cohort, arf) in enumerate(cohorts)
+        ])
+
+    def test_newcomers_excluded_from_counts_and_median(self, conn):
+        from arf.db import query_thermometer_series
+
+        upsert_snapshot(conn, self._rows([
+            ("core-low", "core", 10.0),
+            ("core-mid", "core", 20.0),
+            ("core-high", "core", 30.0),
+            ("newcomer-top", "newcomer", 100.0),  # always 100 within its cohort
+            ("newcomer-2", "newcomer", 80.0),
+        ]), date(2026, 8, 9))
+
+        row = query_thermometer_series(conn).iloc[0]
+        assert row["count_arf_gte_90"] == 0      # the phantom D1 is gone
+        assert row["median_arf"] == 20.0         # median of the 3 core rows
+
+    def test_rows_without_a_cohort_are_treated_as_core(self, conn):
+        """Snapshots written before the cohort column must still aggregate."""
+        from arf.db import query_thermometer_series
+
+        df = self._rows([("legacy", "core", 40.0)])
+        df["cohort"] = None
+        upsert_snapshot(conn, df, date(2026, 8, 9))
+        assert query_thermometer_series(conn).iloc[0]["median_arf"] == 40.0
+
+
+class TestSchemaMigration:
+    def test_cohort_column_added_to_an_existing_db(self, tmp_path):
+        """CREATE TABLE IF NOT EXISTS leaves an old table untouched."""
+        import duckdb
+
+        db_path = tmp_path / "old.db"
+        c = duckdb.connect(str(db_path))
+        c.execute(
+            "CREATE TABLE snapshots (ticker TEXT, as_of_date DATE, leg TEXT, "
+            "arf DOUBLE, PRIMARY KEY (ticker, as_of_date))"
+        )
+        c.close()
+
+        c2 = init_db(db_path)
+        cols = {r[0] for r in c2.execute("DESCRIBE snapshots").fetchall()}
+        c2.close()
+        assert {"cohort", "financial_currency", "financial_fx_usd"} <= cols
 
 
 class TestPoolMembership:

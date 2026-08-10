@@ -1,4 +1,4 @@
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import duckdb
@@ -11,6 +11,10 @@ CREATE TABLE IF NOT EXISTS snapshots (
     leg                     TEXT,
     layer                   TEXT,
     name                    TEXT,
+    -- core | newcomer. Percentiles are ranked within (leg, cohort), so
+    -- newcomers are not comparable to the core board and must be filtered
+    -- out of any cross-sectional aggregate. NULL on pre-cohort rows = core.
+    cohort                  TEXT,
     -- market data
     price                   DOUBLE,
     market_cap_usd          DOUBLE,
@@ -44,6 +48,11 @@ CREATE TABLE IF NOT EXISTS snapshots (
     data_source             TEXT,
     currency                TEXT,
     fx_rate_usd             DOUBLE,
+    -- Reporting currency of the financial statements; differs from `currency`
+    -- for ADRs (BABA reports CNY, TSM reports TWD) and sets the reverse-DCF's
+    -- unit basis. See arf.scoring._local_market_cap.
+    financial_currency      TEXT,
+    financial_fx_usd        DOUBLE,
     PRIMARY KEY (ticker, as_of_date)
 )
 """
@@ -228,8 +237,34 @@ def init_db(path: Path = Path("data/arf.db")) -> duckdb.DuckDBPyConnection:
     conn.execute(_SCHEMA_VALUE_CHAIN)
     conn.execute(_SCHEMA_POOL_MEMBERSHIP)
     conn.execute(_SCHEMA_POOL_CHANGES)
+    _add_missing_columns(conn)
     _mark_stale_runs_interrupted(conn)
     return conn
+
+
+# Columns added after the first release. CREATE TABLE IF NOT EXISTS leaves an
+# existing table untouched, so each one needs an explicit ALTER on old DBs.
+_ADDED_COLUMNS: dict[str, dict[str, str]] = {
+    "snapshots": {
+        "cohort": "TEXT",
+        "financial_currency": "TEXT",
+        "financial_fx_usd": "DOUBLE",
+    },
+}
+
+# Predicate restricting a snapshots query to the comparable core board.
+# Rows written before the cohort column existed are all core, hence COALESCE.
+CORE_ONLY = "COALESCE(cohort, 'core') = 'core'"
+
+
+def _add_missing_columns(conn: duckdb.DuckDBPyConnection) -> None:
+    """Bring an existing DB up to the current schema (idempotent)."""
+    for table, columns in _ADDED_COLUMNS.items():
+        existing = {row[0] for row in conn.execute(f"DESCRIBE {table}").fetchall()}
+        for name, sql_type in columns.items():
+            if name not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {sql_type}")
+    conn.commit()
 
 
 def _mark_stale_runs_interrupted(conn: duckdb.DuckDBPyConnection) -> None:
@@ -238,15 +273,23 @@ def _mark_stale_runs_interrupted(conn: duckdb.DuckDBPyConnection) -> None:
     A run stuck in 'running' for >6 hours is a crashed process (pipelines take
     ~3–5 minutes), not a live one. Marking it 'interrupted' keeps the admin UI
     from showing a perpetual spinner. Idempotent — safe on every connect.
+
+    ``started_at`` is stored as a naive UTC TIMESTAMP (see :func:`start_run`),
+    so the cutoff must be naive UTC too. Comparing against bare ``now()`` (a
+    TIMESTAMPTZ) makes DuckDB read the naive column in the session time zone:
+    east of UTC that shifts it forward and a run started *this second* already
+    looks 8 hours old, so every connect would kill the live pipeline.
     """
+    cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=6)
     conn.execute(
         """
         UPDATE runs
         SET status = 'interrupted'
         WHERE status = 'running'
           AND finished_at IS NULL
-          AND started_at < now() - INTERVAL '6 hours'
-        """
+          AND started_at < ?
+        """,
+        [cutoff],
     )
     conn.commit()
 
@@ -416,8 +459,15 @@ def query_latest(conn: duckdb.DuckDBPyConnection) -> pd.DataFrame:
 
 
 def query_thermometer_series(conn: duckdb.DuckDBPyConnection) -> pd.DataFrame:
-    """Return weekly bubble-thermometer metrics over time."""
-    return conn.execute("""
+    """Return weekly bubble-thermometer metrics over time (core board only).
+
+    Newcomers are percentile-ranked inside their own 5-name cohort, so the top
+    one always scores arf = 100 and the group is spread 20/40/…/100 regardless
+    of valuation. Pooling them with the core board would add a guaranteed
+    phantom D1 per leg every week and drag MEDIAN(arf) toward 60 — and would
+    disagree with render_markdown, which already counts core only.
+    """
+    return conn.execute(f"""
         SELECT
             as_of_date,
             leg,
@@ -432,6 +482,7 @@ def query_thermometer_series(conn: duckdb.DuckDBPyConnection) -> pd.DataFrame:
             MEDIAN(implied_growth_gap) * 100 AS median_growth_gap_pct,
             MEDIAN(arf) AS median_arf
         FROM snapshots
+        WHERE {CORE_ONLY}
         GROUP BY as_of_date, leg
         ORDER BY as_of_date, leg
     """).fetchdf()

@@ -37,6 +37,13 @@ class StockData:
     ev_sales_5yr_percentile: float | None = None
 
     # Metadata
-    currency: str = "USD"
-    fx_rate_usd: float = 1.0
+    currency: str = "USD"           # trading currency of the quote
+    fx_rate_usd: float = 1.0        # units of `currency` per USD
+    # Currency the income/cash-flow statements are reported in. For ADRs this
+    # differs from `currency`: BABA/BIDU/PDD trade in USD but report in CNY,
+    # TSM trades in USD but reports in TWD. The reverse-DCF divides market cap
+    # by FCF, so it needs the market cap in *this* currency, not the trading
+    # one. Defaults track `currency` when a fetcher does not set them.
+    financial_currency: str | None = None
+    financial_fx_usd: float | None = None   # units of financial_currency per USD
     data_source: str = ""

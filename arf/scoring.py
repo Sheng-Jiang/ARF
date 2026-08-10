@@ -73,22 +73,42 @@ def implied_growth_gap(
     return g_star - consensus_cagr
 
 
+def _valid_fx(value: object) -> float | None:
+    if value is None or (isinstance(value, float) and math.isnan(value)):
+        return None
+    try:
+        fx = float(value)
+    except (TypeError, ValueError):
+        return None
+    return fx if fx > 0 else None
+
+
 def _local_market_cap(row: pd.Series) -> float | None:
-    """Market cap in the stock's local currency, matching local-currency FCF.
+    """Market cap in the currency the financial statements are reported in.
 
     ``market_cap_usd`` comes from yfinance/Baostock converted to USD, while
     ``free_cash_flow`` for A-shares/HK names is in CNY/HKD — mixing the two in
     the Gordon Growth formula (P = FCF / (wacc − g)) biases g* by the FX rate.
-    Multiplying by ``fx_rate_usd`` (local per USD) restores unit consistency.
-    Missing/invalid fx falls back to 1.0 (US names have no conversion).
+
+    The conversion must use the *reporting* currency, not the trading one.
+    ADRs are the case that separates them: BABA/BIDU/PDD/GDS/VNET trade in USD
+    (``fx_rate_usd`` = 1.0) but report in CNY, and TSM trades in USD but
+    reports in TWD — using the trading rate there leaves the market cap in USD
+    against a CNY/TWD FCF, inflating the FCF yield ~7x (~32x for TSM) and
+    driving g* sharply negative for the largest names in the China leg.
+
+    Falls back to ``fx_rate_usd`` when the reporting rate is absent (A-shares
+    and HK names report in their trading currency), then to 1.0.
     """
     mkt_cap = row.get("market_cap_usd")
     if mkt_cap is None or (isinstance(mkt_cap, float) and math.isnan(mkt_cap)):
         return None
-    fx = row.get("fx_rate_usd")
-    if fx is None or (isinstance(fx, float) and math.isnan(fx)) or fx <= 0:
-        fx = 1.0
-    return float(mkt_cap) * float(fx)
+    fx = (
+        _valid_fx(row.get("financial_fx_usd"))
+        or _valid_fx(row.get("fx_rate_usd"))
+        or 1.0
+    )
+    return float(mkt_cap) * fx
 
 
 def implied_growth_for_row(row: pd.Series, wacc: float) -> float | None:

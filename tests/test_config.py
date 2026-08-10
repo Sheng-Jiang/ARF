@@ -33,10 +33,29 @@ def test_us_leg_count(universe):
 
 
 def test_china_leg_count(universe):
+    # China leg holds 54 entries total; 50 are in the active pool, 4 are
+    # rotation candidates (without them build_rotation_plan can never pair).
     china = get_leg(universe, "China")
-    assert len(china) == 50
+    assert len(china) == 54
     china_pool = get_pool_entries(china, ACTIVE_POOL)
     assert len(china_pool) == 50
+
+
+def test_both_legs_have_rotation_candidates(universe):
+    """A leg with no watchlist candidates can never rotate — the plan pairs 1:1."""
+    for leg_name in ("US", "China"):
+        candidates = [
+            e for e in get_leg(universe, leg_name)
+            if e.cohort == "watch" and e.pool is None
+        ]
+        assert candidates, f"{leg_name} has no rotation candidates"
+
+
+def test_get_pool_entries_defaults_to_active_pool(universe):
+    """The bare call must return the pool, not everything outside it."""
+    assert get_pool_entries(universe) == get_pool_entries(universe, ACTIVE_POOL)
+    assert all(e.pool == ACTIVE_POOL for e in get_pool_entries(universe))
+    assert len(get_pool_entries(universe)) == 100
 
 
 def test_pool_is_50_50_with_45_5_split(universe):

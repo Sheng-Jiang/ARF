@@ -16,6 +16,10 @@ htmlcov/
 .pytest_cache/
 .ruff_cache/
 
+# Local tool state — .gcloud-config holds credentials.db / access_tokens.db
+.gcloud-config/
+.codewhale/
+
 # MS Office documents
 *.docx
 *.doc

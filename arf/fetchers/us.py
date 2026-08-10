@@ -118,6 +118,14 @@ def fetch_us(entry: UniverseEntry, as_of: date) -> StockData:
             log.warning("yfinance returned empty info for %s", entry.ticker)
             return result
 
+        # TSM trades in USD but reports in TWD; the reverse-DCF divides market
+        # cap by FCF, so it needs both in the reporting currency.
+        from arf.fetchers.fx import get_fx_rates
+
+        fin_ccy = info.get("financialCurrency") or "USD"
+        result.financial_currency = fin_ccy
+        result.financial_fx_usd = get_fx_rates().get(fin_ccy, 1.0)
+
         result.price = _safe(info.get("currentPrice") or info.get("regularMarketPrice"))
         result.market_cap_usd = _safe(info.get("marketCap"))
         result.ev_usd = _safe(info.get("enterpriseValue"))

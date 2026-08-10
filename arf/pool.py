@@ -59,9 +59,23 @@ def _is_a_share(ticker: str) -> bool:
     return ticker.endswith((".SZ", ".SH"))
 
 
+def _ticker_history(prices: pd.DataFrame, ticker: str) -> pd.DataFrame:
+    """Date-ascending price history for one ticker.
+
+    ``daily_prices`` is read without an ORDER BY guarantee and is UPSERTed in
+    partial refreshes, so row order in the frame is arbitrary — every window
+    below slices by position and would otherwise score a random historical
+    stretch instead of the most recent one.
+    """
+    df = prices[prices["ticker"] == ticker]
+    if df.empty or "date" not in df.columns:
+        return df
+    return df.sort_values("date")
+
+
 def _turnover(prices: pd.DataFrame, ticker: str, days: int = 90) -> float | None:
     """90-day average daily turnover in local currency (volume in shares)."""
-    df = prices[prices["ticker"] == ticker].tail(days)
+    df = _ticker_history(prices, ticker).tail(days)
     if df.empty:
         return None
     mult = 100.0 if _is_a_share(ticker) else 1.0  # A-share volume is in hands
@@ -71,8 +85,21 @@ def _turnover(prices: pd.DataFrame, ticker: str, days: int = 90) -> float | None
     return float(turnover.mean())
 
 
-def _volume_avg(prices: pd.DataFrame, ticker: str, days: int) -> float | None:
-    df = prices[prices["ticker"] == ticker].tail(days)
+def _volume_avg(
+    prices: pd.DataFrame, ticker: str, days: int, offset: int = 0
+) -> float | None:
+    """Average daily volume over ``days`` bars ending ``offset`` bars back.
+
+    ``offset=0`` is the most recent ``days`` bars; ``offset=30`` is the ``days``
+    bars immediately preceding the last 30.
+    """
+    df = _ticker_history(prices, ticker)
+    if df.empty:
+        return None
+    end = len(df) - offset
+    if end <= 0:
+        return None
+    df = df.iloc[max(0, end - days):end]
     if df.empty:
         return None
     mult = 100.0 if _is_a_share(ticker) else 1.0
@@ -81,9 +108,15 @@ def _volume_avg(prices: pd.DataFrame, ticker: str, days: int) -> float | None:
 
 
 def _fade_score(prices: pd.DataFrame, ticker: str) -> float:
-    """Volume fade: recent 30d vs prior 60d. Halved volume → 100 (worst)."""
+    """Volume fade: recent 30d vs the 60d *before* it. Halved volume → 100.
+
+    The two windows must not overlap: comparing the last 30 bars against a
+    90-bar window that contains them compresses a genuine 50% fade to a ratio
+    of ~0.6 (score 40) — below the NEUTRAL 50 handed to a name with no price
+    data at all, which inverts the ranking this dimension exists to produce.
+    """
     recent = _volume_avg(prices, ticker, 30)
-    prior = _volume_avg(prices, ticker, 90)
+    prior = _volume_avg(prices, ticker, 60, offset=30)
     if recent is None or prior is None or prior <= 0:
         return NEUTRAL
     ratio = recent / prior
@@ -253,8 +286,15 @@ def apply_rotation(
 
     Outgoing names get ``pool: null, cohort: watch``; incoming names get
     ``pool: <new_pool_id>`` with the cohort taken from ``entrants``
-    (newcomer for new listings, core otherwise). The file's leading comment
-    header is preserved.
+    (newcomer for new listings, core otherwise). Every *retained* member is
+    re-stamped onto ``new_pool_id`` too — the pool id names the whole roster
+    for that quarter, so leaving the ~47 untouched names on the previous id
+    would split the roster into two pools and make ``pool_membership`` for the
+    new quarter contain only the handful of swapped-in names. The file's
+    leading comment header is preserved.
+
+    Only the ``changed`` entries (in/out) are returned; re-stamped retentions
+    are not rotation events.
     """
     text = universe_path.read_text(encoding="utf-8")
     sep = text.find("- ticker:")
@@ -282,6 +322,12 @@ def apply_rotation(
             by_ticker[ticker]["pool"] = new_pool_id
             by_ticker[ticker]["cohort"] = entrant_cohort.get(ticker, "core")
             changed.append({"ticker": ticker, "leg": leg, "direction": "in"})
+
+    # Carry retained members onto the new pool id. Outgoing names were set to
+    # None above, so every remaining non-null pool is a member of the roster.
+    for entry in data:
+        if entry.get("pool"):
+            entry["pool"] = new_pool_id
 
     payload = header + "\n" + yaml.safe_dump(
         data, sort_keys=False, allow_unicode=True, default_flow_style=False
@@ -399,7 +445,7 @@ def rotate_pool(
 
     snapshot_df = conn.execute("SELECT * FROM snapshots").fetchdf()
     prices_df = conn.execute(
-        "SELECT ticker, date, close, volume FROM daily_prices"
+        "SELECT ticker, date, close, volume FROM daily_prices ORDER BY ticker, date"
     ).fetchdf()
     try:
         research_df = conn.execute(
@@ -418,11 +464,20 @@ def rotate_pool(
     ]
     entrants = entrant_scores(watch, prices_df, research_df, as_of)
 
+    for leg in ("US", "China"):
+        if not any(e.leg == leg for e in watch):
+            log.warning(
+                "Rotation: no watchlist candidates for the %s leg — it cannot "
+                "rotate. Add `cohort: watch` entries to %s.",
+                leg, universe_path,
+            )
+
     plan = build_rotation_plan(inactive, entrants)
     changed = apply_rotation(universe_path, plan, new_pool_id, entrants)
 
     # Archive the new membership (re-read the file so it is authoritative).
     new_universe = load_universe(universe_path)
+    new_cohorts = {e.ticker: e.cohort for e in new_universe}
     membership = [
         {
             "ticker": e.ticker,
@@ -440,7 +495,9 @@ def rotate_pool(
         {
             "ticker": c["ticker"],
             "direction": c["direction"],
-            "cohort": cohort_map.get(c["ticker"]),
+            # Post-rotation cohort: an incoming name's cohort is assigned by
+            # apply_rotation, so the pre-rotation map would record "watch".
+            "cohort": new_cohorts.get(c["ticker"], cohort_map.get(c["ticker"])),
             "reason": "rotation",
         }
         for c in changed

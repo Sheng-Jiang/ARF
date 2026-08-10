@@ -884,8 +884,7 @@
   pure_play_pct: 70
   primary_exchange: NASDAQ
   policy_premium: false
-  notes: EUV chokepoint（原 Europe-ref，已并入 US 池）（原 Europe-ref，已并入 US 池）（原 Europe-ref，已并入
-    US 池）（原 Europe-ref，已并入 US 池）（原 Europe-ref，已并入 US 池）
+  notes: EUV chokepoint（原 Europe-ref，已并入 US 池）
   cohort: core
   pool: 2026Q3
   listed_at: null
@@ -896,8 +895,7 @@
   pure_play_pct: 40
   primary_exchange: NASDAQ
   policy_premium: false
-  notes: IP licensing; UK-domiciled（原 Europe-ref，已并入 US 池）（原 Europe-ref，已并入 US 池）（原
-    Europe-ref，已并入 US 池）（原 Europe-ref，已并入 US 池）（原 Europe-ref，已并入 US 池）
+  notes: IP licensing; UK-domiciled（原 Europe-ref，已并入 US 池）
   cohort: core
   pool: 2026Q3
   listed_at: null
@@ -919,8 +917,7 @@
   pure_play_pct: 20
   primary_exchange: OTC
   policy_premium: false
-  notes: Power management（原 Europe-ref，已并入 US 池）（原 Europe-ref，已并入 US 池）（原 Europe-ref，已并入
-    US 池）（原 Europe-ref，已并入 US 池）（原 Europe-ref，已并入 US 池）
+  notes: Power management（原 Europe-ref，已并入 US 池）
   cohort: core
   pool: 2026Q3
   listed_at: null
@@ -931,8 +928,7 @@
   pure_play_pct: 15
   primary_exchange: NYSE
   policy_premium: false
-  notes: （原 Europe-ref，已并入 US 池）（原 Europe-ref，已并入 US 池）（原 Europe-ref，已并入 US 池）（原 Europe-ref，已并入
-    US 池）（原 Europe-ref，已并入 US 池）
+  notes: （原 Europe-ref，已并入 US 池）
   cohort: core
   pool: 2026Q3
   listed_at: null
@@ -943,8 +939,7 @@
   pure_play_pct: 15
   primary_exchange: OTC
   policy_premium: false
-  notes: （原 Europe-ref，已并入 US 池）（原 Europe-ref，已并入 US 池）（原 Europe-ref，已并入 US 池）（原 Europe-ref，已并入
-    US 池）（原 Europe-ref，已并入 US 池）
+  notes: （原 Europe-ref，已并入 US 池）
   cohort: core
   pool: 2026Q3
   listed_at: null
@@ -955,8 +950,7 @@
   pure_play_pct: 20
   primary_exchange: NYSE
   policy_premium: false
-  notes: （原 Europe-ref，已并入 US 池）（原 Europe-ref，已并入 US 池）（原 Europe-ref，已并入 US 池）（原 Europe-ref，已并入
-    US 池）（原 Europe-ref，已并入 US 池）
+  notes: （原 Europe-ref，已并入 US 池）
   cohort: core
   pool: 2026Q3
   listed_at: null
@@ -1224,6 +1218,50 @@
   pool: null
   listed_at: '2019-05-10'
   notes: 轮换候选：自动驾驶
+- ticker: 6682.HK
+  name: 第四范式
+  leg: China
+  layer: L4
+  pure_play_pct: 90
+  primary_exchange: HKEX
+  policy_premium: false
+  cohort: watch
+  pool: null
+  listed_at: '2023-09-28'
+  notes: 轮换候选：企业级 AI 平台（纯 AI 标的）
+- ticker: 300474.SZ
+  name: 景嘉微
+  leg: China
+  layer: L2
+  pure_play_pct: 55
+  primary_exchange: SZSE
+  policy_premium: false
+  cohort: watch
+  pool: null
+  listed_at: '2016-03-15'
+  notes: 轮换候选：国产 GPU
+- ticker: 688521.SH
+  name: 芯原股份
+  leg: China
+  layer: L2
+  pure_play_pct: 60
+  primary_exchange: SSE
+  policy_premium: false
+  cohort: watch
+  pool: null
+  listed_at: '2020-08-18'
+  notes: 轮换候选：芯片设计 IP / Chiplet
+- ticker: 0992.HK
+  name: 联想集团
+  leg: China
+  layer: L3
+  pure_play_pct: 30
+  primary_exchange: HKEX
+  policy_premium: false
+  cohort: watch
+  pool: null
+  listed_at: '1994-02-14'
+  notes: 轮换候选：AI 服务器 / AI PC
 - ticker: SPACEX
   name: SpaceX
   leg: Pre-IPO

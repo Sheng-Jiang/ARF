@@ -463,6 +463,32 @@ class TestImpliedGrowth:
         row = pd.Series({"market_cap_usd": 100.0, "free_cash_flow": 5.0})
         assert implied_growth_for_row(row, 0.10) == pytest.approx(0.10 - 5 / 100)
 
+    def test_adr_uses_the_reporting_currency_not_the_trading_one(self):
+        """BABA trades in USD but reports FCF in CNY.
+
+        fx_rate_usd is 1.0 for an ADR, so keying off it leaves a USD market cap
+        against a CNY FCF — a ~7x inflated FCF yield that drives g* sharply
+        negative for the biggest names in the China leg.
+        """
+        adr = pd.Series({
+            "market_cap_usd": 100.0,
+            "free_cash_flow": 5.0,      # CNY
+            "currency": "USD",
+            "fx_rate_usd": 1.0,
+            "financial_currency": "CNY",
+            "financial_fx_usd": 7.2,
+        })
+        # Same company listed in CNY terms: ¥720 cap, ¥5 FCF.
+        assert implied_growth_for_row(adr, 0.10) == pytest.approx(0.10 - 5 / 720)
+
+    def test_reporting_rate_falls_back_to_trading_rate(self):
+        """A-shares and HK names report in their trading currency."""
+        a_share = pd.Series({
+            "market_cap_usd": 100.0, "free_cash_flow": 5.0, "fx_rate_usd": 7.2,
+            "financial_fx_usd": None,
+        })
+        assert implied_growth_for_row(a_share, 0.10) == pytest.approx(0.10 - 5 / 720)
+
     def test_missing_fcf_returns_none(self):
         row = pd.Series({"market_cap_usd": 100.0, "fx_rate_usd": 1.0})
         assert implied_growth_for_row(row, 0.10) is None

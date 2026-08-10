@@ -93,6 +93,19 @@ US_WATCH = {
              "轮换候选：自动驾驶"),
 }
 
+# 每条腿都必须有轮换候选：build_rotation_plan 按 1:1 配对换出/换入，
+# 候选为空的一条腿产出的永远是空计划，季度轮换对它彻底失效。
+CHINA_WATCH = {
+    "6682.HK": ("第四范式", "China", "L4", 90, "HKEX", "2023-09-28",
+                "轮换候选：企业级 AI 平台（纯 AI 标的）"),
+    "300474.SZ": ("景嘉微", "China", "L2", 55, "SZSE", "2016-03-15",
+                  "轮换候选：国产 GPU"),
+    "688521.SH": ("芯原股份", "China", "L2", 60, "SSE", "2020-08-18",
+                  "轮换候选：芯片设计 IP / Chiplet"),
+    "0992.HK": ("联想集团", "China", "L3", 30, "HKEX", "1994-02-14",
+                "轮换候选：AI 服务器 / AI PC"),
+}
+
 CHINA_ADD_CORE = {
     "688041.SH": ("海光信息 Hygon", "China", "L2", 95, "SH", "2022-08-12",
                   "国产 CPU / DCU 加速卡"),
@@ -227,7 +240,12 @@ def build_universe(pool_id: str, path: Path = Path("config/universe.yaml")) -> l
             e["leg"] = "US"
             e["cohort"] = "core"
             e["pool"] = pool_id
-            e["notes"] = f"{e.get('notes', '')}（原 Europe-ref，已并入 US 池）"
+            # Append once — the script is meant to be re-runnable against its
+            # own output, and an unconditional append grows the note on every
+            # pass until the entry is a wall of repeated suffixes.
+            marker = "（原 Europe-ref，已并入 US 池）"
+            notes = e.get("notes", "") or ""
+            e["notes"] = notes if marker in notes else f"{notes}{marker}"
         # Pre-IPO legacy entries stay leg=Pre-IPO, cohort=watch, pool=null.
         entries.append(e)
 
@@ -238,6 +256,7 @@ def build_universe(pool_id: str, path: Path = Path("config/universe.yaml")) -> l
         **{t: ("newcomer", d) for t, d in US_NEWCOMER.items()},
         **{t: ("newcomer", d) for t, d in CHINA_NEWCOMER.items()},
         **{t: ("watch", d) for t, d in US_WATCH.items()},
+        **{t: ("watch", d) for t, d in CHINA_WATCH.items()},
         **{t: ("watch", d) for t, d in PREIPO_OBSERVE.items()},
     }
     for ticker, (cohort, data) in new_sets.items():

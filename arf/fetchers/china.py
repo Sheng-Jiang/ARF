@@ -226,8 +226,19 @@ def _fetch_hk_or_adr(entry: UniverseEntry, as_of: date) -> StockData:
         currency = info.get("currency", "HKD" if entry.ticker.endswith(".HK") else "USD")
         result.currency = currency
         rates = get_fx_rates()
-        fx = rates["HKD"] if currency == "HKD" else (rates["CNY"] if currency == "CNY" else 1.0)
+
+        def _rate(code: str | None) -> float:
+            return rates.get(code, 1.0) if code else 1.0
+
+        fx = _rate(currency)
         result.fx_rate_usd = fx
+
+        # ADRs (BABA/BIDU/PDD/GDS/VNET) trade in USD but report their financials
+        # in CNY; the reverse-DCF needs the market cap in the reporting currency
+        # or g* is off by the FX rate. yfinance exposes this as financialCurrency.
+        fin_ccy = info.get("financialCurrency") or currency
+        result.financial_currency = fin_ccy
+        result.financial_fx_usd = _rate(fin_ccy)
 
         result.price = _safe(info.get("currentPrice") or info.get("regularMarketPrice"))
         mktcap_local = _safe(info.get("marketCap"))

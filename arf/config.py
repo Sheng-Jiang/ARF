@@ -62,10 +62,28 @@ def get_leg(universe: list[UniverseEntry], leg: str) -> list[UniverseEntry]:
     return [e for e in universe if e.leg == leg]
 
 
+def active_pool_id(universe: list[UniverseEntry]) -> str | None:
+    """The pool id the universe is currently assigned to, if any.
+
+    Every member of a quarter's roster carries the same id, so the highest one
+    present is the active quarter (ids sort lexicographically: 2026Q3 < 2026Q4).
+    """
+    pools = {e.pool for e in universe if e.pool}
+    return max(pools) if pools else None
+
+
 def get_pool_entries(
     universe: list[UniverseEntry], pool: str | None = None
 ) -> list[UniverseEntry]:
-    """Entries in the active pool (or a specific quarter); excludes watchlist."""
+    """Entries in a quarterly pool; excludes the watchlist and Pre-IPO tier.
+
+    ``pool`` defaults to the active pool. Filtering on ``pool is None`` — which
+    a literal ``e.pool == pool`` default would do — returns the exact opposite:
+    every entry *outside* the pool.
+    """
+    pool = pool or active_pool_id(universe)
+    if pool is None:
+        return []
     return [e for e in universe if e.pool == pool]
 
 

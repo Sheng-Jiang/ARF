@@ -143,9 +143,15 @@ def _fetch_a_prices_baostock(ticker: str, start_date: str, end_date: str) -> pd.
     the rest of the app assumes for A-shares. ``adjustflag="3"`` is 前复权 (≈ qfq),
     matching the page's default adjustment basis.
     """
-    import threading
-
     import baostock as bs
+
+    # Baostock's connection is a module-level singleton, so the lock guarding
+    # it has to be module-level too — shared with arf.fetchers.china, which
+    # drives the same library from the weekly pipeline. A lock constructed
+    # here would be private to this call and serialise nothing: two concurrent
+    # Streamlit sessions would each take their own, and the first to reach
+    # `bs.logout()` would tear down the session the other is still reading.
+    from arf.fetchers.china import _bs_lock
 
     if "." not in ticker:
         return pd.DataFrame()
@@ -153,8 +159,7 @@ def _fetch_a_prices_baostock(ticker: str, start_date: str, end_date: str) -> pd.
     bs_code = f"sh.{code}" if exchange == "SH" else f"sz.{code}"
 
     rows: list[dict] = []
-    lock = threading.Lock()  # Baostock uses a global singleton connection.
-    with lock:
+    with _bs_lock:
         lg = bs.login()
         if lg.error_code != "0":
             log.warning("Baostock fallback login failed for %s", ticker)
