@@ -299,8 +299,9 @@ def compute_arf(
     groups: list[tuple[str, str | None, pd.Series]] = []
     for leg_name in ("US", "China"):
         if use_cohort:
+            cohort_series = df["cohort"].fillna("core")
             for cohort in ("core", "newcomer"):
-                mask = (df["leg"] == leg_name) & (df["cohort"] == cohort)
+                mask = (df["leg"] == leg_name) & (cohort_series == cohort)
                 if mask.sum() == 0:
                     continue
                 groups.append((leg_name, cohort, mask))
@@ -361,9 +362,10 @@ def compute_arf(
 
     # Non-scored rows pass through (Pre-IPO, watchlist, unknown cohorts).
     if use_cohort:
+        cohort_series = df["cohort"].fillna("core")
         other_mask = ~(
             df["leg"].isin(["US", "China"])
-            & df["cohort"].isin(["core", "newcomer"])
+            & cohort_series.isin(["core", "newcomer"])
         )
     else:
         other_mask = ~df["leg"].isin(["US", "China"])

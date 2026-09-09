@@ -614,3 +614,12 @@ class TestComputeArfCohort:
         watch = result[result["cohort"] == "watch"].iloc[0]
         assert pd.isna(watch["arf"])
         assert pd.isna(watch["decile"])
+
+    def test_null_cohort_defaults_to_core(self):
+        # Rows with null/None cohort (e.g. pre-migration snapshots) default to core
+        df = _make_arf_df(3)
+        df["cohort"] = [None, None, "core"]
+        result = compute_arf(df, wacc_us=0.10, wacc_china=0.12)
+        assert result["arf"].notna().all()
+        assert result["decile"].notna().all()
+
