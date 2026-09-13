@@ -55,6 +55,11 @@ def _stock_data_to_dict(sd: StockData) -> dict:
         "ev_sales_5yr_percentile": sd.ev_sales_5yr_percentile,
         "currency": sd.currency,
         "fx_rate_usd": sd.fx_rate_usd,
+        # Reporting currency sets the reverse-DCF unit basis for ADRs — see
+        # arf.scoring._local_market_cap. Dropping it here falls back silently
+        # to the trading rate.
+        "financial_currency": sd.financial_currency,
+        "financial_fx_usd": sd.financial_fx_usd,
         "data_source": sd.data_source,
     }
 
