@@ -566,7 +566,7 @@ def run_pipeline(
         df = _build_scoring_df(stocks, universe)
         df = compute_arf(df)
 
-        upsert_snapshot(conn, df, as_of)
+        upsert_snapshot(conn, df, as_of, run_id=run_id)
         record_fetch_outcomes(conn, run_id, outcomes)
         console.print(f"Snapshot saved to {db_path}")
 

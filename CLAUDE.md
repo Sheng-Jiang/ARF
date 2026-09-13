@@ -36,7 +36,7 @@ ruff check arf/
 ### Pipeline stages
 1. **Fetch** — pull market data, fundamentals, forward estimates per ticker; store raw in DuckDB (`data/arf.db`)
 2. **Score** — compute `E_score` and `V_score`; combine as `ARF = sqrt(E_score × V_score)`
-3. **Snapshot** — write one row per ticker per `as_of_date` to DuckDB (idempotent: overwrite same date)
+3. **Snapshot** — append one row per ticker as the next revision of `as_of_date` to `snapshot_revisions` in DuckDB; nothing is ever deleted. Readers query the `snapshots` view, which serves only the latest revision per date (the whole run, not newest row per ticker). Re-running a past date adds a revision rather than rewriting history
 4. **Render** — emit `data/snapshots/arf_<date>.parquet`, `reports/arf_<date>.md`, and `reports/thermometer.html`
 
 ### Scoring formula (`arf/scoring.py` — primary test target)

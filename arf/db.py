@@ -5,9 +5,17 @@ import duckdb
 import pandas as pd
 
 _SCHEMA_SNAPSHOTS = """
-CREATE TABLE IF NOT EXISTS snapshots (
+CREATE TABLE IF NOT EXISTS snapshot_revisions (
     ticker                  TEXT        NOT NULL,
     as_of_date              DATE        NOT NULL,
+    -- Append-only history: each upsert_snapshot call writes the next revision
+    -- (1, 2, …) of its as_of_date and nothing is ever deleted. Readers use the
+    -- ``snapshots`` view, which serves only the latest revision per date.
+    revision                INTEGER     NOT NULL,
+    -- Naive UTC write time. NULL on rows migrated from the pre-revision table:
+    -- when those were fetched was never recorded.
+    fetched_at              TIMESTAMP,
+    run_id                  TEXT,       -- runs.run_id that wrote the row
     leg                     TEXT,
     layer                   TEXT,
     name                    TEXT,
@@ -53,9 +61,24 @@ CREATE TABLE IF NOT EXISTS snapshots (
     -- unit basis. See arf.scoring._local_market_cap.
     financial_currency      TEXT,
     financial_fx_usd        DOUBLE,
-    PRIMARY KEY (ticker, as_of_date)
+    PRIMARY KEY (ticker, as_of_date, revision)
 )
 """
+
+# Latest revision per as_of_date — the *whole* revision, not the newest row per
+# ticker: a ticker missing from a re-run must not resurface from an older run,
+# because its percentile scores were ranked against a different peer set.
+# Bookkeeping columns are excluded so SELECT * readers see the original schema.
+_VIEW_SNAPSHOTS = """
+CREATE OR REPLACE VIEW snapshots AS
+SELECT * EXCLUDE (revision, fetched_at, run_id)
+FROM snapshot_revisions r
+WHERE revision = (
+    SELECT MAX(revision) FROM snapshot_revisions m WHERE m.as_of_date = r.as_of_date
+)
+"""
+
+_REVISION_COLUMNS = ("revision", "fetched_at", "run_id")
 
 _SCHEMA_RUNS = """
 CREATE TABLE IF NOT EXISTS runs (
@@ -226,6 +249,7 @@ def init_db(path: Path = Path("data/arf.db")) -> duckdb.DuckDBPyConnection:
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = duckdb.connect(str(path))
     conn.execute(_SCHEMA_SNAPSHOTS)
+    _migrate_legacy_snapshots_table(conn)
     conn.execute(_SCHEMA_RUNS)
     conn.execute(_SCHEMA_FETCH_OUTCOMES)
     conn.execute(_SCHEMA_GEMINI_SUMMARIES)
@@ -238,14 +262,41 @@ def init_db(path: Path = Path("data/arf.db")) -> duckdb.DuckDBPyConnection:
     conn.execute(_SCHEMA_POOL_MEMBERSHIP)
     conn.execute(_SCHEMA_POOL_CHANGES)
     _add_missing_columns(conn)
+    conn.execute(_VIEW_SNAPSHOTS)
     _mark_stale_runs_interrupted(conn)
     return conn
+
+
+def _migrate_legacy_snapshots_table(conn: duckdb.DuckDBPyConnection) -> None:
+    """Migration: move a pre-revision physical ``snapshots`` table into history.
+
+    Its rows become revision 1 of their date, then the table is dropped so the
+    ``snapshots`` view can take its name. Atomic, and a no-op once ``snapshots``
+    is a view — safe on every connect.
+    """
+    kind = conn.execute(
+        "SELECT table_type FROM information_schema.tables "
+        "WHERE table_schema = 'main' AND table_name = 'snapshots'"
+    ).fetchone()
+    if kind is None or kind[0] != "BASE TABLE":
+        return
+    conn.begin()
+    try:
+        conn.execute(
+            "INSERT INTO snapshot_revisions BY NAME "
+            "SELECT *, 1 AS revision FROM snapshots"
+        )
+        conn.execute("DROP TABLE snapshots")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
 
 
 # Columns added after the first release. CREATE TABLE IF NOT EXISTS leaves an
 # existing table untouched, so each one needs an explicit ALTER on old DBs.
 _ADDED_COLUMNS: dict[str, dict[str, str]] = {
-    "snapshots": {
+    "snapshot_revisions": {
         "cohort": "TEXT",
         "financial_currency": "TEXT",
         "financial_fx_usd": "DOUBLE",
@@ -423,24 +474,42 @@ def upsert_snapshot(
     conn: duckdb.DuckDBPyConnection,
     df: pd.DataFrame,
     as_of_date: date,
+    run_id: str | None = None,
 ) -> None:
-    """Insert or overwrite all rows for the given as_of_date.
+    """Append ``df`` as the next revision of ``as_of_date``.
 
-    Only df columns that match schema columns are inserted; extra schema
-    columns default to NULL. Extra df columns are silently ignored.
+    Nothing is deleted: re-running a date writes revision N+1, the
+    ``snapshots`` view switches to it, and earlier revisions stay in
+    ``snapshot_revisions``. Only df columns that match schema columns are
+    inserted; extra schema columns default to NULL. Extra df columns are
+    silently ignored.
     """
     df = df.copy()
     df["as_of_date"] = as_of_date
 
     schema_cols = [
         row[0]
-        for row in conn.execute("DESCRIBE snapshots").fetchall()
+        for row in conn.execute("DESCRIBE snapshot_revisions").fetchall()
     ]
-    df_cols = [c for c in schema_cols if c in df.columns]
+    df_cols = [c for c in schema_cols if c in df.columns and c not in _REVISION_COLUMNS]
     cols_sql = ", ".join(df_cols)
-    conn.execute("DELETE FROM snapshots WHERE as_of_date = ?", [as_of_date])
-    conn.execute(f"INSERT INTO snapshots ({cols_sql}) SELECT {cols_sql} FROM df")
-    conn.commit()
+    fetched_at = datetime.now(UTC).replace(tzinfo=None)
+    conn.begin()
+    try:
+        revision = conn.execute(
+            "SELECT COALESCE(MAX(revision), 0) + 1 FROM snapshot_revisions "
+            "WHERE as_of_date = ?",
+            [as_of_date],
+        ).fetchone()[0]
+        conn.execute(
+            f"INSERT INTO snapshot_revisions ({cols_sql}, revision, fetched_at, run_id) "
+            f"SELECT {cols_sql}, ?, ?, ? FROM df",
+            [revision, fetched_at, run_id],
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
 
 
 def query_snapshot(

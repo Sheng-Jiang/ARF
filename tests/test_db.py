@@ -1,5 +1,5 @@
 import uuid
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import pandas as pd
 import pytest
@@ -124,6 +124,72 @@ class TestUpsertSnapshot:
             "SELECT forward_pe FROM snapshots WHERE ticker='NVDA'"
         ).fetchone()
         assert row[0] is None
+
+
+class TestSnapshotRevisions:
+    """Snapshot history is append-only.
+
+    Re-running a past as_of_date must not replace what was recorded then —
+    a re-run sees today's data (restated fundamentals, a different set of
+    tickers that resolved), so overwriting it silently rewrites history.
+    ``snapshots`` is a view of the latest revision per date; every revision
+    stays in ``snapshot_revisions``.
+    """
+
+    def _revisions(self, conn, ticker: str, as_of: date) -> list[tuple]:
+        return conn.execute(
+            "SELECT revision, arf FROM snapshot_revisions "
+            "WHERE ticker = ? AND as_of_date = ? ORDER BY revision",
+            [ticker, as_of],
+        ).fetchall()
+
+    def test_rerun_same_date_preserves_earlier_revision(self, conn):
+        as_of = date(2026, 5, 28)
+        df1 = _sample_df(["NVDA"], as_of)
+        df1.loc[0, "arf"] = 60.0
+        upsert_snapshot(conn, df1, as_of)
+        df2 = _sample_df(["NVDA"], as_of)
+        df2.loc[0, "arf"] = 75.0
+        upsert_snapshot(conn, df2, as_of)
+
+        assert self._revisions(conn, "NVDA", as_of) == [(1, 60.0), (2, 75.0)]
+
+    def test_view_serves_only_the_latest_run_for_a_date(self, conn):
+        """A ticker that failed to fetch on the re-run must not resurface from
+        the earlier revision — its scores were ranked against a different
+        peer set and are not comparable with the re-run's rows."""
+        as_of = date(2026, 5, 28)
+        upsert_snapshot(conn, _sample_df(["NVDA", "AMD"], as_of), as_of)
+        upsert_snapshot(conn, _sample_df(["NVDA"], as_of), as_of)
+
+        assert query_snapshot(conn, as_of)["ticker"].tolist() == ["NVDA"]
+
+    def test_revision_counter_is_per_date(self, conn):
+        d1, d2 = date(2026, 5, 28), date(2026, 6, 4)
+        upsert_snapshot(conn, _sample_df(["NVDA"], d1), d1)
+        upsert_snapshot(conn, _sample_df(["NVDA"], d2), d2)
+        upsert_snapshot(conn, _sample_df(["NVDA"], d1), d1)
+
+        assert [r[0] for r in self._revisions(conn, "NVDA", d1)] == [1, 2]
+        assert [r[0] for r in self._revisions(conn, "NVDA", d2)] == [1]
+
+    def test_write_records_run_id_and_fetched_at(self, conn):
+        as_of = date(2026, 5, 28)
+        before = datetime.now(UTC).replace(tzinfo=None, microsecond=0)
+        upsert_snapshot(conn, _sample_df(["NVDA"], as_of), as_of, run_id="run-abc")
+        after = datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=1)
+
+        run_id, fetched_at = conn.execute(
+            "SELECT run_id, fetched_at FROM snapshot_revisions WHERE ticker = 'NVDA'"
+        ).fetchone()
+        assert run_id == "run-abc"
+        assert before <= fetched_at <= after
+
+    def test_view_keeps_the_pre_revision_columns(self, conn):
+        """Readers doing SELECT * FROM snapshots (webapp tables, pool.py) must
+        not start receiving bookkeeping columns."""
+        cols = set(conn.execute("DESCRIBE snapshots").fetchdf()["column_name"])
+        assert not cols & {"revision", "fetched_at", "run_id"}
 
 
 class TestQuerySnapshot:
@@ -474,6 +540,52 @@ class TestSchemaMigration:
         cols = {r[0] for r in c2.execute("DESCRIBE snapshots").fetchall()}
         c2.close()
         assert {"cohort", "financial_currency", "financial_fx_usd"} <= cols
+
+    def _legacy_db(self, tmp_path):
+        """A DB from before snapshots became append-only: a physical table."""
+        import duckdb
+
+        db_path = tmp_path / "legacy.db"
+        c = duckdb.connect(str(db_path))
+        c.execute(
+            "CREATE TABLE snapshots (ticker TEXT, as_of_date DATE, leg TEXT, "
+            "arf DOUBLE, PRIMARY KEY (ticker, as_of_date))"
+        )
+        c.execute(
+            "INSERT INTO snapshots VALUES "
+            "('NVDA', DATE '2026-05-28', 'US', 60.0), "
+            "('AMD',  DATE '2026-05-28', 'US', 70.0)"
+        )
+        c.close()
+        return db_path
+
+    def test_legacy_rows_survive_as_revision_one(self, tmp_path):
+        db_path = self._legacy_db(tmp_path)
+        init_db(db_path).close()
+        c = init_db(db_path)  # reopening must not migrate twice
+
+        rows = c.execute(
+            "SELECT ticker, revision, arf, fetched_at FROM snapshot_revisions "
+            "ORDER BY ticker"
+        ).fetchall()
+        served = query_snapshot(c, date(2026, 5, 28))
+        c.close()
+
+        assert rows == [("AMD", 1, 70.0, None), ("NVDA", 1, 60.0, None)]
+        assert sorted(served["ticker"]) == ["AMD", "NVDA"]
+
+    def test_rerun_after_migration_becomes_revision_two(self, tmp_path):
+        db_path = self._legacy_db(tmp_path)
+        c = init_db(db_path)
+        as_of = date(2026, 5, 28)
+        upsert_snapshot(c, _sample_df(["NVDA"], as_of), as_of)
+
+        revisions = c.execute(
+            "SELECT revision FROM snapshot_revisions WHERE ticker = 'NVDA' "
+            "ORDER BY revision"
+        ).fetchall()
+        c.close()
+        assert revisions == [(1,), (2,)]
 
 
 class TestPoolMembership:
