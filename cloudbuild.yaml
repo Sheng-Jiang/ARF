@@ -28,7 +28,7 @@ steps:
       - --platform=managed
       - --min-instances=0
       - --max-instances=1
-      - --no-allow-unauthenticated
+      - --allow-unauthenticated
       - --memory=512Mi
       - --cpu=1
       - --set-env-vars=DATA_SOURCE=gcs,GCS_BUCKET=${_GCS_BUCKET},GCS_DB_OBJECT=arf.db,GCP_PROJECT=$PROJECT_ID,GCP_REGION=${_REGION},PIPELINE_JOB=arf-pipeline
