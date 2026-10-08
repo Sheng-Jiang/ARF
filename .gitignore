@@ -1,4 +1,6 @@
 data/*.db
+data/*.db.wal
+data/*.wal
 data/snapshots/*.parquet
 reports/*.md
 reports/*.html

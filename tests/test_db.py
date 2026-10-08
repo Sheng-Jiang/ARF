@@ -8,6 +8,7 @@ from arf.db import (
     finish_run,
     init_db,
     list_pool_ids,
+    query_candidates,
     query_fetch_outcomes,
     query_gemini_summaries,
     query_latest,
@@ -15,11 +16,15 @@ from arf.db import (
     query_pool_membership,
     query_runs,
     query_snapshot,
+    query_theses,
     record_fetch_outcomes,
     start_run,
+    update_candidate_status,
+    upsert_candidate,
     upsert_gemini_summaries,
     upsert_pool_membership,
     upsert_snapshot,
+    upsert_thesis,
 )
 
 
@@ -629,3 +634,84 @@ class TestPoolMembership:
         upsert_pool_membership(conn, "2026Q3", self._sample_rows())
         upsert_pool_membership(conn, "2026Q3", [])
         assert query_pool_membership(conn, "2026Q3").empty
+
+
+class TestCandidatePool:
+    def test_upsert_and_query_candidates(self, conn):
+        cand = {
+            "ticker": "VRT",
+            "name": "Vertiv Holdings",
+            "leg": "US",
+            "layer": "L1",
+            "source": "capex_radar",
+            "discovered_at": date(2026, 6, 1),
+            "status": "discovered",
+            "pure_play_est": 45.0,
+            "supply_role": "Liquid cooling and power management",
+            "key_customers_json": ["NVDA", "MSFT"],
+            "notes": "Fastest growing cooling vendor",
+        }
+        upsert_candidate(conn, cand)
+        df = query_candidates(conn)
+        assert len(df) == 1
+        assert df.iloc[0]["ticker"] == "VRT"
+        assert df.iloc[0]["supply_role"] == "Liquid cooling and power management"
+        assert "NVDA" in df.iloc[0]["key_customers_json"]
+
+    def test_filter_candidates(self, conn):
+        upsert_candidate(conn, {"ticker": "US1", "leg": "US", "status": "qualified"})
+        upsert_candidate(conn, {"ticker": "CN1", "leg": "China", "status": "discovered"})
+        
+        us_df = query_candidates(conn, leg="US")
+        assert len(us_df) == 1
+        assert us_df.iloc[0]["ticker"] == "US1"
+
+        qual_df = query_candidates(conn, status="qualified")
+        assert len(qual_df) == 1
+        assert qual_df.iloc[0]["ticker"] == "US1"
+
+    def test_update_candidate_status(self, conn):
+        upsert_candidate(conn, {"ticker": "TEST", "leg": "US", "status": "discovered"})
+        update_candidate_status(conn, "TEST", "monitored", notes="Promoted to watch")
+        df = query_candidates(conn, status="monitored")
+        assert len(df) == 1
+        assert df.iloc[0]["notes"] == "Promoted to watch"
+
+
+class TestInvestmentTheses:
+    def test_upsert_and_query_theses(self, conn):
+        thesis = {
+            "thesis_id": "th-001",
+            "ticker": "NVDA",
+            "as_of_date": date(2026, 6, 1),
+            "thesis_type": "garp_value",
+            "title": "Blackwell transition margin inflection",
+            "bull_case": "Blackwell ultra demand accelerates",
+            "bear_case": "ASIC competition and power bottleneck",
+            "synthesis": "Strong buy in D3-D5 range",
+            "valuation_entry_zone": "Forward P/E < 28",
+            "invalidation_criteria": "Gross margin drops below 70%",
+            "confidence_score": 85.0,
+            "catalysts_json": ["GTC conference", "Q2 earnings"],
+            "model": "gemini-3.7-flash",
+        }
+        upsert_thesis(conn, thesis)
+        df = query_theses(conn, ticker="NVDA")
+        assert len(df) == 1
+        assert df.iloc[0]["thesis_type"] == "garp_value"
+        assert df.iloc[0]["confidence_score"] == 85.0
+        assert "GTC conference" in df.iloc[0]["catalysts_json"]
+
+    def test_query_theses_filtering(self, conn):
+        upsert_thesis(conn, {
+            "thesis_id": "t1", "ticker": "T1", "as_of_date": date(2026, 6, 1),
+            "thesis_type": "long_opportunity", "title": "T1 thesis"
+        })
+        upsert_thesis(conn, {
+            "thesis_id": "t2", "ticker": "T2", "as_of_date": date(2026, 6, 1),
+            "thesis_type": "froth_short", "title": "T2 thesis"
+        })
+        short_df = query_theses(conn, thesis_type="froth_short")
+        assert len(short_df) == 1
+        assert short_df.iloc[0]["ticker"] == "T2"
+

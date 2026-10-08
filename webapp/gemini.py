@@ -22,7 +22,8 @@ import pandas as pd
 
 log = logging.getLogger(__name__)
 
-MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-pro")
+MODEL = os.getenv("GEMINI_MODEL", "gemini-3.7-flash")
+FLASH_MODEL = os.getenv("GEMINI_FLASH_MODEL", "gemini-3.7-flash")
 MAX_PARALLEL = int(os.getenv("GEMINI_MAX_PARALLEL", "6"))
 
 
@@ -797,7 +798,7 @@ def parse_nlp_screener_query(
     try:
         client = genai.Client(api_key=api_key.strip())
         response = client.models.generate_content(
-            model="gemini-2.5-flash",  # Flash is excellent and fast for structured text/SQL generation
+            model=FLASH_MODEL,  # Flash is excellent and fast for structured text/SQL generation
             contents=prompt,
             config=dict(
                 temperature=0.0,

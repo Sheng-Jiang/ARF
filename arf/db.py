@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
@@ -244,6 +245,42 @@ CREATE TABLE IF NOT EXISTS pool_changes (
 )
 """
 
+_SCHEMA_CANDIDATE_POOL = """
+CREATE TABLE IF NOT EXISTS candidate_pool (
+    ticker              TEXT        PRIMARY KEY,
+    name                TEXT,
+    leg                 TEXT        NOT NULL,  -- 'US' or 'China'
+    layer               TEXT,                  -- 'L1' to 'L5'
+    source              TEXT        NOT NULL,  -- 'sec_filing', 'capex_radar', 'news_crawler', 'manual'
+    discovered_at       DATE        NOT NULL,
+    status              TEXT        NOT NULL,  -- 'discovered', 'qualified', 'monitored', 'rejected'
+    pure_play_est       DOUBLE,
+    supply_role         TEXT,
+    key_customers_json  TEXT,                  -- e.g. '["NVDA", "MSFT"]'
+    notes               TEXT,
+    updated_at          TIMESTAMP   NOT NULL
+)
+"""
+
+_SCHEMA_INVESTMENT_THESES = """
+CREATE TABLE IF NOT EXISTS investment_theses (
+    thesis_id               TEXT        PRIMARY KEY,
+    ticker                  TEXT        NOT NULL,
+    as_of_date              DATE        NOT NULL,
+    thesis_type             TEXT        NOT NULL,  -- 'long_opportunity', 'garp_value', 'froth_short', 'neutral_watch'
+    title                   TEXT        NOT NULL,
+    bull_case               TEXT,
+    bear_case               TEXT,
+    synthesis               TEXT,
+    valuation_entry_zone    TEXT,
+    invalidation_criteria   TEXT,
+    confidence_score        DOUBLE,
+    catalysts_json          TEXT,
+    model                   TEXT,
+    created_at              TIMESTAMP   NOT NULL
+)
+"""
+
 
 def init_db(path: Path = Path("data/arf.db")) -> duckdb.DuckDBPyConnection:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -261,6 +298,8 @@ def init_db(path: Path = Path("data/arf.db")) -> duckdb.DuckDBPyConnection:
     conn.execute(_SCHEMA_VALUE_CHAIN)
     conn.execute(_SCHEMA_POOL_MEMBERSHIP)
     conn.execute(_SCHEMA_POOL_CHANGES)
+    conn.execute(_SCHEMA_CANDIDATE_POOL)
+    conn.execute(_SCHEMA_INVESTMENT_THESES)
     _add_missing_columns(conn)
     conn.execute(_VIEW_SNAPSHOTS)
     _mark_stale_runs_interrupted(conn)
@@ -902,4 +941,154 @@ def query_pool_changes(
         "WHERE pool_id = (SELECT MAX(pool_id) FROM pool_changes) "
         "ORDER BY direction, ticker"
     ).fetchdf()
+
+
+# ---------- Candidate Pool & Investment Theses ----------
+
+def upsert_candidate(
+    conn: duckdb.DuckDBPyConnection,
+    candidate: dict,
+    updated_at: datetime | None = None,
+) -> None:
+    """Insert or update a discovered company in candidate_pool."""
+    ts = updated_at or datetime.now(UTC).replace(tzinfo=None)
+    customers = candidate.get("key_customers_json")
+    if isinstance(customers, list):
+        customers = json.dumps(customers, ensure_ascii=False)
+    elif customers is None:
+        customers = "[]"
+
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO candidate_pool (
+            ticker, name, leg, layer, source, discovered_at, status,
+            pure_play_est, supply_role, key_customers_json, notes, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            candidate["ticker"],
+            candidate.get("name", candidate["ticker"]),
+            candidate.get("leg", "US"),
+            candidate.get("layer"),
+            candidate.get("source", "manual"),
+            candidate.get("discovered_at", date.today()),
+            candidate.get("status", "discovered"),
+            candidate.get("pure_play_est"),
+            candidate.get("supply_role", ""),
+            customers,
+            candidate.get("notes", ""),
+            ts,
+        ],
+    )
+    conn.commit()
+
+
+def query_candidates(
+    conn: duckdb.DuckDBPyConnection,
+    status: str | None = None,
+    leg: str | None = None,
+) -> pd.DataFrame:
+    """Return candidates filtered by status and/or leg."""
+    clauses = []
+    params = []
+    if status is not None:
+        clauses.append("status = ?")
+        params.append(status)
+    if leg is not None:
+        clauses.append("leg = ?")
+        params.append(leg)
+
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    return conn.execute(
+        f"SELECT * FROM candidate_pool {where} ORDER BY updated_at DESC, ticker",
+        params,
+    ).fetchdf()
+
+
+def update_candidate_status(
+    conn: duckdb.DuckDBPyConnection,
+    ticker: str,
+    status: str,
+    notes: str | None = None,
+    updated_at: datetime | None = None,
+) -> None:
+    """Update status and optional notes for a candidate."""
+    ts = updated_at or datetime.now(UTC).replace(tzinfo=None)
+    if notes is not None:
+        conn.execute(
+            "UPDATE candidate_pool SET status = ?, notes = ?, updated_at = ? WHERE ticker = ?",
+            [status, notes, ts, ticker],
+        )
+    else:
+        conn.execute(
+            "UPDATE candidate_pool SET status = ?, updated_at = ? WHERE ticker = ?",
+            [status, ts, ticker],
+        )
+    conn.commit()
+
+
+def upsert_thesis(
+    conn: duckdb.DuckDBPyConnection,
+    thesis: dict,
+    created_at: datetime | None = None,
+) -> None:
+    """Insert or update an investment thesis / opportunity card."""
+    ts = created_at or datetime.now(UTC).replace(tzinfo=None)
+    catalysts = thesis.get("catalysts_json")
+    if isinstance(catalysts, list):
+        catalysts = json.dumps(catalysts, ensure_ascii=False)
+    elif catalysts is None:
+        catalysts = "[]"
+
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO investment_theses (
+            thesis_id, ticker, as_of_date, thesis_type, title,
+            bull_case, bear_case, synthesis, valuation_entry_zone,
+            invalidation_criteria, confidence_score, catalysts_json,
+            model, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            thesis["thesis_id"],
+            thesis["ticker"],
+            thesis["as_of_date"],
+            thesis.get("thesis_type", "long_opportunity"),
+            thesis.get("title", f"Thesis for {thesis['ticker']}"),
+            thesis.get("bull_case", ""),
+            thesis.get("bear_case", ""),
+            thesis.get("synthesis", ""),
+            thesis.get("valuation_entry_zone", ""),
+            thesis.get("invalidation_criteria", ""),
+            thesis.get("confidence_score", 50.0),
+            catalysts,
+            thesis.get("model", "gemini-3.7-flash"),
+            ts,
+        ],
+    )
+    conn.commit()
+
+
+def query_theses(
+    conn: duckdb.DuckDBPyConnection,
+    ticker: str | None = None,
+    thesis_type: str | None = None,
+    limit: int = 50,
+) -> pd.DataFrame:
+    """Query stored investment theses."""
+    clauses = []
+    params = []
+    if ticker is not None:
+        clauses.append("ticker = ?")
+        params.append(ticker)
+    if thesis_type is not None:
+        clauses.append("thesis_type = ?")
+        params.append(thesis_type)
+
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    return conn.execute(
+        f"SELECT * FROM investment_theses {where} ORDER BY created_at DESC LIMIT {int(limit)}",
+        params,
+    ).fetchdf()
+
 

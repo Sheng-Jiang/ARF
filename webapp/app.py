@@ -19,6 +19,7 @@ pages = {
         st.Page("pages/8_⚖️_双价值链.py", title="双价值链", icon="⚖️"),
     ],
     "研究": [
+        st.Page("pages/9_🤖_AI_投资雷达.py", title="AI 投资雷达", icon="🤖"),
         st.Page("pages/5_🔍_AI_智能选股.py", title="AI 智能选股", icon="🔍"),
         st.Page("pages/7_📝_一键研报.py", title="一键研报", icon="📝"),
         st.Page("pages/4_📈_技术指标与回测.py", title="技术指标与回测", icon="📈"),
