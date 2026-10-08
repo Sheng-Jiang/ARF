@@ -15,17 +15,25 @@ log = logging.getLogger(__name__)
 
 
 def _connect_db(db_path: Path = Path("data/arf.db")) -> duckdb.DuckDBPyConnection:
-    """Return a read-only connection, bootstrapping the schema first if needed.
+    """Return a connection to DuckDB for query tools.
 
-    ``init_db`` opens a read-write connection to create any missing tables/views;
-    we close it before reopening read-only so the query tools below physically
-    cannot mutate the database (defense-in-depth behind the SELECT-only guard in
-    :func:`query_quant_database`). Closing the bootstrap handle also avoids
-    leaking a connection on every call.
+    Connects using a configuration compatible with any existing open connection
+    in the same process (such as Streamlit's cached connection in webapp/data.py),
+    avoiding DuckDB's "different configuration than existing connections" error.
+    Read-only safety is enforced by ``query_quant_database``'s SELECT-only validation.
     """
-    bootstrap = init_db(db_path)
-    bootstrap.close()
-    return duckdb.connect(str(db_path), read_only=True)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        conn = duckdb.connect(str(db_path))
+    except duckdb.ConnectionException:
+        conn = duckdb.connect(str(db_path), read_only=True)
+
+    try:
+        conn.execute("SELECT 1 FROM snapshots LIMIT 0")
+    except duckdb.CatalogException:
+        conn.close()
+        return init_db(db_path)
+    return conn
 
 
 def get_stock_quant_profile(

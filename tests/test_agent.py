@@ -2,12 +2,14 @@
 from datetime import date
 from unittest.mock import MagicMock, patch
 
+import duckdb
 import pandas as pd
 import pytest
 
 from arf.agent.radar import discover_supply_chain_candidates, scan_valuation_anomalies
 from arf.agent.thesis import generate_opportunity_card
 from arf.agent.tools import (
+    _connect_db,
     get_stock_quant_profile,
     query_quant_database,
     search_value_chain_layer,
@@ -198,3 +200,27 @@ def test_discover_supply_chain_candidates_mock(agent_test_db):
         conn.close()
         assert len(staged_df) == 1
         assert staged_df.iloc[0]["ticker"] == "VRT"
+
+
+def test_connect_db_concurrency_with_open_app_connection(agent_test_db):
+    """Simulate Streamlit holding a cached read-write connection while agent tools connect.
+    
+    Verifies that _connect_db avoids DuckDB configuration conflict exceptions.
+    """
+    app_conn = duckdb.connect(str(agent_test_db), read_only=False)
+    try:
+        # Direct _connect_db call
+        c = _connect_db(agent_test_db)
+        c.close()
+
+        # Tool call while app connection is active in the same process
+        profile = get_stock_quant_profile("NVDA", date(2026, 6, 1), db_path=agent_test_db)
+        assert profile is not None
+        assert profile["ticker"] == "NVDA"
+
+        # Safe SQL query call
+        rows = query_quant_database("SELECT COUNT(*) AS cnt FROM snapshots", db_path=agent_test_db)
+        assert len(rows) == 1
+        assert rows[0]["cnt"] == 2
+    finally:
+        app_conn.close()
