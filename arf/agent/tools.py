@@ -15,8 +15,17 @@ log = logging.getLogger(__name__)
 
 
 def _connect_db(db_path: Path = Path("data/arf.db")) -> duckdb.DuckDBPyConnection:
-    init_db(db_path)
-    return duckdb.connect(str(db_path), read_only=False)
+    """Return a read-only connection, bootstrapping the schema first if needed.
+
+    ``init_db`` opens a read-write connection to create any missing tables/views;
+    we close it before reopening read-only so the query tools below physically
+    cannot mutate the database (defense-in-depth behind the SELECT-only guard in
+    :func:`query_quant_database`). Closing the bootstrap handle also avoids
+    leaking a connection on every call.
+    """
+    bootstrap = init_db(db_path)
+    bootstrap.close()
+    return duckdb.connect(str(db_path), read_only=True)
 
 
 def get_stock_quant_profile(

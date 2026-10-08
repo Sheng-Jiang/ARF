@@ -24,7 +24,7 @@ inject_mobile_css()
 
 st.title("🤖 AI 投资机会与产业链雷达")
 st.caption(
-    "由 Gemini 3.7/3.8 Flash 驱动的自主投研 Agent：全天候扫描跨板块估值异动，主动探寻全球 AI 供应链未覆盖标的，生成结构化 Opportunity Card。"
+    "由 Gemini Flash 驱动的自主投研 Agent：全天候扫描跨板块估值异动，主动探寻全球 AI 供应链未覆盖标的，生成结构化 Opportunity Card。"
 )
 
 as_of = render_sidebar()
@@ -116,7 +116,7 @@ with tab_radar:
             trigger_thesis = st.button("🚀 生成 Opportunity Card", disabled=not gemini.is_enabled(), use_container_width=True)
 
         if trigger_thesis and target_ticker:
-            with st.spinner("Agent 正在结合 Gemini 3.7/3.8 Flash 进行 Bull vs Bear 研判并检索全球最新动态..."):
+            with st.spinner("Agent 正在结合 Gemini Flash 进行 Bull vs Bear 研判并检索全球最新动态..."):
                 try:
                     card = generate_opportunity_card(
                         ticker=target_ticker,

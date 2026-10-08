@@ -22,8 +22,13 @@ import pandas as pd
 
 log = logging.getLogger(__name__)
 
-MODEL = os.getenv("GEMINI_MODEL", "gemini-3.7-flash")
-FLASH_MODEL = os.getenv("GEMINI_FLASH_MODEL", "gemini-3.7-flash")
+# Shared defaults for the existing webapp features (一键研报, 智能选股, screener).
+# Kept at their prior values so the AI-radar agent commit doesn't silently
+# downgrade report/screener quality. The agent modules pick their own Flash
+# model via their own defaults (arf/agent/thesis.py, arf/agent/radar.py); set
+# GEMINI_MODEL / GEMINI_FLASH_MODEL to override any of them.
+MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-pro")
+FLASH_MODEL = os.getenv("GEMINI_FLASH_MODEL", "gemini-2.5-flash")
 MAX_PARALLEL = int(os.getenv("GEMINI_MAX_PARALLEL", "6"))
 
 

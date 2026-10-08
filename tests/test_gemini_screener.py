@@ -2,7 +2,7 @@
 from datetime import date
 from unittest.mock import MagicMock, patch
 
-from webapp.gemini import parse_nlp_screener_query
+from webapp.gemini import FLASH_MODEL, parse_nlp_screener_query
 
 
 def test_parse_nlp_screener_query_success():
@@ -24,7 +24,7 @@ def test_parse_nlp_screener_query_success():
         mock_client.models.generate_content.assert_called_once()
         call_kwargs = mock_client.models.generate_content.call_args[1]
         
-        assert call_kwargs["model"] in ("gemini-3.7-flash", "gemini-3.8-flash")
+        assert call_kwargs["model"] == FLASH_MODEL
         assert "User Screener Query: 芯片题材" in call_kwargs["contents"]
         assert "2026-06-26" in call_kwargs["contents"]
         assert sql == mock_response.text

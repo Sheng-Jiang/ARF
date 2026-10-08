@@ -1,4 +1,4 @@
-"""Thesis generator and Opportunity Card compiler using Gemini 3.7/3.8 Flash."""
+"""Thesis generator and Opportunity Card compiler using Gemini Flash."""
 from __future__ import annotations
 
 import json
@@ -90,7 +90,7 @@ def generate_opportunity_card(
     db_path: Path = Path("data/arf.db"),
     persist: bool = True,
 ) -> OpportunityCard:
-    """Generate an institutional Opportunity Card for a stock using Gemini 3.7/3.8 Flash."""
+    """Generate an institutional Opportunity Card for a stock using Gemini Flash."""
     key = (api_key or os.getenv("GEMINI_API_KEY", "")).strip()
     if not key or key.startswith("PLACEHOLDER"):
         raise RuntimeError("GEMINI_API_KEY is not set or valid.")
@@ -99,12 +99,32 @@ def generate_opportunity_card(
     if not quant_profile:
         raise ValueError(f"No quantitative data found for {ticker} as of {as_of}.")
 
+    # get_stock_quant_profile falls back to the most recent snapshot when the
+    # requested as_of has no row. Label the card with the date of the data we
+    # actually got, not the date we asked for, so the persisted thesis never
+    # claims a snapshot it wasn't built from.
+    data_as_of = as_of
+    raw_profile_date = quant_profile.get("as_of_date")
+    if raw_profile_date:
+        try:
+            data_as_of = date.fromisoformat(str(raw_profile_date)[:10])
+        except (TypeError, ValueError):
+            log.warning(
+                "Unparseable as_of_date %r in quant profile for %s; using requested %s",
+                raw_profile_date, ticker, as_of,
+            )
+    if data_as_of != as_of:
+        log.warning(
+            "No snapshot for %s on %s; generated card from %s data instead.",
+            ticker, as_of, data_as_of,
+        )
+
     name = quant_profile.get("name") or ticker
     leg = quant_profile.get("leg") or "US"
     layer = quant_profile.get("layer") or "L3"
 
     prompt_context = (
-        f"Snapshot Date: {as_of.isoformat()}\n"
+        f"Snapshot Date: {data_as_of.isoformat()}\n"
         f"Target Stock: {ticker} ({name}) | Leg: {leg} | Layer: {layer}\n\n"
         f"=== QUANTITATIVE ARF PROFILE ===\n"
         f"- ARF Score: {quant_profile.get('arf', 'N/A')} (Decile: D{quant_profile.get('decile', 'N/A')})\n"
@@ -151,7 +171,7 @@ def generate_opportunity_card(
 
     parsed = json.loads(clean_json)
 
-    thesis_id = f"th_{ticker.lower()}_{as_of.strftime('%Y%m%d')}_{uuid.uuid4().hex[:6]}"
+    thesis_id = f"th_{ticker.lower()}_{data_as_of.strftime('%Y%m%d')}_{uuid.uuid4().hex[:6]}"
 
     card = OpportunityCard(
         thesis_id=thesis_id,
@@ -159,7 +179,7 @@ def generate_opportunity_card(
         name=name,
         leg=leg,
         layer=layer,
-        as_of_date=as_of.isoformat(),
+        as_of_date=data_as_of.isoformat(),
         thesis_type=parsed.get("thesis_type", "neutral_watch"),
         title=parsed.get("title", f"Investment Thesis for {ticker}"),
         quant_profile=QuantFactorSnapshot(**quant_profile),
@@ -180,7 +200,7 @@ def generate_opportunity_card(
             upsert_thesis(conn, {
                 "thesis_id": card.thesis_id,
                 "ticker": card.ticker,
-                "as_of_date": as_of,
+                "as_of_date": data_as_of,
                 "thesis_type": card.thesis_type,
                 "title": card.title,
                 "bull_case": card.bull_case,
