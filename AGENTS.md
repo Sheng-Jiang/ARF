@@ -84,3 +84,13 @@ Reference calibration figures (May 2026): NVDA fwd P/E ~21–25, P/S ~21, ROE ~1
 ## Python Requirements
 
 Python ≥ 3.11, type hints throughout, `ruff` clean. Unit test coverage >80% for `arf/scoring.py` (z-scoring, winsorization, percentile ranking, geometric mean, reverse-DCF solver).
+
+## Deployment & GCP Configuration
+
+- **Target GCP Project ID**: `ai-rf-497701` (always use this project ID when deploying Cloud Run services or jobs from this repository, e.g. `gcloud builds submit --project=ai-rf-497701` / `gcloud run deploy --project=ai-rf-497701`).
+- **Target Region**: `asia-east1`
+- **GCS Data Bucket**: `arf-data-ai-rf`
+- **Cloud Run Webapp Service**: `arf-webapp`
+- **Cloud Run Pipeline Job**: `arf-pipeline`
+- **Secret Manager Secret**: `gemini-api-key`
+
