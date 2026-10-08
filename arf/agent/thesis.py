@@ -1,21 +1,20 @@
 """Thesis generator and Opportunity Card compiler using Gemini Flash."""
 from __future__ import annotations
 
-import json
 import logging
 import os
-import re
 import uuid
 from datetime import date
 from pathlib import Path
 
+from arf.agent.radar import _extract_json_payload
 from arf.agent.schemas import OpportunityCard, QuantFactorSnapshot
 from arf.agent.tools import get_stock_quant_profile
 from arf.db import init_db, upsert_thesis
 
 log = logging.getLogger(__name__)
 
-THESIS_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.7-flash")
+THESIS_MODEL = os.getenv("GEMINI_FLASH_MODEL", "gemini-2.5-flash")
 
 
 _THESIS_SYSTEM_PROMPT = """You are a senior buy-side tech investment analyst specializing in the global AI hardware and software value chain (Jensen Huang's 5-layer cake).
@@ -152,7 +151,6 @@ def generate_opportunity_card(
         tools=[types.Tool(google_search=types.GoogleSearch())],
         temperature=0.2,
         system_instruction=_THESIS_SYSTEM_PROMPT,
-        response_mime_type="application/json",
     )
 
     response = client.models.generate_content(
@@ -162,14 +160,7 @@ def generate_opportunity_card(
     )
 
     raw_text, citations = _extract_citations_and_text(response)
-
-    # Clean markdown json fencing if any
-    clean_json = raw_text.strip()
-    if clean_json.startswith("```"):
-        clean_json = re.sub(r"^```(?:json)?\n", "", clean_json)
-        clean_json = re.sub(r"\n```$", "", clean_json)
-
-    parsed = json.loads(clean_json)
+    parsed = _extract_json_payload(raw_text)
 
     thesis_id = f"th_{ticker.lower()}_{data_as_of.strftime('%Y%m%d')}_{uuid.uuid4().hex[:6]}"
 

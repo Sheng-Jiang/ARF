@@ -194,12 +194,37 @@ def test_discover_supply_chain_candidates_mock(agent_test_db):
         assert cands[0].ticker == "VRT"
         assert cands[0].layer == "L1"
 
+        # Verify GenerateContentConfig did not pass response_mime_type with tools
+        # (Gemini API forbids response_mime_type="application/json" when tools are present)
+        call_kwargs = mock_client.models.generate_content.call_args.kwargs
+        config = call_kwargs["config"]
+        assert getattr(config, "response_mime_type", None) is None
+        assert len(config.tools) == 1
+
         # Verify staged in candidate_pool
         conn = init_db(agent_test_db)
         staged_df = query_candidates(conn)
         conn.close()
         assert len(staged_df) == 1
         assert staged_df.iloc[0]["ticker"] == "VRT"
+
+
+def test_extract_json_payload_formats():
+    from arf.agent.radar import _extract_json_payload
+
+    # Direct JSON
+    assert _extract_json_payload('{"key": "val"}') == {"key": "val"}
+
+    # Markdown fenced
+    assert _extract_json_payload('```json\n{"candidates": [1, 2]}\n```') == {"candidates": [1, 2]}
+
+    # Markdown with conversational intro and outro
+    chat_resp = "Here are the top companies:\n```json\n{\"candidates\": [{\"ticker\": \"COHR\"}]}\n```\nEnjoy!"
+    assert _extract_json_payload(chat_resp) == {"candidates": [{"ticker": "COHR"}]}
+
+    # Invalid / empty string
+    assert _extract_json_payload("") == {}
+    assert _extract_json_payload("not json at all") == {}
 
 
 def test_connect_db_concurrency_with_open_app_connection(agent_test_db):

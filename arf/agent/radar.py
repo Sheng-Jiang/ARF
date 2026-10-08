@@ -15,7 +15,30 @@ from arf.db import init_db, upsert_candidate
 
 log = logging.getLogger(__name__)
 
-RADAR_MODEL = os.getenv("GEMINI_FLASH_MODEL", "gemini-3.7-flash")
+RADAR_MODEL = os.getenv("GEMINI_FLASH_MODEL", "gemini-2.5-flash")
+
+
+def _extract_json_payload(text: str) -> dict[str, Any]:
+    """Robustly extract a JSON dictionary from a model response."""
+    text = (text or "").strip()
+    try:
+        return json.loads(text)
+    except Exception:
+        pass
+    match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group(1))
+        except Exception:
+            pass
+    first_brace = text.find("{")
+    last_brace = text.rfind("}")
+    if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+        try:
+            return json.loads(text[first_brace : last_brace + 1])
+        except Exception:
+            pass
+    return {}
 
 
 def scan_valuation_anomalies(
@@ -130,7 +153,6 @@ def discover_supply_chain_candidates(
         tools=[types.Tool(google_search=types.GoogleSearch())],
         temperature=0.2,
         system_instruction=_DISCOVERY_SYSTEM_PROMPT,
-        response_mime_type="application/json",
     )
 
     prompt = f"Search and discover the top publicly traded companies in the following AI supply chain area: {theme}"
@@ -141,13 +163,10 @@ def discover_supply_chain_candidates(
         config=config,
     )
 
-    clean_json = (response.text or "{}").strip()
-    if clean_json.startswith("```"):
-        clean_json = re.sub(r"^```(?:json)?\n", "", clean_json)
-        clean_json = re.sub(r"\n```$", "", clean_json)
-
-    parsed = json.loads(clean_json)
+    parsed = _extract_json_payload(response.text or "")
     raw_list = parsed.get("candidates", [])
+    if not raw_list:
+        log.warning("No candidates found in model response: %r", response.text)
 
     candidates: list[CandidateCompany] = []
     conn = init_db(db_path) if stage_to_db else None
