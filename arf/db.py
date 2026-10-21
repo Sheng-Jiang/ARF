@@ -1148,12 +1148,12 @@ def _json_dumps_safe(val: object) -> str:
     if val is None:
         return "[]"
     if hasattr(val, "model_dump"):
-        return json.dumps(val.model_dump(), ensure_ascii=False)
+        return json.dumps(val.model_dump(), ensure_ascii=False, default=str)
     if isinstance(val, (list, dict)):
-        return json.dumps(val, ensure_ascii=False)
+        return json.dumps(val, ensure_ascii=False, default=str)
     if isinstance(val, str):
         return val
-    return json.dumps(val, ensure_ascii=False)
+    return json.dumps(val, ensure_ascii=False, default=str)
 
 
 # Callers may pass either the storage column name (``*_json``) or the Pydantic
@@ -1183,7 +1183,7 @@ _OPPORTUNITY_STAGE_ORDER = (
 
 def _stage_rank(stage: str) -> int:
     try:
-        return _OPPORTUNITY_STAGE_ORDER.index(str(stage))
+        return _OPPORTUNITY_STAGE_ORDER.index(str(stage).lower())
     except ValueError:
         return -1
 
@@ -1228,7 +1228,7 @@ def upsert_idr(
     )
 
     def pick(key: str, default: object = None) -> object:
-        if key in provided:
+        if key in provided and provided[key] is not None:
             return provided[key]
         if existing is not None and existing.get(key) is not None:
             return existing[key]
@@ -1338,12 +1338,12 @@ def upsert_idr(
             conn,
             ticker=str(ticker),
             stage=desired_stage,
-            name=str(pick("name", ticker)),
-            leg=str(pick("leg", "US")),
-            layer=str(pick("layer", "L3")),
+            name=str(pick("name", ticker) or ticker),
+            leg=str(pick("leg", "US") or "US"),
+            layer=str(pick("layer", "L3") or "L3"),
             latest_idr_id=idr_id,
-            valuation_entry_zone=str(pick("valuation_entry_zone", "")),
-            invalidation_criteria=str(pick("invalidation_criteria", "")),
+            valuation_entry_zone=str(pick("valuation_entry_zone", "") or ""),
+            invalidation_criteria=str(pick("invalidation_criteria", "") or ""),
             updated_at=ts,
         )
     conn.commit()

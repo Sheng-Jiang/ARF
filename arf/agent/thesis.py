@@ -109,6 +109,8 @@ def _quant_snapshot(quant_profile: dict) -> QuantFactorSnapshot:
         data["leg"] = "US"
     if data.get("as_of_date") is None:
         data["as_of_date"] = ""
+    else:
+        data["as_of_date"] = str(data["as_of_date"])[:10]
     return QuantFactorSnapshot(**data)
 
 

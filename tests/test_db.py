@@ -826,6 +826,54 @@ class TestInvestmentDecisionRecords:
         assert state["current_stage"] == "harvested"
         assert state["latest_idr_id"] == "idr-nvda-2"
 
+    def test_model_dump_does_not_erase_pm_annotations(self, conn):
+        """Re-compiling an IDR (passing model_dump() with None fields) preserves PM annotations."""
+        from arf.agent.schemas import InvestmentDecisionRecord
+
+        idr = InvestmentDecisionRecord(
+            idr_id="idr-nvda-pm-test",
+            ticker="NVDA",
+            name="NVIDIA Corp",
+            as_of_date="2026-06-01",
+            valuation_entry_zone="Forward P/E < 30",
+        )
+        upsert_idr(conn, idr.model_dump())
+
+        # Human PM annotates the decision
+        upsert_idr(conn, {
+            "idr_id": "idr-nvda-pm-test",
+            "ticker": "NVDA",
+            "as_of_date": date(2026, 6, 1),
+            "human_pm_decision": "approved_override",
+            "human_pm_notes": "Valuation pull-back confirmed with research committee",
+        })
+
+        # Pipeline re-runs card generation on the same date and dumps IDR (human_pm_decision is None)
+        upsert_idr(conn, idr.model_dump())
+
+        row = query_idrs(conn, ticker="NVDA").iloc[0]
+        assert row["human_pm_decision"] == "approved_override"
+        assert row["human_pm_notes"] == "Valuation pull-back confirmed with research committee"
+
+        st_row = query_opportunity_states(conn).iloc[0]
+        assert st_row["valuation_entry_zone"] == "Forward P/E < 30"
+        assert st_row["valuation_entry_zone"] != "None"
+
+    def test_stage_rank_and_json_dumps_safe(self):
+        import numpy as np
+
+        from arf.db import _json_dumps_safe, _stage_rank
+
+        assert _stage_rank("HARVESTED") == _stage_rank("harvested") == 6
+        assert _stage_rank("Invalidated") == 7
+        assert _stage_rank("unknown_stage") == -1
+
+        # Test date and numpy serialization in _json_dumps_safe
+        payload = {"as_of": date(2026, 6, 1), "int_val": np.int64(42), "float_val": np.float64(3.14)}
+        res = _json_dumps_safe(payload)
+        assert "2026-06-01" in res
+        assert "42" in res
+
     def test_query_idrs_filtering(self, conn):
         upsert_idr(conn, {
             "idr_id": "idr-1", "ticker": "T1", "as_of_date": date(2026, 6, 1),
