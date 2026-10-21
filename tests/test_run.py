@@ -63,3 +63,54 @@ def test_scoring_df_carries_reporting_currency_into_reverse_dcf():
 
     # Market cap in TWD = 32e9 → FCF yield 5% → g* = 10% − 5% = 5%.
     assert implied_growth_for_row(row, wacc=0.10) == pytest.approx(0.05)
+
+
+def test_fetch_all_with_leg_filter():
+    from datetime import date
+    from unittest.mock import patch
+
+    from arf.config import UniverseEntry
+    from arf.fetchers.base import StockData
+    from arf.run import fetch_all
+
+    universe = [
+        UniverseEntry(
+            ticker="NVDA",
+            name="NVIDIA",
+            leg="US",
+            layer="L2",
+            pure_play_pct=1.0,
+            primary_exchange="NASDAQ",
+            policy_premium=False,
+            pool="2026Q3",
+        ),
+        UniverseEntry(
+            ticker="300308.SZ",
+            name="Innolight",
+            leg="China",
+            layer="L3",
+            pure_play_pct=0.9,
+            primary_exchange="SZSE",
+            policy_premium=False,
+            pool="2026Q3",
+        ),
+    ]
+
+    def mock_fetch(entry, as_of):
+        return StockData(ticker=entry.ticker, as_of_date=as_of, price=100.0)
+
+    with patch("arf.run._fetch_one", side_effect=mock_fetch):
+        # Fetch only China
+        china_stocks = fetch_all(universe, date(2026, 10, 21), leg="China")
+        assert len(china_stocks) == 1
+        assert china_stocks[0].ticker == "300308.SZ"
+
+        # Fetch only US
+        us_stocks = fetch_all(universe, date(2026, 10, 21), leg="US")
+        assert len(us_stocks) == 1
+        assert us_stocks[0].ticker == "NVDA"
+
+        # Fetch all
+        all_stocks = fetch_all(universe, date(2026, 10, 21), leg=None)
+        assert len(all_stocks) == 2
+

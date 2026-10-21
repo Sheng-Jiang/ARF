@@ -75,13 +75,21 @@ def fetch_daily_prices(ticker: str, start_date: str, end_date: str, adjust: str 
             
         df = df.copy()
         df["ticker"] = ticker
-        df = df.rename(columns={
-            "amount": "volume"
-        })
+        if "volume" not in df.columns and "amount" in df.columns:
+            df = df.rename(columns={"amount": "volume"})
+        if "turnover" in df.columns and "turnover_rate" not in df.columns:
+            df = df.rename(columns={"turnover": "turnover_rate"})
         
-        df = df[["ticker", "date", "open", "high", "low", "close", "volume"]]
+        # Deduplicate columns if any duplicate was introduced upstream
+        df = df.loc[:, ~df.columns.duplicated()].copy()
+        
+        cols = ["ticker", "date", "open", "high", "low", "close", "volume"]
+        if "turnover_rate" in df.columns:
+            cols.append("turnover_rate")
+        df = df[[c for c in cols if c in df.columns]]
         df["date"] = pd.to_datetime(df["date"]).dt.date
-        for col in ["open", "high", "low", "close", "volume"]:
+        numeric_cols = [c for c in df.columns if c not in ("ticker", "date")]
+        for col in numeric_cols:
             df[col] = pd.to_numeric(df[col], errors="coerce")
             
         return df
