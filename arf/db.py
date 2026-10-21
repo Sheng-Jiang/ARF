@@ -1156,87 +1156,194 @@ def _json_dumps_safe(val: object) -> str:
     return json.dumps(val, ensure_ascii=False)
 
 
+# Callers may pass either the storage column name (``*_json``) or the Pydantic
+# field name used by ``InvestmentDecisionRecord.model_dump()``.
+_IDR_JSON_FIELD_ALIASES = {
+    "observed_metrics_json": "observed_metrics",
+    "policy_rules_json": "policy_rules_evaluated",
+    "bull_arguments_json": "bull_arguments",
+    "bear_arguments_json": "bear_arguments",
+    "catalysts_json": "catalysts",
+    "citations_json": "citations",
+}
+
+# Lifecycle order of ``OpportunityStage`` (arf/agent/schemas.py). Kept as plain
+# strings so this storage module does not depend on the agent package.
+_OPPORTUNITY_STAGE_ORDER = (
+    "discovered",
+    "qualified",
+    "under_review",
+    "thesis_formulated",
+    "committee_pending",
+    "active_watch",
+    "harvested",
+    "invalidated",
+)
+
+
+def _stage_rank(stage: str) -> int:
+    try:
+        return _OPPORTUNITY_STAGE_ORDER.index(str(stage))
+    except ValueError:
+        return -1
+
+
+def _fetch_row_dict(
+    conn: duckdb.DuckDBPyConnection, sql: str, params: list[object]
+) -> dict[str, object] | None:
+    """Run a query and return its first row as a column→value dict."""
+    cursor = conn.execute(sql, params)
+    row = cursor.fetchone()
+    if row is None:
+        return None
+    return dict(zip((desc[0] for desc in cursor.description), row, strict=True))
+
+
 def upsert_idr(
     conn: duckdb.DuckDBPyConnection,
     idr: dict,
     created_at: datetime | None = None,
     auto_update_state: bool = True,
 ) -> None:
-    """Insert or update a 5-step Investment Decision Record (IDR)."""
+    """Insert or update a 5-step Investment Decision Record (IDR).
+
+    Updates merge onto the stored row: columns absent from ``idr`` keep their
+    stored value instead of being reset to a schema default. A partial write
+    (recording ``human_pm_decision``, say) therefore cannot erase the
+    machine-generated gate verdict, recommended action, or invalidation
+    criteria of the record it is annotating.
+    """
     ts = created_at or datetime.now(UTC).replace(tzinfo=None)
+    idr_id = idr["idr_id"]
 
-    observed_metrics = _json_dumps_safe(idr.get("observed_metrics_json") or idr.get("observed_metrics"))
-    policy_rules = _json_dumps_safe(idr.get("policy_rules_json") or idr.get("policy_rules_evaluated"))
-    bull_arguments = _json_dumps_safe(idr.get("bull_arguments_json") or idr.get("bull_arguments"))
-    bear_arguments = _json_dumps_safe(idr.get("bear_arguments_json") or idr.get("bear_arguments"))
-    catalysts = _json_dumps_safe(idr.get("catalysts_json") or idr.get("catalysts"))
-    citations = _json_dumps_safe(idr.get("citations_json") or idr.get("citations"))
+    provided: dict[str, object] = dict(idr)
+    for canonical, alias in _IDR_JSON_FIELD_ALIASES.items():
+        if canonical not in provided and alias in provided:
+            provided[canonical] = provided[alias]
 
-    conn.execute(
-        """
-        INSERT OR REPLACE INTO investment_decision_records (
-            idr_id, ticker, name, as_of_date, stage,
-            trigger_type, trigger_summary, observed_metrics_json,
-            leg, layer, cost_of_equity, policy_rules_json,
-            bull_arguments_json, bear_arguments_json, deliberation_synthesis,
-            gate_verdict, gate_details, froth_flag, hurdle_met,
-            recommended_action, valuation_entry_zone, invalidation_criteria,
-            confidence_score, catalysts_json, citations_json,
-            human_pm_decision, human_pm_notes, model, created_at
-        ) VALUES (
-            ?, ?, ?, ?, ?,
-            ?, ?, ?,
-            ?, ?, ?, ?,
-            ?, ?, ?,
-            ?, ?, ?, ?,
-            ?, ?, ?,
-            ?, ?, ?,
-            ?, ?, ?, ?
-        )
-        """,
-        [
-            idr["idr_id"],
-            idr["ticker"],
-            idr.get("name", idr["ticker"]),
-            idr["as_of_date"],
-            str(idr.get("stage", "thesis_formulated")),
-            idr.get("trigger_type", "radar_scan"),
-            idr.get("trigger_summary", ""),
-            observed_metrics,
-            idr.get("leg", "US"),
-            idr.get("layer", "L3"),
-            float(idr.get("cost_of_equity", 0.10)),
-            policy_rules,
-            bull_arguments,
-            bear_arguments,
-            idr.get("deliberation_synthesis", ""),
-            str(idr.get("gate_verdict", "PASSED")),
-            idr.get("gate_details", ""),
-            bool(idr.get("froth_flag", False)),
-            bool(idr.get("hurdle_met", True)),
-            str(idr.get("recommended_action", "MONITOR")),
-            idr.get("valuation_entry_zone", ""),
-            idr.get("invalidation_criteria", ""),
-            float(idr.get("confidence_score", 50.0)),
-            catalysts,
-            citations,
-            idr.get("human_pm_decision"),
-            idr.get("human_pm_notes"),
-            idr.get("model", "gemini-3.8-flash"),
-            ts,
-        ],
+    existing = _fetch_row_dict(
+        conn,
+        "SELECT * FROM investment_decision_records WHERE idr_id = ?",
+        [idr_id],
     )
+
+    def pick(key: str, default: object = None) -> object:
+        if key in provided:
+            return provided[key]
+        if existing is not None and existing.get(key) is not None:
+            return existing[key]
+        return default
+
+    ticker = pick("ticker")
+    if not ticker:
+        raise ValueError("upsert_idr requires 'ticker'")
+    as_of_date = pick("as_of_date")
+    if as_of_date is None:
+        raise ValueError("upsert_idr requires 'as_of_date'")
+
+    values = [
+        ticker,
+        pick("name", ticker),
+        as_of_date,
+        str(pick("stage", "thesis_formulated")),
+        pick("trigger_type", "radar_scan"),
+        pick("trigger_summary", ""),
+        _json_dumps_safe(pick("observed_metrics_json")),
+        pick("leg", "US"),
+        pick("layer", "L3"),
+        float(pick("cost_of_equity", 0.10)),
+        _json_dumps_safe(pick("policy_rules_json")),
+        _json_dumps_safe(pick("bull_arguments_json")),
+        _json_dumps_safe(pick("bear_arguments_json")),
+        pick("deliberation_synthesis", ""),
+        str(pick("gate_verdict", "PASSED")),
+        pick("gate_details", ""),
+        bool(pick("froth_flag", False)),
+        bool(pick("hurdle_met", True)),
+        str(pick("recommended_action", "MONITOR")),
+        pick("valuation_entry_zone", ""),
+        pick("invalidation_criteria", ""),
+        float(pick("confidence_score", 50.0)),
+        _json_dumps_safe(pick("catalysts_json")),
+        _json_dumps_safe(pick("citations_json")),
+        pick("human_pm_decision"),
+        pick("human_pm_notes"),
+        pick("model", "gemini-3.8-flash"),
+    ]
+    # created_at records when the IDR was first written; an annotation must not
+    # rewrite it. An explicit created_at argument still wins (used by tests).
+    created_ts = created_at or (existing["created_at"] if existing is not None else ts)
+
+    if existing is None:
+        conn.execute(
+            """
+            INSERT INTO investment_decision_records (
+                idr_id, ticker, name, as_of_date, stage,
+                trigger_type, trigger_summary, observed_metrics_json,
+                leg, layer, cost_of_equity, policy_rules_json,
+                bull_arguments_json, bear_arguments_json, deliberation_synthesis,
+                gate_verdict, gate_details, froth_flag, hurdle_met,
+                recommended_action, valuation_entry_zone, invalidation_criteria,
+                confidence_score, catalysts_json, citations_json,
+                human_pm_decision, human_pm_notes, model, created_at
+            ) VALUES (
+                ?, ?, ?, ?, ?,
+                ?, ?, ?,
+                ?, ?, ?, ?,
+                ?, ?, ?,
+                ?, ?, ?, ?,
+                ?, ?, ?,
+                ?, ?, ?,
+                ?, ?, ?, ?
+            )
+            """,
+            [idr_id, *values, created_ts],
+        )
+    else:
+        conn.execute(
+            """
+            UPDATE investment_decision_records SET
+                ticker = ?, name = ?, as_of_date = ?, stage = ?,
+                trigger_type = ?, trigger_summary = ?, observed_metrics_json = ?,
+                leg = ?, layer = ?, cost_of_equity = ?, policy_rules_json = ?,
+                bull_arguments_json = ?, bear_arguments_json = ?,
+                deliberation_synthesis = ?,
+                gate_verdict = ?, gate_details = ?, froth_flag = ?, hurdle_met = ?,
+                recommended_action = ?, valuation_entry_zone = ?,
+                invalidation_criteria = ?,
+                confidence_score = ?, catalysts_json = ?, citations_json = ?,
+                human_pm_decision = ?, human_pm_notes = ?, model = ?, created_at = ?
+            WHERE idr_id = ?
+            """,
+            [*values, created_ts, idr_id],
+        )
+
     if auto_update_state:
+        desired_stage = str(pick("stage", "thesis_formulated"))
+        state = _fetch_row_dict(
+            conn,
+            "SELECT current_stage FROM opportunity_states WHERE ticker = ?",
+            [ticker],
+        )
+        if state is not None and _stage_rank(desired_stage) < _stage_rank(
+            str(state["current_stage"])
+        ):
+            # Every freshly compiled IDR is stamped thesis_formulated, but a
+            # new card must not roll back a lifecycle the PM already advanced
+            # or closed (e.g. harvested/invalidated). Keep the current stage
+            # while still refreshing the link and metadata below.
+            desired_stage = str(state["current_stage"])
+
         update_opportunity_stage(
             conn,
-            ticker=idr["ticker"],
-            stage=str(idr.get("stage", "thesis_formulated")),
-            name=idr.get("name", idr["ticker"]),
-            leg=idr.get("leg", "US"),
-            layer=idr.get("layer", "L3"),
-            latest_idr_id=idr["idr_id"],
-            valuation_entry_zone=idr.get("valuation_entry_zone", ""),
-            invalidation_criteria=idr.get("invalidation_criteria", ""),
+            ticker=str(ticker),
+            stage=desired_stage,
+            name=str(pick("name", ticker)),
+            leg=str(pick("leg", "US")),
+            layer=str(pick("layer", "L3")),
+            latest_idr_id=idr_id,
+            valuation_entry_zone=str(pick("valuation_entry_zone", "")),
+            invalidation_criteria=str(pick("invalidation_criteria", "")),
             updated_at=ts,
         )
     conn.commit()
