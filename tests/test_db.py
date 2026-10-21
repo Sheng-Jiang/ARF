@@ -769,6 +769,63 @@ class TestInvestmentDecisionRecords:
         assert st_df.iloc[0]["latest_idr_id"] == "idr-nvda-001"
         assert st_df.iloc[0]["valuation_entry_zone"] == "Forward P/E < 30"
 
+    def test_partial_update_preserves_stored_fields(self, conn):
+        """Annotating an IDR must not reset machine-generated audit fields."""
+        upsert_idr(conn, {
+            "idr_id": "idr-nvda-partial",
+            "ticker": "NVDA",
+            "name": "NVIDIA Corp",
+            "as_of_date": date(2026, 6, 1),
+            "stage": "thesis_formulated",
+            "gate_verdict": "BLOCKED_FROTH",
+            "gate_details": "G3 Gate: froth-flagged",
+            "recommended_action": "AVOID_FROTH",
+            "invalidation_criteria": "P/S above 30 for two quarters",
+            "froth_flag": True,
+            "hurdle_met": False,
+            "confidence_score": 75.0,
+        })
+        created_at = query_idrs(conn, ticker="NVDA").iloc[0]["created_at"]
+
+        upsert_idr(conn, {
+            "idr_id": "idr-nvda-partial",
+            "ticker": "NVDA",
+            "as_of_date": date(2026, 6, 1),
+            "human_pm_decision": "approved_override",
+        })
+
+        row = query_idrs(conn, ticker="NVDA").iloc[0]
+        assert row["gate_verdict"] == "BLOCKED_FROTH"
+        assert row["gate_details"] == "G3 Gate: froth-flagged"
+        assert row["recommended_action"] == "AVOID_FROTH"
+        assert row["invalidation_criteria"] == "P/S above 30 for two quarters"
+        assert bool(row["froth_flag"]) is True
+        assert bool(row["hurdle_met"]) is False
+        assert row["confidence_score"] == 75.0
+        assert row["human_pm_decision"] == "approved_override"
+        assert row["created_at"] == created_at
+
+    def test_new_idr_does_not_regress_advanced_stage(self, conn):
+        """Generating a fresh card must not reopen a harvested/invalidated name."""
+        upsert_idr(conn, {
+            "idr_id": "idr-nvda-1",
+            "ticker": "NVDA",
+            "as_of_date": date(2026, 6, 1),
+            "stage": "thesis_formulated",
+        })
+        update_opportunity_stage(conn, ticker="NVDA", stage="harvested")
+
+        upsert_idr(conn, {
+            "idr_id": "idr-nvda-2",
+            "ticker": "NVDA",
+            "as_of_date": date(2026, 6, 2),
+            "stage": "thesis_formulated",
+        })
+
+        state = query_opportunity_states(conn).iloc[0]
+        assert state["current_stage"] == "harvested"
+        assert state["latest_idr_id"] == "idr-nvda-2"
+
     def test_query_idrs_filtering(self, conn):
         upsert_idr(conn, {
             "idr_id": "idr-1", "ticker": "T1", "as_of_date": date(2026, 6, 1),

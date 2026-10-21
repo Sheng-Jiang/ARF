@@ -279,6 +279,53 @@ def test_compile_investment_decision_record_g3_gates(agent_test_db):
 
 
 
+def test_compile_idr_without_technical_metrics(agent_test_db):
+    """A ticker with no technical_metrics row must still compile an IDR.
+
+    get_stock_quant_profile LEFT JOINs technical_metrics, so ma_bullish comes
+    back NULL for names without technical coverage (e.g. new HK IPOs).
+    """
+    conn = init_db(agent_test_db)
+    conn.execute("DELETE FROM technical_metrics WHERE ticker = 'NVDA'")
+    conn.commit()
+    conn.close()
+
+    mock_response = MagicMock()
+    mock_response.candidates = []
+    mock_response.text = """
+    {
+      "thesis_type": "garp_value",
+      "title": "NVIDIA: Blackwell Ramp",
+      "bull_case": "Unmatched 90% ROE and software moat.",
+      "bear_case": "Hyperscaler capex moderation.",
+      "synthesis": "Asymmetric risk/reward.",
+      "valuation_entry_zone": "Forward P/E < 30",
+      "invalidation_criteria": "Gross margin compresses below 70%",
+      "confidence_score": 80.0,
+      "catalysts": []
+    }
+    """
+
+    with patch("google.genai.Client") as mock_client_cls:
+        mock_client = MagicMock()
+        mock_client_cls.return_value = mock_client
+        mock_client.models.generate_content.return_value = mock_response
+
+        card, idr = compile_investment_decision_record(
+            "NVDA",
+            date(2026, 6, 1),
+            api_key="fake_test_key",
+            db_path=agent_test_db,
+            persist=False,
+        )
+
+    assert card.quant_profile is not None
+    assert card.quant_profile.ma_bullish is False
+    assert card.quant_profile.technical_score is None
+    assert idr.observed_metrics is not None
+    assert idr.observed_metrics.ma_bullish is False
+
+
 def test_discover_supply_chain_candidates_mock(agent_test_db):
     mock_response = MagicMock()
     mock_response.text = """

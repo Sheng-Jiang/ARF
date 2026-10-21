@@ -89,6 +89,29 @@ def _extract_citations_and_text(response) -> tuple[str, list[dict[str, str]]]:
     return text, deduped
 
 
+def _quant_snapshot(quant_profile: dict) -> QuantFactorSnapshot:
+    """Build a QuantFactorSnapshot, tolerating NULLs from the LEFT JOIN.
+
+    ``get_stock_quant_profile`` LEFT JOINs ``technical_metrics``, so a ticker
+    with no technical row for the date (e.g. a newly listed HK IPO with only
+    1d/5d price history) comes back with NULL ``ma_bullish``/``froth_flag``.
+    Pydantic rejects ``None`` for those bool fields; default them to False,
+    matching the schema's "not flagged / not bullish" meaning, instead of
+    failing the whole card.
+    """
+    data = dict(quant_profile)
+    for field in ("froth_flag", "ma_bullish"):
+        if data.get(field) is None:
+            data[field] = False
+    if not data.get("name"):
+        data["name"] = data.get("ticker") or ""
+    if not data.get("leg"):
+        data["leg"] = "US"
+    if data.get("as_of_date") is None:
+        data["as_of_date"] = ""
+    return QuantFactorSnapshot(**data)
+
+
 def compile_investment_decision_record(
     ticker: str,
     as_of: date,
@@ -216,7 +239,7 @@ def compile_investment_decision_record(
         stage=OpportunityStage.THESIS_FORMULATED,
         trigger_type="valuation_pullback" if thesis_type == "garp_value" else "factor_scan",
         trigger_summary=f"{ticker} analyzed as of {data_as_of.isoformat()} with ARF={quant_profile.get('arf')} (D{quant_profile.get('decile')})",
-        observed_metrics=QuantFactorSnapshot(**quant_profile),
+        observed_metrics=_quant_snapshot(quant_profile),
         leg=leg,
         layer=layer,
         cost_of_equity=cost_of_equity,
@@ -250,7 +273,7 @@ def compile_investment_decision_record(
         as_of_date=data_as_of.isoformat(),
         thesis_type=thesis_type,
         title=parsed.get("title", f"Investment Thesis for {ticker}"),
-        quant_profile=QuantFactorSnapshot(**quant_profile),
+        quant_profile=_quant_snapshot(quant_profile),
         bull_case=bull_case_raw,
         bear_case=bear_case_raw,
         synthesis=parsed.get("synthesis", ""),
