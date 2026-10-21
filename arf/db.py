@@ -1,5 +1,7 @@
 import json
+import math
 from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 
 import duckdb
@@ -1143,17 +1145,77 @@ def query_theses(
     ).fetchdf()
 
 
-def _json_dumps_safe(val: object) -> str:
-    """Safely convert a dict, list, or Pydantic model to a JSON string."""
-    if val is None:
-        return "[]"
-    if hasattr(val, "model_dump"):
-        return json.dumps(val.model_dump(), ensure_ascii=False, default=str)
-    if isinstance(val, (list, dict)):
-        return json.dumps(val, ensure_ascii=False, default=str)
+def _json_ready(val: object) -> object:
+    """Convert a value to strict-JSON-native types without stringifying numbers.
+
+    ``json.dumps(default=str)`` turned ``np.int64(4)`` into ``"4"``, so a
+    consumer comparing the stored decile numerically hit a ``TypeError``.
+    NumPy scalars and ``Decimal`` are converted to the equivalent Python
+    number instead; non-finite floats become ``None`` so the output is valid
+    JSON.
+    """
+    if val is None or val is pd.NA:
+        return None
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, int):
+        return int(val)
+    if isinstance(val, float):
+        return float(val) if math.isfinite(val) else None
     if isinstance(val, str):
         return val
-    return json.dumps(val, ensure_ascii=False, default=str)
+    if isinstance(val, Decimal):
+        return float(val)
+    if isinstance(val, (datetime, date)):
+        return None if val is pd.NaT else val.isoformat()
+    if isinstance(val, dict):
+        return {_json_key(key): _json_ready(item) for key, item in val.items()}
+    if isinstance(val, (list, tuple, set)):
+        return [_json_ready(item) for item in val]
+    if hasattr(val, "model_dump"):
+        return _json_ready(val.model_dump())
+    item = getattr(val, "item", None)  # NumPy scalar (np.int64, np.bool_, …)
+    if callable(item):
+        try:
+            return _json_ready(item())
+        except (TypeError, ValueError):
+            pass
+    return str(val)
+
+
+def _json_key(key: object) -> object:
+    """Normalize a dict key to a type ``json.dumps`` accepts.
+
+    ``default=`` is never applied to keys, which is why a ``date`` or NumPy
+    key still raised ``TypeError`` after the old fix.
+    """
+    if key is None or isinstance(key, (str, int, bool)):
+        return key
+    if isinstance(key, float):
+        return key if math.isfinite(key) else str(key)
+    ready = _json_ready(key)
+    if ready is None or isinstance(ready, (str, int, float, bool)):
+        return ready
+    return str(ready)
+
+
+def _json_dumps_safe(val: object) -> str:
+    """Serialize a JSON column while preserving JSON-native types.
+
+    ``None`` becomes JSON ``null``: ``observed_metrics_json`` is object-shaped,
+    so an absent snapshot must not be stored as an empty list. List-shaped
+    columns pass an explicit ``[]`` via ``pick(..., [])``.
+    """
+    if val is None:
+        return "null"
+    if isinstance(val, str):
+        return val
+    if hasattr(val, "model_dump"):
+        val = val.model_dump()
+    return json.dumps(_json_ready(val), ensure_ascii=False, allow_nan=False)
+
+
+_UNSET = object()  # distinguishes "key absent" from an explicit ``None``
 
 
 # Callers may pass either the storage column name (``*_json``) or the Pydantic
@@ -1181,9 +1243,24 @@ _OPPORTUNITY_STAGE_ORDER = (
 )
 
 
+def _normalize_stage(stage: object) -> str:
+    """Canonicalize a known stage to its lowercase spelling.
+
+    Comparisons are case-insensitive, so the value that reaches storage must be
+    normalized too; otherwise ``stage="HARVESTED"`` ranks as harvested but is
+    persisted verbatim and ``query_opportunity_states(stage="harvested")``
+    stops finding it. Unknown stages are preserved so bad input stays visible.
+    """
+    if stage is None:
+        return ""
+    value = str(stage).strip()
+    lowered = value.lower()
+    return lowered if lowered in _OPPORTUNITY_STAGE_ORDER else value
+
+
 def _stage_rank(stage: str) -> int:
     try:
-        return _OPPORTUNITY_STAGE_ORDER.index(str(stage).lower())
+        return _OPPORTUNITY_STAGE_ORDER.index(_normalize_stage(stage))
     except ValueError:
         return -1
 
@@ -1227,12 +1304,16 @@ def upsert_idr(
         [idr_id],
     )
 
-    def pick(key: str, default: object = None) -> object:
-        if key in provided and provided[key] is not None:
+    def pick(key: str, default: object = _UNSET) -> object:
+        # A key that is absent from ``provided`` keeps the stored value. An
+        # explicit ``None`` is an intentional clear (e.g. retracting a PM
+        # sign-off), so callers that pass a full ``model_dump()`` must use
+        # ``exclude_unset=True`` to avoid clearing annotations they never set.
+        if key in provided:
             return provided[key]
         if existing is not None and existing.get(key) is not None:
             return existing[key]
-        return default
+        return None if default is _UNSET else default
 
     ticker = pick("ticker")
     if not ticker:
@@ -1241,31 +1322,48 @@ def upsert_idr(
     if as_of_date is None:
         raise ValueError("upsert_idr requires 'as_of_date'")
 
+    def num(key: str, default: float) -> float:
+        value = pick(key, default)
+        return default if value is None else float(value)
+
+    def json_list(key: str) -> str:
+        value = pick(key, [])
+        return _json_dumps_safe([] if value is None else value)
+
+    name_val = pick("name", ticker)
+    # A missing gate verdict is stored as NULL, never as PASSED: an
+    # unevaluated gate and a gate that actually passed must stay
+    # distinguishable in the audit table.
+    gate_verdict = pick("gate_verdict")
+    hurdle_met = pick("hurdle_met")
+    recommended_action = pick("recommended_action", "MONITOR")
+    stage_val = pick("stage", "thesis_formulated") or "thesis_formulated"
+
     values = [
         ticker,
-        pick("name", ticker),
+        "" if name_val is None else str(name_val),
         as_of_date,
-        str(pick("stage", "thesis_formulated")),
+        _normalize_stage(stage_val),
         pick("trigger_type", "radar_scan"),
         pick("trigger_summary", ""),
         _json_dumps_safe(pick("observed_metrics_json")),
         pick("leg", "US"),
         pick("layer", "L3"),
-        float(pick("cost_of_equity", 0.10)),
-        _json_dumps_safe(pick("policy_rules_json")),
-        _json_dumps_safe(pick("bull_arguments_json")),
-        _json_dumps_safe(pick("bear_arguments_json")),
+        num("cost_of_equity", 0.10),
+        json_list("policy_rules_json"),
+        json_list("bull_arguments_json"),
+        json_list("bear_arguments_json"),
         pick("deliberation_synthesis", ""),
-        str(pick("gate_verdict", "PASSED")),
+        None if gate_verdict is None else str(gate_verdict),
         pick("gate_details", ""),
         bool(pick("froth_flag", False)),
-        bool(pick("hurdle_met", True)),
-        str(pick("recommended_action", "MONITOR")),
+        None if hurdle_met is None else bool(hurdle_met),
+        None if recommended_action is None else str(recommended_action),
         pick("valuation_entry_zone", ""),
         pick("invalidation_criteria", ""),
-        float(pick("confidence_score", 50.0)),
-        _json_dumps_safe(pick("catalysts_json")),
-        _json_dumps_safe(pick("citations_json")),
+        num("confidence_score", 50.0),
+        json_list("catalysts_json"),
+        json_list("citations_json"),
         pick("human_pm_decision"),
         pick("human_pm_notes"),
         pick("model", "gemini-3.8-flash"),
@@ -1319,7 +1417,7 @@ def upsert_idr(
         )
 
     if auto_update_state:
-        desired_stage = str(pick("stage", "thesis_formulated"))
+        desired_stage = _normalize_stage(stage_val)
         state = _fetch_row_dict(
             conn,
             "SELECT current_stage FROM opportunity_states WHERE ticker = ?",
@@ -1332,18 +1430,27 @@ def upsert_idr(
             # new card must not roll back a lifecycle the PM already advanced
             # or closed (e.g. harvested/invalidated). Keep the current stage
             # while still refreshing the link and metadata below.
-            desired_stage = str(state["current_stage"])
+            desired_stage = _normalize_stage(state["current_stage"])
 
+        # Empty values are passed through as empty strings; update_opportunity_stage
+        # merges them onto the stored row, so an IDR with no name cannot
+        # overwrite a friendly name with the ticker.
         update_opportunity_stage(
             conn,
             ticker=str(ticker),
             stage=desired_stage,
-            name=str(pick("name", ticker) or ticker),
-            leg=str(pick("leg", "US") or "US"),
-            layer=str(pick("layer", "L3") or "L3"),
+            name="" if pick("name") is None else str(pick("name")),
+            leg="" if pick("leg") is None else str(pick("leg")),
+            layer="" if pick("layer") is None else str(pick("layer")),
             latest_idr_id=idr_id,
-            valuation_entry_zone=str(pick("valuation_entry_zone", "") or ""),
-            invalidation_criteria=str(pick("invalidation_criteria", "") or ""),
+            valuation_entry_zone=(
+                "" if pick("valuation_entry_zone") is None
+                else str(pick("valuation_entry_zone"))
+            ),
+            invalidation_criteria=(
+                "" if pick("invalidation_criteria") is None
+                else str(pick("invalidation_criteria"))
+            ),
             updated_at=ts,
         )
     conn.commit()
@@ -1387,6 +1494,7 @@ def update_opportunity_stage(
 ) -> None:
     """Update or insert the current lifecycle stage for an Opportunity Alpha."""
     ts = updated_at or datetime.now(UTC).replace(tzinfo=None)
+    stage = _normalize_stage(stage)
     existing = conn.execute(
         "SELECT name, leg, layer, latest_idr_id, valuation_entry_zone, invalidation_criteria, notes "
         "FROM opportunity_states WHERE ticker = ?",

@@ -1,3 +1,4 @@
+import json
 import uuid
 from datetime import UTC, date, datetime, timedelta
 
@@ -827,7 +828,7 @@ class TestInvestmentDecisionRecords:
         assert state["latest_idr_id"] == "idr-nvda-2"
 
     def test_model_dump_does_not_erase_pm_annotations(self, conn):
-        """Re-compiling an IDR (passing model_dump() with None fields) preserves PM annotations."""
+        """A recompiled IDR merges onto PM annotations instead of clearing them."""
         from arf.agent.schemas import InvestmentDecisionRecord
 
         idr = InvestmentDecisionRecord(
@@ -837,7 +838,7 @@ class TestInvestmentDecisionRecords:
             as_of_date="2026-06-01",
             valuation_entry_zone="Forward P/E < 30",
         )
-        upsert_idr(conn, idr.model_dump())
+        upsert_idr(conn, idr.model_dump(exclude_unset=True))
 
         # Human PM annotates the decision
         upsert_idr(conn, {
@@ -848,8 +849,9 @@ class TestInvestmentDecisionRecords:
             "human_pm_notes": "Valuation pull-back confirmed with research committee",
         })
 
-        # Pipeline re-runs card generation on the same date and dumps IDR (human_pm_decision is None)
-        upsert_idr(conn, idr.model_dump())
+        # Pipeline re-runs card generation on the same date. ``exclude_unset``
+        # omits human_pm_decision/human_pm_notes entirely.
+        upsert_idr(conn, idr.model_dump(exclude_unset=True))
 
         row = query_idrs(conn, ticker="NVDA").iloc[0]
         assert row["human_pm_decision"] == "approved_override"
@@ -858,6 +860,77 @@ class TestInvestmentDecisionRecords:
         st_row = query_opportunity_states(conn).iloc[0]
         assert st_row["valuation_entry_zone"] == "Forward P/E < 30"
         assert st_row["valuation_entry_zone"] != "None"
+
+    def test_explicit_none_retracts_pm_annotation(self, conn):
+        """An explicit None clears a sign-off; only an absent key preserves it."""
+        base = {
+            "idr_id": "idr-nvda-retract",
+            "ticker": "NVDA",
+            "as_of_date": date(2026, 6, 1),
+        }
+        upsert_idr(conn, {**base, "human_pm_decision": "approved_override"})
+        upsert_idr(conn, {**base, "human_pm_decision": None})
+
+        row = query_idrs(conn, ticker="NVDA").iloc[0]
+        assert row["human_pm_decision"] is None or pd.isna(row["human_pm_decision"])
+
+    def test_minimal_idr_does_not_claim_gate_passed(self, conn):
+        """A record with no gate evaluation must not look like a clean pass."""
+        upsert_idr(conn, {
+            "idr_id": "idr-minimal",
+            "ticker": "NVDA",
+            "as_of_date": date(2026, 6, 1),
+        })
+
+        row = query_idrs(conn, ticker="NVDA").iloc[0]
+        assert row["gate_verdict"] is None or pd.isna(row["gate_verdict"])
+        assert row["hurdle_met"] is None or pd.isna(row["hurdle_met"])
+
+    def test_stage_normalized_before_storage(self, conn):
+        """A mixed-case stage must be stored in canonical form."""
+        upsert_idr(conn, {
+            "idr_id": "idr-case",
+            "ticker": "NVDA",
+            "as_of_date": date(2026, 6, 1),
+            "stage": "HARVESTED",
+        })
+
+        row = query_idrs(conn, ticker="NVDA").iloc[0]
+        assert row["stage"] == "harvested"
+        assert len(query_opportunity_states(conn, stage="harvested")) == 1
+
+    def test_empty_name_does_not_overwrite_state_name(self, conn):
+        """An IDR without a name must not replace the stored friendly name."""
+        upsert_idr(conn, {
+            "idr_id": "idr-name-1",
+            "ticker": "AMD",
+            "name": "Advanced Micro Devices",
+            "as_of_date": date(2026, 6, 1),
+        })
+        upsert_idr(conn, {
+            "idr_id": "idr-name-2",
+            "ticker": "AMD",
+            "name": "",
+            "as_of_date": date(2026, 6, 2),
+        })
+
+        state = query_opportunity_states(conn).iloc[0]
+        assert state["name"] == "Advanced Micro Devices"
+
+    def test_json_columns_preserve_types_and_shapes(self, conn):
+        """Stored JSON keeps native types, normalizes keys, and nulls object fields."""
+        upsert_idr(conn, {
+            "idr_id": "idr-json",
+            "ticker": "NVDA",
+            "as_of_date": date(2026, 6, 1),
+            "observed_metrics": None,
+            "catalysts_json": [],
+        })
+
+        row = query_idrs(conn, ticker="NVDA").iloc[0]
+        assert json.loads(row["observed_metrics_json"]) is None
+        assert json.loads(row["catalysts_json"]) == []
+        assert json.loads(row["policy_rules_json"]) == []
 
     def test_stage_rank_and_json_dumps_safe(self):
         import numpy as np
@@ -868,11 +941,27 @@ class TestInvestmentDecisionRecords:
         assert _stage_rank("Invalidated") == 7
         assert _stage_rank("unknown_stage") == -1
 
-        # Test date and numpy serialization in _json_dumps_safe
-        payload = {"as_of": date(2026, 6, 1), "int_val": np.int64(42), "float_val": np.float64(3.14)}
-        res = _json_dumps_safe(payload)
-        assert "2026-06-01" in res
-        assert "42" in res
+        payload = {
+            "as_of": date(2026, 6, 1),
+            "int_val": np.int64(42),
+            "float_val": np.float64(3.14),
+            "flag": np.bool_(True),
+            "nan": float("nan"),
+        }
+        parsed = json.loads(_json_dumps_safe(payload))
+        # Numbers must stay numbers: stringifying them breaks numeric consumers.
+        assert parsed["int_val"] == 42 and isinstance(parsed["int_val"], int)
+        assert parsed["float_val"] == 3.14
+        assert parsed["flag"] is True
+        assert parsed["as_of"] == "2026-06-01"
+        assert parsed["nan"] is None
+
+        # ``default=`` never applies to dict keys; they must be normalized too.
+        keyed = json.loads(_json_dumps_safe({date(2026, 6, 1): {"np": np.int64(1)}}))
+        assert keyed == {"2026-06-01": {"np": 1}}
+
+        # None is a JSON null, not an empty list.
+        assert json.loads(_json_dumps_safe(None)) is None
 
     def test_query_idrs_filtering(self, conn):
         upsert_idr(conn, {
