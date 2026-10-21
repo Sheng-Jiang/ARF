@@ -1,0 +1,13 @@
+[Unit]
+Description=Daily 16:30 CST trigger for ARF China leg data ingestion
+Requires=arf-china-sync.service
+
+[Timer]
+# 16:30 CST (China Standard Time) corresponds to 08:30:00 UTC.
+# The A-share market closes at 15:00 CST; 16:30 CST allows 90 minutes for after-hours
+# trade reports, turnover settlement, and Eastmoney research publication.
+OnCalendar=*-*-* 08:30:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target

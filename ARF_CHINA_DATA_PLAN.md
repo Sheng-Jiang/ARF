@@ -102,6 +102,6 @@ For high-volume historical crawls and vectorised CYQ chip distribution calculati
 | Milestone | Deliverables | Target Status |
 | :--- | :--- | :--- |
 | **M1: Scoped Proxy Engine** | `arf/fetchers/proxy.py`, `scripts/tunnel_china.sh`, integration in `akshare.py` and `research.py`. Unit tests passing. | **Done & Verified** |
-| **M2: Lighthouse Batch Sync Script** | `scripts/sync_china_lighthouse.sh` to execute China leg ingestion on Lighthouse and push snapshots to GCS. | Next |
-| **M3: Production Secret & Cloud Run Link** | Configure Secret Manager `china-data-proxy` in `ai-rf-497701`; pass to `arf-pipeline` Cloud Run job. | Next |
-| **M4: Automated Systemd Cron** | Install `arf-china-sync.timer` on Lighthouse for automated 16:30 CST daily runs. | Next |
+| **M2: Lighthouse Batch Sync Script** | `scripts/sync_china_lighthouse.sh`, `--leg` pipeline scoping, GCS HMAC storage bridge in `arf/storage.py`. Live execution verified. | **Done & Verified** |
+| **M3: Production Secret & Cloud Run Link** | Secret Manager `china-data-proxy` in `ai-rf-497701`; bound to Cloud Run Job `arf-pipeline` and `cloudbuild.job.yaml`. | **Done & Verified** |
+| **M4: Automated Systemd Cron** | `arf-china-sync.service` & `arf-china-sync.timer` active on Lighthouse (`82.156.75.194`) triggering daily at 16:30 CST. | **Done & Verified** |

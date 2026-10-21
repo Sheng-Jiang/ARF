@@ -1,0 +1,17 @@
+[Unit]
+Description=ARF China Leg Daily Ingestion Runner
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/ARF
+EnvironmentFile=-/etc/arf/gcs_hmac.env
+EnvironmentFile=-/home/ubuntu/.arf/gcs_hmac.env
+ExecStart=/bin/bash /home/ubuntu/ARF/scripts/sync_china_lighthouse.sh --local
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target

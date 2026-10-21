@@ -80,14 +80,25 @@ def _fetch_one(entry: UniverseEntry, as_of: date) -> StockData:
         return StockData(ticker=entry.ticker, as_of_date=as_of, data_source="error")
 
 
-def fetch_all(universe: list[UniverseEntry], as_of: date) -> list[StockData]:
+def fetch_all(
+    universe: list[UniverseEntry],
+    as_of: date,
+    leg: str | None = None,
+) -> list[StockData]:
     """Fetch market data for in-pool US/China names; Pre-IPO passes through as
     manual rows. Watchlist names (pool=null, not Pre-IPO) are not fetched this
-    quarter — they are rotation candidates only."""
+    quarter — they are rotation candidates only.
+
+    If leg is specified, only entries matching that leg are fetched.
+    """
     results: list[StockData] = []
     to_fetch = [
         e for e in universe
-        if (e.pool is not None and e.leg in ("US", "China")) or e.leg == "Pre-IPO"
+        if (
+            (e.pool is not None and e.leg in ("US", "China"))
+            or (e.leg == "Pre-IPO" and (leg is None or leg == "Pre-IPO"))
+        )
+        and (leg is None or e.leg == leg)
     ]
     with ThreadPoolExecutor(max_workers=12) as pool:
         futures = {pool.submit(_fetch_one, entry, as_of): entry for entry in to_fetch}
@@ -99,6 +110,44 @@ def fetch_all(universe: list[UniverseEntry], as_of: date) -> list[StockData]:
                 log.warning("Unexpected error for %s: %s", entry.ticker, exc)
                 results.append(StockData(ticker=entry.ticker, as_of_date=as_of))
     return results
+
+
+def _carry_forward_other_leg_rows(conn, as_of: date, leg: str) -> pd.DataFrame:
+    """Rows from the previous revision belonging to legs other than ``leg``.
+
+    A scoped run writes a complete new revision for its date, so without
+    carrying the other legs forward their rows would disappear from the latest
+    revision (and from the webapp, which serves the latest snapshot). The
+    snapshot for ``as_of`` is preferred; otherwise the latest available date is
+    used so a daily China run keeps the US board populated between weekly runs.
+    Scores are carried as stored — they must not be re-ranked with only one leg
+    present in the input.
+    """
+    from arf.db import query_latest, query_snapshot
+
+    existing = query_snapshot(conn, as_of)
+    if existing.empty:
+        existing = query_latest(conn)
+    rows = existing[existing["leg"] != leg].copy()
+    rows["as_of_date"] = as_of
+    return rows
+
+
+def _merge_leg_scoped_snapshot(
+    df: pd.DataFrame,
+    preserved: pd.DataFrame | None,
+) -> pd.DataFrame:
+    """Score the freshly fetched leg, then append carried-forward rows.
+
+    Snapshot rows do not carry the E-score inputs (``pure_play_pct``,
+    ``revenue_ntm_growth`` — they store ``revenue_ntm`` instead), so running
+    ``compute_arf`` over a frame that already contains preserved rows nulls
+    their stored E/V/ARF. Score first, concatenate after.
+    """
+    scored = compute_arf(df)
+    if preserved is None or preserved.empty:
+        return scored
+    return pd.concat([scored, preserved], ignore_index=True)
 
 
 def _build_scoring_df(
@@ -362,7 +411,13 @@ def fetch_daily_prices_yf(ticker: str, start_date: str, end_date: str) -> pd.Dat
         return pd.DataFrame()
 
 
-def _run_technical_pipeline(conn, df: pd.DataFrame, universe: list[UniverseEntry], as_of: date) -> None:
+def _run_technical_pipeline(
+    conn,
+    df: pd.DataFrame,
+    universe: list[UniverseEntry],
+    as_of: date,
+    leg: str | None = None,
+) -> None:
     """Pre-calculate and cache daily prices and technical metrics for scored universe stocks in DuckDB.
     
     This ensures that the AI-Screener and dashboard charts have pre-populated data out-of-the-box.
@@ -377,7 +432,10 @@ def _run_technical_pipeline(conn, df: pd.DataFrame, universe: list[UniverseEntry
         score_stock_technical,
     )
     
-    scored_stocks = [e for e in universe if e.leg in ("US", "China")]
+    scored_stocks = [
+        e for e in universe
+        if (e.leg == leg if leg else e.leg in ("US", "China"))
+    ]
     if not scored_stocks:
         return
         
@@ -471,7 +529,10 @@ def _run_technical_pipeline(conn, df: pd.DataFrame, universe: list[UniverseEntry
 
 
 def _run_research_pipeline(
-    conn, universe: list[UniverseEntry], as_of: date
+    conn,
+    universe: list[UniverseEntry],
+    as_of: date,
+    leg: str | None = None,
 ) -> None:
     """Fetch + persist institutional research reports for the scored universe.
 
@@ -482,7 +543,10 @@ def _run_research_pipeline(
     from arf.db import upsert_research_reports
     from arf.fetchers.research import fetch_research_reports
 
-    scored_stocks = [e for e in universe if e.leg in ("US", "China")]
+    scored_stocks = [
+        e for e in universe
+        if (e.leg == leg if leg else e.leg in ("US", "China"))
+    ]
     if not scored_stocks:
         return
 
@@ -537,6 +601,7 @@ def run_pipeline(
     report_dir: Path = Path("reports"),
     universe_path: Path = Path("config/universe.yaml"),
     trigger_source: str = "manual",
+    leg: str | None = None,
 ) -> pd.DataFrame:
     """Run the full ARF pipeline for a given as-of date.
 
@@ -544,7 +609,8 @@ def run_pipeline(
     `gs://$GCS_BUCKET/$GCS_DB_OBJECT` before running, and uploads the updated DB
     plus the snapshot parquet + markdown report when finished.
     """
-    console.print(f"[bold]ARF pipeline[/bold] — as of {as_of} (trigger: {trigger_source})")
+    leg_str = f" [leg: {leg}]" if leg else ""
+    console.print(f"[bold]ARF pipeline[/bold] — as of {as_of}{leg_str} (trigger: {trigger_source})")
 
     db_path = data_dir / "arf.db"
     if storage.is_gcs_mode():
@@ -559,7 +625,7 @@ def run_pipeline(
 
     try:
         console.print("Fetching market data…")
-        stocks = fetch_all(universe, as_of)
+        stocks = fetch_all(universe, as_of, leg=leg)
         outcomes = [(s.ticker, _outcome_for(s), s.data_source or None) for s in stocks]
         ok = sum(1 for _, st, _ in outcomes if st == "ok")
         failed = sum(1 for _, st, _ in outcomes if st == "error")
@@ -569,7 +635,19 @@ def run_pipeline(
         )
 
         df = _build_scoring_df(stocks, universe)
-        df = compute_arf(df)
+        preserved_rows = None
+        if leg is not None:
+            try:
+                preserved_rows = _carry_forward_other_leg_rows(conn, as_of, leg)
+                if not preserved_rows.empty:
+                    console.print(
+                        f"Preserving {len(preserved_rows)} rows for other legs "
+                        f"from the existing snapshot"
+                    )
+            except Exception as exc:
+                log.warning("Could not preserve existing rows for other legs: %s", exc)
+
+        df = _merge_leg_scoped_snapshot(df, preserved_rows)
 
         upsert_snapshot(conn, df, as_of, run_id=run_id)
         record_fetch_outcomes(conn, run_id, outcomes)
@@ -581,13 +659,13 @@ def run_pipeline(
 
         # Pre-calculate and cache technical indicators for A-shares
         try:
-            _run_technical_pipeline(conn, df, universe, as_of)
+            _run_technical_pipeline(conn, df, universe, as_of, leg=leg)
         except Exception:
             log.exception("Technical indicators cache failed - continuing main pipeline")
 
         # Fetch + cache institutional research reports (layer-1 consensus data)
         try:
-            _run_research_pipeline(conn, universe, as_of)
+            _run_research_pipeline(conn, universe, as_of, leg=leg)
         except Exception:
             log.exception("Research report cache failed - continuing main pipeline")
 
@@ -609,6 +687,7 @@ def run_pipeline(
         snap_dir = data_dir / "snapshots"
         snap_dir.mkdir(parents=True, exist_ok=True)
         parquet_path = snap_dir / f"arf_{as_of}.parquet"
+        df["as_of_date"] = as_of
         df.to_parquet(parquet_path, index=False)
         console.print(f"Parquet written: {parquet_path}")
 
@@ -710,8 +789,10 @@ def main() -> None:
     parser.add_argument("--data-dir", type=Path, default=Path("data"))
     parser.add_argument("--report-dir", type=Path, default=Path("reports"))
     parser.add_argument("--universe", type=Path, default=Path("config/universe.yaml"))
+    parser.add_argument("--leg", choices=["US", "China"], default=None,
+                        help="Filter pipeline to a specific leg (US or China).")
     parser.add_argument("--trigger-source", default=os.getenv("TRIGGER_SOURCE", "manual"),
-                        help="Tag for the run record: manual|scheduler|webapp")
+                        help="Tag for the run record: manual|scheduler|webapp|lighthouse")
     args = parser.parse_args()
 
     as_of = args.as_of
@@ -725,6 +806,7 @@ def main() -> None:
         report_dir=args.report_dir,
         universe_path=args.universe,
         trigger_source=args.trigger_source,
+        leg=args.leg,
     )
 
 

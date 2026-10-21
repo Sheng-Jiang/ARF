@@ -63,3 +63,149 @@ def test_scoring_df_carries_reporting_currency_into_reverse_dcf():
 
     # Market cap in TWD = 32e9 → FCF yield 5% → g* = 10% − 5% = 5%.
     assert implied_growth_for_row(row, wacc=0.10) == pytest.approx(0.05)
+
+
+def test_fetch_all_with_leg_filter():
+    from datetime import date
+    from unittest.mock import patch
+
+    from arf.config import UniverseEntry
+    from arf.fetchers.base import StockData
+    from arf.run import fetch_all
+
+    universe = [
+        UniverseEntry(
+            ticker="NVDA",
+            name="NVIDIA",
+            leg="US",
+            layer="L2",
+            pure_play_pct=1.0,
+            primary_exchange="NASDAQ",
+            policy_premium=False,
+            pool="2026Q3",
+        ),
+        UniverseEntry(
+            ticker="300308.SZ",
+            name="Innolight",
+            leg="China",
+            layer="L3",
+            pure_play_pct=0.9,
+            primary_exchange="SZSE",
+            policy_premium=False,
+            pool="2026Q3",
+        ),
+    ]
+
+    def mock_fetch(entry, as_of):
+        return StockData(ticker=entry.ticker, as_of_date=as_of, price=100.0)
+
+    with patch("arf.run._fetch_one", side_effect=mock_fetch):
+        # Fetch only China
+        china_stocks = fetch_all(universe, date(2026, 10, 21), leg="China")
+        assert len(china_stocks) == 1
+        assert china_stocks[0].ticker == "300308.SZ"
+
+        # Fetch only US
+        us_stocks = fetch_all(universe, date(2026, 10, 21), leg="US")
+        assert len(us_stocks) == 1
+        assert us_stocks[0].ticker == "NVDA"
+
+        # Fetch all
+        all_stocks = fetch_all(universe, date(2026, 10, 21), leg=None)
+        assert len(all_stocks) == 2
+
+
+
+def test_carry_forward_keeps_other_legs_and_pre_ipo(tmp_path):
+    from datetime import date
+
+    import pandas as pd
+
+    from arf.db import upsert_snapshot
+    from arf.run import _carry_forward_other_leg_rows
+
+    conn = init_db(tmp_path / "t.db")
+    as_of = date(2026, 10, 21)
+    upsert_snapshot(
+        conn,
+        pd.DataFrame(
+            {
+                "ticker": ["NVDA", "300308.SZ", "ANTHROPIC"],
+                "leg": ["US", "China", "Pre-IPO"],
+                "cohort": ["core", "core", "manual"],
+                "arf": [40.0, 90.0, None],
+            }
+        ),
+        as_of,
+    )
+
+    rows = _carry_forward_other_leg_rows(conn, as_of, "China")
+
+    # China is being re-fetched; US and Pre-IPO survive the scoped revision.
+    assert set(rows["ticker"]) == {"NVDA", "ANTHROPIC"}
+    assert rows["as_of_date"].eq(as_of).all()
+    conn.close()
+
+
+def test_carry_forward_falls_back_to_latest_date(tmp_path):
+    from datetime import date
+
+    import pandas as pd
+
+    from arf.db import upsert_snapshot
+    from arf.run import _carry_forward_other_leg_rows
+
+    conn = init_db(tmp_path / "t.db")
+    upsert_snapshot(
+        conn,
+        pd.DataFrame({"ticker": ["NVDA"], "leg": ["US"], "arf": [40.0]}),
+        date(2026, 10, 14),
+    )
+
+    rows = _carry_forward_other_leg_rows(conn, date(2026, 10, 21), "China")
+
+    assert list(rows["ticker"]) == ["NVDA"]
+    assert rows["as_of_date"].eq(date(2026, 10, 21)).all()
+    conn.close()
+
+
+def test_merge_leg_scoped_snapshot_keeps_stored_scores():
+    """Preserved rows lack E-score inputs; they must not be re-ranked to NaN."""
+    import pandas as pd
+
+    from arf.run import _merge_leg_scoped_snapshot
+
+    fresh = pd.DataFrame(
+        {
+            "ticker": ["300308.SZ", "300394.SZ"],
+            "leg": ["China", "China"],
+            "cohort": ["core", "core"],
+            "layer": ["L3", "L3"],
+            "pure_play_pct": [90.0, 80.0],
+            "gross_margin": [0.30, 0.40],
+            "revenue_ntm_growth": [0.50, 0.60],
+            "ev_sales_5yr_percentile": [80.0, 90.0],
+            "ev_sales": [10.0, 12.0],
+            "roe": [0.20, 0.25],
+            "ps_ratio": [10.0, 12.0],
+        }
+    )
+    preserved = pd.DataFrame(
+        {
+            "ticker": ["NVDA"],
+            "leg": ["US"],
+            "cohort": ["core"],
+            "e_score": [77.0],
+            "v_score": [66.0],
+            "arf": [71.3],
+            "decile": [3],
+        }
+    )
+
+    out = _merge_leg_scoped_snapshot(fresh, preserved)
+
+    nvda = out.loc[out["ticker"] == "NVDA"].iloc[0]
+    assert nvda["e_score"] == 77.0
+    assert nvda["v_score"] == 66.0
+    assert nvda["arf"] == 71.3
+    assert out.loc[out["leg"] == "China", "arf"].notna().all()
