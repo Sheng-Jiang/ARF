@@ -85,12 +85,21 @@ Reference calibration figures (May 2026): NVDA fwd P/E ~21–25, P/S ~21, ROE ~1
 
 Python ≥ 3.11, type hints throughout, `ruff` clean. Unit test coverage >80% for `arf/scoring.py` (z-scoring, winsorization, percentile ranking, geometric mean, reverse-DCF solver).
 
-## Deployment & GCP Configuration
+## Deployment & Hybrid Cloud Infrastructure
 
+ARF operates a **Hybrid Cloud Architecture** bridging Google Cloud (US & Global AI Model Tier) and Tencent Cloud (Domestic China Financial Data Tier):
+
+### 1. Global / AI Tier (Google Cloud)
 - **Target GCP Project ID**: `ai-rf-497701` (always use this project ID when deploying Cloud Run services or jobs from this repository, e.g. `gcloud builds submit --project=ai-rf-497701` / `gcloud run deploy --project=ai-rf-497701`).
-- **Target Region**: `asia-east1`
-- **GCS Data Bucket**: `arf-data-ai-rf`
-- **Cloud Run Webapp Service**: `arf-webapp`
-- **Cloud Run Pipeline Job**: `arf-pipeline`
-- **Secret Manager Secret**: `gemini-api-key`
+- **Target Region**: `asia-east1` (Taiwan)
+- **GCS Data Bucket**: `arf-data-ai-rf` (authoritative versioned parquet data lake and `arf.db`)
+- **Cloud Run Webapp Service**: `arf-webapp` (interactive Streamlit webapp & Opportunity Radar)
+- **Cloud Run Pipeline Job**: `arf-pipeline` (weekly batch scoring and snapshot generation)
+- **Secret Manager Secrets**: `gemini-api-key` (for Google Gemini 3.8 Flash model), `china-data-proxy` (for domestic proxy URL)
+
+### 2. Domestic China Data Tier (Tencent Cloud Lighthouse)
+- **Host / IP**: `82.156.75.194` (`lighthouse` / `bid2-lh` in `~/.ssh/config`)
+- **Specs**: Ubuntu 22.04 LTS, 4 vCPU, 4GB RAM, 40GB SSD
+- **Role 1 — Domestic Data Proxy**: Authenticated SOCKS5/HTTP forward proxy. Routes AkShare (Eastmoney / Tencent / Sina) scraping from GCP Cloud Run and local developer workstations through a domestic Chinese IP, eliminating geo-blocking, 403 Forbidden errors, and non-mainland rate limits.
+- **Role 2 — Domestic Batch Runner**: Scheduled pipeline worker running daily after A-share close (16:30 CST) to sync China prices, compute CYQ chip profit ratios, and push incremental DuckDB snapshots to GCS `gs://arf-data-ai-rf`.
 
