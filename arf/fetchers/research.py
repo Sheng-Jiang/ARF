@@ -87,8 +87,11 @@ def _research_em_raw(code: str) -> pd.DataFrame:
     """Fetch the Eastmoney research-report list for an A-share code, with retry."""
     import akshare as ak
 
+    from arf.fetchers.proxy import use_china_proxy
+
     log.info("Fetching Eastmoney research reports for %s", code)
-    return ak.stock_research_report_em(symbol=code)
+    with use_china_proxy():
+        return ak.stock_research_report_em(symbol=code)
 
 
 def _fetch_research_a(ticker: str, cutoff: date) -> pd.DataFrame:

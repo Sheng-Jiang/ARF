@@ -5,6 +5,8 @@ import akshare as ak
 import pandas as pd
 from tenacity import retry, stop_after_attempt, wait_exponential
 
+from arf.fetchers.proxy import use_china_proxy
+
 log = logging.getLogger(__name__)
 
 def _tx_symbol(ticker: str) -> str:
@@ -45,12 +47,13 @@ def fetch_daily_prices_raw(symbol: str, start_date: str, end_date: str, adjust: 
     """Fetch daily price history from Tencent via AkShare with retry logic."""
     log.info(f"Fetching daily prices for {symbol} from {start_date} to {end_date} (adjust={adjust})")
     try:
-        df = ak.stock_zh_a_hist_tx(
-            symbol=symbol,
-            start_date=start_date,
-            end_date=end_date,
-            adjust=adjust
-        )
+        with use_china_proxy():
+            df = ak.stock_zh_a_hist_tx(
+                symbol=symbol,
+                start_date=start_date,
+                end_date=end_date,
+                adjust=adjust
+            )
         return df
     except Exception as e:
         log.warning(f"Error fetching from AkShare for {symbol}: {e}")
@@ -108,9 +111,10 @@ def fetch_hk_daily_prices_raw(symbol: str, start_date: str, end_date: str, adjus
     ``start_date``/``end_date`` are ``YYYYMMDD`` strings (Eastmoney format).
     """
     log.info(f"Fetching HK daily prices for {symbol} from {start_date} to {end_date} (adjust={adjust})")
-    return ak.stock_hk_hist(
-        symbol=symbol, period="daily", start_date=start_date, end_date=end_date, adjust=adjust
-    )
+    with use_china_proxy():
+        return ak.stock_hk_hist(
+            symbol=symbol, period="daily", start_date=start_date, end_date=end_date, adjust=adjust
+        )
 
 
 def fetch_hk_daily_prices(ticker: str, start_date: str, end_date: str, adjust: str = "qfq") -> pd.DataFrame:

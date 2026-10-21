@@ -23,6 +23,7 @@ dependencies = [
     "lxml>=5.2",
     "pyarrow>=14.0",
     "akshare>=1.16.81",
+    "pysocks>=1.7.1",
     "backtrader==1.9.78.123",
 ]
 
