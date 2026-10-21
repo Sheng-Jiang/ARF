@@ -112,6 +112,44 @@ def fetch_all(
     return results
 
 
+def _carry_forward_other_leg_rows(conn, as_of: date, leg: str) -> pd.DataFrame:
+    """Rows from the previous revision belonging to legs other than ``leg``.
+
+    A scoped run writes a complete new revision for its date, so without
+    carrying the other legs forward their rows would disappear from the latest
+    revision (and from the webapp, which serves the latest snapshot). The
+    snapshot for ``as_of`` is preferred; otherwise the latest available date is
+    used so a daily China run keeps the US board populated between weekly runs.
+    Scores are carried as stored — they must not be re-ranked with only one leg
+    present in the input.
+    """
+    from arf.db import query_latest, query_snapshot
+
+    existing = query_snapshot(conn, as_of)
+    if existing.empty:
+        existing = query_latest(conn)
+    rows = existing[existing["leg"] != leg].copy()
+    rows["as_of_date"] = as_of
+    return rows
+
+
+def _merge_leg_scoped_snapshot(
+    df: pd.DataFrame,
+    preserved: pd.DataFrame | None,
+) -> pd.DataFrame:
+    """Score the freshly fetched leg, then append carried-forward rows.
+
+    Snapshot rows do not carry the E-score inputs (``pure_play_pct``,
+    ``revenue_ntm_growth`` — they store ``revenue_ntm`` instead), so running
+    ``compute_arf`` over a frame that already contains preserved rows nulls
+    their stored E/V/ARF. Score first, concatenate after.
+    """
+    scored = compute_arf(df)
+    if preserved is None or preserved.empty:
+        return scored
+    return pd.concat([scored, preserved], ignore_index=True)
+
+
 def _build_scoring_df(
     stocks: list[StockData],
     universe: list[UniverseEntry],
@@ -597,26 +635,19 @@ def run_pipeline(
         )
 
         df = _build_scoring_df(stocks, universe)
+        preserved_rows = None
         if leg is not None:
-            # Preserve existing snapshot rows for other legs if available
-            other_legs = [item for item in ("US", "China") if item != leg]
             try:
-                from arf.db import query_latest, query_snapshot
-                existing_df = query_snapshot(conn, as_of)
-                if existing_df.empty:
-                    existing_df = query_latest(conn)
-                if not existing_df.empty:
-                    other_rows = existing_df[existing_df["leg"].isin(other_legs)].copy()
-                    if not other_rows.empty:
-                        console.print(
-                            f"Preserving {len(other_rows)} rows for legs {other_legs} from existing snapshot"
-                        )
-                        other_rows["as_of_date"] = as_of
-                        df = pd.concat([df, other_rows], ignore_index=True)
+                preserved_rows = _carry_forward_other_leg_rows(conn, as_of, leg)
+                if not preserved_rows.empty:
+                    console.print(
+                        f"Preserving {len(preserved_rows)} rows for other legs "
+                        f"from the existing snapshot"
+                    )
             except Exception as exc:
                 log.warning("Could not preserve existing rows for other legs: %s", exc)
 
-        df = compute_arf(df)
+        df = _merge_leg_scoped_snapshot(df, preserved_rows)
 
         upsert_snapshot(conn, df, as_of, run_id=run_id)
         record_fetch_outcomes(conn, run_id, outcomes)

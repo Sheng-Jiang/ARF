@@ -19,6 +19,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import requests
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 log = logging.getLogger(__name__)
 
@@ -33,17 +34,16 @@ def is_gcs_mode() -> bool:
 
 
 def _get_hmac_credentials() -> tuple[str, str] | None:
-    """Return (access_key, secret_key) if GCS HMAC interoperability credentials are set."""
-    key = (
-        os.getenv("GCS_HMAC_KEY")
-        or os.getenv("GCS_ACCESS_KEY")
-        or os.getenv("AWS_ACCESS_KEY_ID")
-    )
-    secret = (
-        os.getenv("GCS_HMAC_SECRET")
-        or os.getenv("GCS_SECRET_KEY")
-        or os.getenv("AWS_SECRET_ACCESS_KEY")
-    )
+    """Return (access_key, secret_key) if GCS HMAC interoperability credentials are set.
+
+    Only GCS-specific names are honoured. Ambient ``AWS_ACCESS_KEY_ID`` /
+    ``AWS_SECRET_ACCESS_KEY`` values are deliberately ignored: a developer with
+    AWS credentials but GCS mode enabled would otherwise switch this module
+    onto an HMAC path with the wrong key and fail (or, worse, start from a
+    fresh DB) instead of using Application Default Credentials.
+    """
+    key = os.getenv("GCS_HMAC_KEY") or os.getenv("GCS_ACCESS_KEY")
+    secret = os.getenv("GCS_HMAC_SECRET") or os.getenv("GCS_SECRET_KEY")
     if key and secret and key.strip() and secret.strip():
         return key.strip(), secret.strip()
     return None
@@ -83,32 +83,60 @@ def _hmac_headers(
     return headers
 
 
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=1, max=8),
+    retry=retry_if_exception_type(requests.RequestException),
+    reraise=True,
+)
 def _hmac_download_file(bucket: str, object_name: str, local_path: Path) -> bool:
     endpoint = os.getenv("GCS_ENDPOINT", DEFAULT_GCS_ENDPOINT).rstrip("/")
     clean_name = object_name.lstrip("/")
     url = f"{endpoint}/{bucket}/{clean_name}"
 
     head_headers = _hmac_headers("HEAD", bucket, clean_name)
-    head_resp = requests.head(url, headers=head_headers, timeout=10)
-    if head_resp.status_code == 404:
-        log.info("No existing %s in GCS — starting fresh", object_name)
-        return False
-    if head_resp.status_code not in (200, 206):
-        log.warning("GCS HEAD %s returned status %d", url, head_resp.status_code)
-        return False
+    with requests.head(url, headers=head_headers, timeout=10) as head_resp:
+        if head_resp.status_code == 404:
+            log.info("No existing %s in GCS — starting fresh", object_name)
+            return False
+        if head_resp.status_code in (401, 403):
+            # Never fall through to "start fresh" on an auth failure: the run
+            # would later upload a brand-new DB over the real one.
+            raise RuntimeError(
+                f"GCS HEAD {url} denied ({head_resp.status_code}); "
+                "check GCS_HMAC_KEY/GCS_HMAC_SECRET — refusing to start a fresh DB"
+            )
+        if head_resp.status_code not in (200, 206):
+            head_resp.raise_for_status()
+            raise requests.RequestException(
+                f"Unexpected GCS HEAD status {head_resp.status_code} for {url}"
+            )
 
-    get_headers = _hmac_headers("GET", bucket, clean_name)
-    with requests.get(url, headers=get_headers, stream=True, timeout=60) as resp:
-        resp.raise_for_status()
-        local_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(local_path, "wb") as f:
-            for chunk in resp.iter_content(chunk_size=65536):
-                if chunk:
-                    f.write(chunk)
+    # Stream to a sibling temp file and swap atomically, so a dropped transfer
+    # cannot leave a truncated DuckDB in place of the previous good copy.
+    local_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = local_path.with_name(local_path.name + ".part")
+    try:
+        get_headers = _hmac_headers("GET", bucket, clean_name)
+        with requests.get(url, headers=get_headers, stream=True, timeout=60) as resp:
+            resp.raise_for_status()
+            with open(tmp_path, "wb") as f:
+                for chunk in resp.iter_content(chunk_size=65536):
+                    if chunk:
+                        f.write(chunk)
+        os.replace(tmp_path, local_path)
+    finally:
+        tmp_path.unlink(missing_ok=True)
     log.info("Downloaded gs://%s/%s -> %s (via HMAC)", bucket, clean_name, local_path)
     return True
 
 
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=1, max=8),
+    retry=retry_if_exception_type(requests.RequestException),
+    reraise=True,
+)
 def _hmac_upload_file(local_path: Path, bucket: str, object_name: str) -> None:
     endpoint = os.getenv("GCS_ENDPOINT", DEFAULT_GCS_ENDPOINT).rstrip("/")
     clean_name = object_name.lstrip("/")

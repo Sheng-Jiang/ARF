@@ -114,3 +114,98 @@ def test_fetch_all_with_leg_filter():
         all_stocks = fetch_all(universe, date(2026, 10, 21), leg=None)
         assert len(all_stocks) == 2
 
+
+
+def test_carry_forward_keeps_other_legs_and_pre_ipo(tmp_path):
+    from datetime import date
+
+    import pandas as pd
+
+    from arf.db import upsert_snapshot
+    from arf.run import _carry_forward_other_leg_rows
+
+    conn = init_db(tmp_path / "t.db")
+    as_of = date(2026, 10, 21)
+    upsert_snapshot(
+        conn,
+        pd.DataFrame(
+            {
+                "ticker": ["NVDA", "300308.SZ", "ANTHROPIC"],
+                "leg": ["US", "China", "Pre-IPO"],
+                "cohort": ["core", "core", "manual"],
+                "arf": [40.0, 90.0, None],
+            }
+        ),
+        as_of,
+    )
+
+    rows = _carry_forward_other_leg_rows(conn, as_of, "China")
+
+    # China is being re-fetched; US and Pre-IPO survive the scoped revision.
+    assert set(rows["ticker"]) == {"NVDA", "ANTHROPIC"}
+    assert rows["as_of_date"].eq(as_of).all()
+    conn.close()
+
+
+def test_carry_forward_falls_back_to_latest_date(tmp_path):
+    from datetime import date
+
+    import pandas as pd
+
+    from arf.db import upsert_snapshot
+    from arf.run import _carry_forward_other_leg_rows
+
+    conn = init_db(tmp_path / "t.db")
+    upsert_snapshot(
+        conn,
+        pd.DataFrame({"ticker": ["NVDA"], "leg": ["US"], "arf": [40.0]}),
+        date(2026, 10, 14),
+    )
+
+    rows = _carry_forward_other_leg_rows(conn, date(2026, 10, 21), "China")
+
+    assert list(rows["ticker"]) == ["NVDA"]
+    assert rows["as_of_date"].eq(date(2026, 10, 21)).all()
+    conn.close()
+
+
+def test_merge_leg_scoped_snapshot_keeps_stored_scores():
+    """Preserved rows lack E-score inputs; they must not be re-ranked to NaN."""
+    import pandas as pd
+
+    from arf.run import _merge_leg_scoped_snapshot
+
+    fresh = pd.DataFrame(
+        {
+            "ticker": ["300308.SZ", "300394.SZ"],
+            "leg": ["China", "China"],
+            "cohort": ["core", "core"],
+            "layer": ["L3", "L3"],
+            "pure_play_pct": [90.0, 80.0],
+            "gross_margin": [0.30, 0.40],
+            "revenue_ntm_growth": [0.50, 0.60],
+            "ev_sales_5yr_percentile": [80.0, 90.0],
+            "ev_sales": [10.0, 12.0],
+            "roe": [0.20, 0.25],
+            "ps_ratio": [10.0, 12.0],
+        }
+    )
+    preserved = pd.DataFrame(
+        {
+            "ticker": ["NVDA"],
+            "leg": ["US"],
+            "cohort": ["core"],
+            "e_score": [77.0],
+            "v_score": [66.0],
+            "arf": [71.3],
+            "decile": [3],
+        }
+    )
+
+    out = _merge_leg_scoped_snapshot(fresh, preserved)
+
+    nvda = out.loc[out["ticker"] == "NVDA"].iloc[0]
+    assert nvda["e_score"] == 77.0
+    assert nvda["v_score"] == 66.0
+    assert nvda["arf"] == 71.3
+    assert out.loc[out["leg"] == "China", "arf"].notna().all()
