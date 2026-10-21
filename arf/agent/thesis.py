@@ -107,8 +107,13 @@ def _quant_snapshot(quant_profile: dict) -> QuantFactorSnapshot:
         data["name"] = data.get("ticker") or ""
     if not data.get("leg"):
         data["leg"] = "US"
-    if data.get("as_of_date") is None:
+    as_of = data.get("as_of_date")
+    # ``pd.NaT`` and NaN are not ``None`` but compare unequal to themselves;
+    # stringifying them would store "NaT"/"nan", which DuckDB rejects as a DATE.
+    if as_of is None or as_of != as_of:
         data["as_of_date"] = ""
+    else:
+        data["as_of_date"] = str(as_of)[:10]
     return QuantFactorSnapshot(**data)
 
 
@@ -289,6 +294,13 @@ def compile_investment_decision_record(
     if persist:
         conn = init_db(db_path)
         try:
+            # ``exclude_unset`` keeps fields the compiler never populated (in
+            # particular the human PM annotations) out of the write, so a
+            # recompiled card merges onto them instead of clearing them.
+            upsert_idr(conn, idr.model_dump(exclude_unset=True))
+            # Persist the audit record first: if the card write fails, an IDR
+            # without a card is recoverable, whereas a committed card pointing
+            # at an IDR that never landed is a dangling audit reference.
             upsert_thesis(conn, {
                 "thesis_id": card.thesis_id,
                 "ticker": card.ticker,
@@ -304,7 +316,6 @@ def compile_investment_decision_record(
                 "catalysts_json": card.catalysts,
                 "model": card.model,
             })
-            upsert_idr(conn, idr.model_dump())
         finally:
             conn.close()
 
