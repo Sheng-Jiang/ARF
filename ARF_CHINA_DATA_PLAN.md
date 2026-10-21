@@ -57,9 +57,11 @@ ARF employs a specialized hybrid topology:
 Rather than routing all outbound container traffic through a proxy (which would break Google Gemini API calls due to mainland GFW restrictions), ARF implements **targeted proxy scoping**:
 
 1. **Selective Context Manager** ([`arf/fetchers/proxy.py`](file:///Users/sheng/Developer/ARF/arf/fetchers/proxy.py)):
-   - Evaluates `ARF_CHINA_PROXY`, `CHINA_DATA_PROXY`, or auto-detects a local SSH tunnel on `127.0.0.1:10808`.
+   - Evaluates `ARF_CHINA_PROXY` or `CHINA_DATA_PROXY`, or auto-detects a local SSH tunnel on `127.0.0.1:10808`. A general-purpose `ALL_PROXY` (usually an overseas VPN) is ignored on purpose.
    - Wraps only China-specific scraper calls ([`arf/fetchers/akshare.py`](file:///Users/sheng/Developer/ARF/arf/fetchers/akshare.py), [`arf/fetchers/research.py`](file:///Users/sheng/Developer/ARF/arf/fetchers/research.py)) via `with use_china_proxy():`.
-   - Google Gemini API calls (`generativelanguage.googleapis.com`) and US data queries remain on direct high-speed Google Cloud backbone networks.
+   - Routing is **thread-scoped**: the context flags the calling thread and a `requests.Session.request` hook applies the proxy there, rather than mutating process-wide `HTTP_PROXY` variables. Concurrent US/yfinance fetches in the same worker pool, and Gemini API calls, are untouched. This covers AkShare because it uses `requests`.
+   - Baostock opens a raw TCP session, so environment proxies and this hook cannot route it — run Baostock jobs on the Lighthouse runner (Path B).
+   - SOCKS5 endpoints require `pysocks` (declared in `pyproject.toml`).
 
 2. **Developer Workstation Integration** ([`scripts/tunnel_china.sh`](file:///Users/sheng/Developer/ARF/scripts/tunnel_china.sh)):
    - Zero-configuration SSH dynamic SOCKS5 tunnel over port 22:
@@ -67,6 +69,7 @@ Rather than routing all outbound container traffic through a proxy (which would 
      scripts/tunnel_china.sh start     # Opens encrypted tunnel on 127.0.0.1:10808
      scripts/tunnel_china.sh status    # Verifies egress IP is 82.156.75.194
      scripts/tunnel_china.sh stop      # Shuts down background tunnel
+     eval "$(scripts/tunnel_china.sh env)"  # Export ARF_CHINA_PROXY in this shell
      ```
    - Automatically detected by `get_china_proxy()` when active.
 

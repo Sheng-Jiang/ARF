@@ -100,6 +100,6 @@ ARF operates a **Hybrid Cloud Architecture** bridging Google Cloud (US & Global 
 ### 2. Domestic China Data Tier (Tencent Cloud Lighthouse)
 - **Host / IP**: `82.156.75.194` (`lighthouse` / `bid2-lh` in `~/.ssh/config`)
 - **Specs**: Ubuntu 22.04 LTS, 4 vCPU, 4GB RAM, 40GB SSD
-- **Role 1 — Domestic Data Proxy**: Authenticated SOCKS5/HTTP forward proxy. Routes AkShare (Eastmoney / Tencent / Sina) scraping from GCP Cloud Run and local developer workstations through a domestic Chinese IP, eliminating geo-blocking, 403 Forbidden errors, and non-mainland rate limits.
+- **Role 1 — Domestic Data Proxy**: Authenticated SOCKS5/HTTP forward proxy. Routes AkShare (Eastmoney / Tencent / Sina) scraping from GCP Cloud Run and local developer workstations through a domestic Chinese IP, eliminating geo-blocking, 403 Forbidden errors, and non-mainland rate limits. Routing is scoped per thread via `arf/fetchers/proxy.py` (`use_china_proxy()`), so US/yfinance and Gemini traffic stays direct; Baostock's raw socket is not proxied and belongs on the Lighthouse runner.
 - **Role 2 — Domestic Batch Runner**: Scheduled pipeline worker running daily after A-share close (16:30 CST) to sync China prices, compute CYQ chip profit ratios, and push incremental DuckDB snapshots to GCS `gs://arf-data-ai-rf`.
 

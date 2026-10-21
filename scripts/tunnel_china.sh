@@ -6,7 +6,7 @@
 #   scripts/tunnel_china.sh start     # Start background SOCKS5 proxy on 127.0.0.1:10808
 #   scripts/tunnel_china.sh stop      # Stop the proxy
 #   scripts/tunnel_china.sh status    # Check status and verify egress IP
-#   eval $(scripts/tunnel_china.sh env) # Set proxy environment variables in current shell
+#   eval "$(scripts/tunnel_china.sh env)" # Export ARF_CHINA_PROXY in current shell
 #
 set -euo pipefail
 
@@ -23,13 +23,18 @@ start_tunnel() {
         exit 0
     fi
     echo "==> Starting SSH SOCKS5 tunnel to ${HOST} on 127.0.0.1:${PORT}..."
-    ssh -o BatchMode=yes -f -N -D "${PORT}" "${HOST}"
+    if ! ssh -o BatchMode=yes -o ExitOnForwardFailure=yes \
+             -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \
+             -f -N -D "${PORT}" "${HOST}"; then
+        echo "==> Failed to start tunnel. Check SSH connection to '${HOST}'." >&2
+        exit 1
+    fi
     sleep 1
     if is_running; then
         echo "==> Tunnel established successfully."
-        echo "    Export proxy: export ALL_PROXY=socks5://127.0.0.1:${PORT}"
+        echo "    Export proxy: export ARF_CHINA_PROXY=socks5://127.0.0.1:${PORT}"
     else
-        echo "==> Failed to start tunnel. Check SSH connection to '${HOST}'." >&2
+        echo "==> SSH exited after starting; no tunnel on port ${PORT}." >&2
         exit 1
     fi
 }
@@ -56,7 +61,6 @@ check_status() {
 }
 
 print_env() {
-    echo "export ALL_PROXY=socks5://127.0.0.1:${PORT}"
     echo "export ARF_CHINA_PROXY=socks5://127.0.0.1:${PORT}"
 }
 
