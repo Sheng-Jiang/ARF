@@ -7,7 +7,7 @@ The ARF (AI Relevance Factor) universe monitors 73 companies, including **37 com
 To compute ARF scores, technical indicators, and CYQ chip distributions, the pipeline relies on domestic mainland financial APIs and scrapers:
 - **AkShare / Eastmoney (东方财富)**: Historical and daily prices, research reports, consensus EPS.
 - **Tencent Finance (腾讯行情)**: Real-time and daily price history (`stock_zh_a_hist_tx`).
-- **Baostock**: Fundamental quarterly reports and historical P/S multiples.
+- **Baostock**: Fundamental quarterly reports and historical P/S multiples. Baostock speaks raw TCP, so it cannot use an HTTP/SOCKS forward proxy — it is served by Path B (running on the domestic runner) only.
 
 ### The Overseas IP Bottleneck
 When running from Google Cloud Run (`asia-east1`, Taiwan) or overseas developer machines, these mainland financial servers frequently:
@@ -56,14 +56,14 @@ ARF employs a specialized hybrid topology:
 
 Rather than routing all outbound container traffic through a proxy (which would break Google Gemini API calls due to mainland GFW restrictions), ARF implements **targeted proxy scoping**:
 
-1. **Selective Context Manager** ([`arf/fetchers/proxy.py`](file:///Users/sheng/Developer/ARF/arf/fetchers/proxy.py)):
-   - Evaluates `ARF_CHINA_PROXY` or `CHINA_DATA_PROXY`, or auto-detects a local SSH tunnel on `127.0.0.1:10808`. A general-purpose `ALL_PROXY` (usually an overseas VPN) is ignored on purpose.
-   - Wraps only China-specific scraper calls ([`arf/fetchers/akshare.py`](file:///Users/sheng/Developer/ARF/arf/fetchers/akshare.py), [`arf/fetchers/research.py`](file:///Users/sheng/Developer/ARF/arf/fetchers/research.py)) via `with use_china_proxy():`.
+1. **Selective Context Manager** ([`arf/fetchers/proxy.py`](arf/fetchers/proxy.py)):
+   - Evaluates `ARF_CHINA_PROXY` or `CHINA_DATA_PROXY`, or auto-detects a local `ssh -D` tunnel on `127.0.0.1:10808` (an unrelated listener on that port is ignored). A general-purpose `ALL_PROXY` (usually an overseas VPN) is ignored on purpose.
+   - Wraps only China-specific scraper calls ([`arf/fetchers/akshare.py`](arf/fetchers/akshare.py), [`arf/fetchers/research.py`](arf/fetchers/research.py)) via `with use_china_proxy():`.
    - Routing is **thread-scoped**: the context flags the calling thread and a `requests.Session.request` hook applies the proxy there, rather than mutating process-wide `HTTP_PROXY` variables. Concurrent US/yfinance fetches in the same worker pool, and Gemini API calls, are untouched. This covers AkShare because it uses `requests`.
    - Baostock opens a raw TCP session, so environment proxies and this hook cannot route it — run Baostock jobs on the Lighthouse runner (Path B).
    - SOCKS5 endpoints require `pysocks` (declared in `pyproject.toml`).
 
-2. **Developer Workstation Integration** ([`scripts/tunnel_china.sh`](file:///Users/sheng/Developer/ARF/scripts/tunnel_china.sh)):
+2. **Developer Workstation Integration** ([`scripts/tunnel_china.sh`](scripts/tunnel_china.sh)):
    - Zero-configuration SSH dynamic SOCKS5 tunnel over port 22:
      ```bash
      scripts/tunnel_china.sh start     # Opens encrypted tunnel on 127.0.0.1:10808

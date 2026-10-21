@@ -14,7 +14,9 @@ PORT="${SOCKS_PORT:-10808}"
 HOST="${LIGHTHOUSE_HOST:-lighthouse}"
 
 is_running() {
-    pgrep -f "ssh.*-D ${PORT} ${HOST}" > /dev/null 2>&1
+    # Match on host-independent parts only: a tunnel started with a different
+    # LIGHTHOUSE_HOST alias must still be found (and stoppable) here.
+    pgrep -f "ssh .*-D ${PORT}([[:space:]]|$)" > /dev/null 2>&1
 }
 
 start_tunnel() {
@@ -42,7 +44,7 @@ start_tunnel() {
 stop_tunnel() {
     if is_running; then
         echo "==> Stopping SSH SOCKS5 tunnel on port ${PORT}..."
-        pkill -f "ssh.*-D ${PORT} ${HOST}" || true
+        pkill -f "ssh .*-D ${PORT}([[:space:]]|$)" || true
         echo "==> Stopped."
     else
         echo "==> Tunnel is not running."

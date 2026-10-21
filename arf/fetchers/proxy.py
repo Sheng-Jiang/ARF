@@ -18,16 +18,22 @@ thread that entered the context are proxied.
 
 .. note::
    Bare-socket clients (e.g. Baostock) are unaffected by this module; run those
-   jobs directly on the domestic Lighthouse runner.
+   jobs directly on the domestic Lighthouse runner (Path B in
+   ``ARF_CHINA_DATA_PLAN.md``).
 """
 from __future__ import annotations
 
 import contextlib
 import logging
 import os
+import re
 import socket
+import subprocess
 import threading
+import time
 from collections.abc import Iterator
+
+import requests
 
 log = logging.getLogger(__name__)
 
@@ -35,9 +41,15 @@ log = logging.getLogger(__name__)
 DEFAULT_LOCAL_SOCKS_PORT = 10808
 _HOOK_MARKER = "_arf_china_proxy_hook"
 _HOOK_LOCK = threading.Lock()
+_DETECT_TTL_SECONDS = 30.0
+_CREDENTIALS_RE = re.compile(r"(?<=//)[^/@\s]+@")
 
 # Per-thread proxy URL; the requests hook reads this on every call.
 _thread_state = threading.local()
+
+# Cached auto-detection result: (monotonic timestamp, proxy URL or None).
+_detect_lock = threading.Lock()
+_detect_cache: tuple[float, str | None] | None = None
 
 
 def _is_local_port_open(port: int, host: str = "127.0.0.1", timeout: float = 0.15) -> bool:
@@ -47,6 +59,56 @@ def _is_local_port_open(port: int, host: str = "127.0.0.1", timeout: float = 0.1
             return True
     except OSError:
         return False
+
+
+def _local_tunnel_running(port: int) -> bool:
+    """True only when the listener is an ``ssh -D <port>`` dynamic tunnel.
+
+    Any process can bind 10808 (v2rayN's default SOCKS port is 10808), and
+    sending mainland fetches to an unrelated listener fails silently. Require a
+    matching SSH process; if ``pgrep`` is unavailable (e.g. a slim container),
+    auto-detection is disabled and ``ARF_CHINA_PROXY`` must be set explicitly.
+    """
+    if not _is_local_port_open(port):
+        return False
+    try:
+        proc = subprocess.run(
+            ["pgrep", "-f", rf"ssh .*-D {port}([[:space:]]|$)"],
+            capture_output=True,
+            timeout=1.0,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return proc.returncode == 0
+
+
+def _clear_detection_cache() -> None:
+    """Forget the cached tunnel detection (used by tests)."""
+    global _detect_cache
+    with _detect_lock:
+        _detect_cache = None
+
+
+def _detect_local_tunnel() -> str | None:
+    """Return the local tunnel proxy URL, probing at most once per TTL window."""
+    global _detect_cache
+    now = time.monotonic()
+    with _detect_lock:
+        if _detect_cache is not None and now - _detect_cache[0] < _DETECT_TTL_SECONDS:
+            return _detect_cache[1]
+        proxy = (
+            f"socks5://127.0.0.1:{DEFAULT_LOCAL_SOCKS_PORT}"
+            if _local_tunnel_running(DEFAULT_LOCAL_SOCKS_PORT)
+            else None
+        )
+        _detect_cache = (now, proxy)
+        return proxy
+
+
+def _redact_proxy_url(proxy_url: str) -> str:
+    """Mask ``user:password@`` credentials before a proxy URL is logged."""
+    return _CREDENTIALS_RE.sub("***@", proxy_url)
 
 
 def get_china_proxy() -> str | None:
@@ -67,13 +129,10 @@ def get_china_proxy() -> str | None:
         if val and val.strip():
             return val.strip()
 
-    # Fallback: check if local developer SSH tunnel is active
-    if _is_local_port_open(DEFAULT_LOCAL_SOCKS_PORT):
-        proxy = f"socks5://127.0.0.1:{DEFAULT_LOCAL_SOCKS_PORT}"
+    proxy = _detect_local_tunnel()
+    if proxy:
         log.debug("Auto-detected active local China proxy tunnel on %s", proxy)
-        return proxy
-
-    return None
+    return proxy
 
 
 def _current_thread_proxy() -> str | None:
@@ -87,17 +146,23 @@ def _install_requests_hook() -> None:
     ``HTTP_PROXY`` inherited from the developer's shell for http(s) URLs.
     """
     with _HOOK_LOCK:
-        import requests
-
         original = requests.sessions.Session.request
         if getattr(original, _HOOK_MARKER, False):
             return
 
-        def request_with_china_proxy(self, method, url, **kwargs):
+        def request_with_china_proxy(
+            self: requests.Session,
+            method: str,
+            url: str,
+            *args: object,
+            **kwargs: object,
+        ) -> requests.Response:
             proxy = _current_thread_proxy()
-            if proxy and not kwargs.get("proxies"):
+            # ``proxies`` is the 10th positional argument of Session.request;
+            # never inject a keyword one if the caller supplied it positionally.
+            if proxy and not kwargs.get("proxies") and len(args) < 10:
                 kwargs["proxies"] = {"http": proxy, "https": proxy}
-            return original(self, method, url, **kwargs)
+            return original(self, method, url, *args, **kwargs)
 
         setattr(request_with_china_proxy, _HOOK_MARKER, True)
         requests.sessions.Session.request = request_with_china_proxy
@@ -126,7 +191,7 @@ def use_china_proxy(proxy_url: str | None = None) -> Iterator[str | None]:
     previous = _current_thread_proxy()
     _thread_state.proxy = proxy
     try:
-        log.debug("Routing China financial data fetch through proxy: %s", proxy)
+        log.debug("Routing China financial data fetch through proxy: %s", _redact_proxy_url(proxy))
         yield proxy
     finally:
         _thread_state.proxy = previous
