@@ -32,6 +32,7 @@ import subprocess
 import threading
 import time
 from collections.abc import Iterator
+from typing import Any
 
 import requests
 
@@ -154,8 +155,8 @@ def _install_requests_hook() -> None:
             self: requests.Session,
             method: str,
             url: str,
-            *args: object,
-            **kwargs: object,
+            *args: Any,
+            **kwargs: Any,
         ) -> requests.Response:
             proxy = _current_thread_proxy()
             # ``proxies`` is the 10th positional argument of Session.request;
