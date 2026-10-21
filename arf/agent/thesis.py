@@ -8,13 +8,20 @@ from datetime import date
 from pathlib import Path
 
 from arf.agent.radar import _extract_json_payload
-from arf.agent.schemas import OpportunityCard, QuantFactorSnapshot
+from arf.agent.schemas import (
+    DecisionAction,
+    GateVerdict,
+    InvestmentDecisionRecord,
+    OpportunityCard,
+    OpportunityStage,
+    QuantFactorSnapshot,
+)
 from arf.agent.tools import get_stock_quant_profile
-from arf.db import init_db, upsert_thesis
+from arf.db import init_db, upsert_idr, upsert_thesis
 
 log = logging.getLogger(__name__)
 
-THESIS_MODEL = os.getenv("GEMINI_FLASH_MODEL", "gemini-2.5-flash")
+THESIS_MODEL = os.getenv("GEMINI_FLASH_MODEL", "gemini-3.8-flash")
 
 
 _THESIS_SYSTEM_PROMPT = """You are a senior buy-side tech investment analyst specializing in the global AI hardware and software value chain (Jensen Huang's 5-layer cake).
@@ -82,14 +89,14 @@ def _extract_citations_and_text(response) -> tuple[str, list[dict[str, str]]]:
     return text, deduped
 
 
-def generate_opportunity_card(
+def compile_investment_decision_record(
     ticker: str,
     as_of: date,
     api_key: str | None = None,
     db_path: Path = Path("data/arf.db"),
     persist: bool = True,
-) -> OpportunityCard:
-    """Generate an institutional Opportunity Card for a stock using Gemini Flash."""
+) -> tuple[OpportunityCard, InvestmentDecisionRecord]:
+    """Compile an institutional Opportunity Card and a 5-step Investment Decision Record (IDR)."""
     key = (api_key or os.getenv("GEMINI_API_KEY", "")).strip()
     if not key or key.startswith("PLACEHOLDER"):
         raise RuntimeError("GEMINI_API_KEY is not set or valid.")
@@ -162,7 +169,77 @@ def generate_opportunity_card(
     raw_text, citations = _extract_citations_and_text(response)
     parsed = _extract_json_payload(raw_text)
 
-    thesis_id = f"th_{ticker.lower()}_{data_as_of.strftime('%Y%m%d')}_{uuid.uuid4().hex[:6]}"
+    idr_uuid = uuid.uuid4().hex[:6]
+    thesis_id = f"th_{ticker.lower()}_{data_as_of.strftime('%Y%m%d')}_{idr_uuid}"
+    idr_id = f"idr_{ticker.lower()}_{data_as_of.strftime('%Y%m%d')}_{idr_uuid}"
+
+    # Evaluate Outside-Model G3 Risk Gate
+    cost_of_equity = 0.10 if leg == "US" else 0.12
+    is_froth = bool(quant_profile.get("froth_flag", False))
+    roe_val = quant_profile.get("roe")
+    hurdle_met = bool(roe_val is not None and roe_val >= cost_of_equity)
+    thesis_type = parsed.get("thesis_type", "neutral_watch")
+    invalidation_criteria = parsed.get("invalidation_criteria", "")
+
+    if is_froth and thesis_type == "long_opportunity":
+        gate_verdict = GateVerdict.BLOCKED_FROTH
+        gate_details = "G3 Gate: Target is froth-flagged (ARF in D1, ROE < WACC, P/S > 25). Long recommendation prohibited."
+        recommended_action = DecisionAction.AVOID_FROTH
+    elif thesis_type == "garp_value" and not hurdle_met:
+        gate_verdict = GateVerdict.BLOCKED_HURDLE
+        roe_str = f"{roe_val:.1%}" if roe_val is not None else "N/A"
+        gate_details = f"G3 Gate: ROE ({roe_str}) fails required hurdle rate ({cost_of_equity:.1%})."
+        recommended_action = DecisionAction.MONITOR
+    elif not invalidation_criteria or len(str(invalidation_criteria).strip()) < 15:
+        gate_verdict = GateVerdict.BLOCKED_INSUFFICIENT_CRITERIA
+        gate_details = "G3 Gate: Lacks explicit, quantitative invalidation criteria."
+        recommended_action = DecisionAction.MONITOR
+    else:
+        gate_verdict = GateVerdict.PASSED
+        gate_details = "G3 Gate: Passed all outside-model risk predicates."
+        if thesis_type in ("long_opportunity", "garp_value"):
+            recommended_action = DecisionAction.BUY_ZONE
+        else:
+            recommended_action = DecisionAction.MONITOR
+
+    # Compile the 5-step Investment Decision Record (IDR)
+    bull_case_raw = parsed.get("bull_case", "")
+    bear_case_raw = parsed.get("bear_case", "")
+    bull_args = [b.strip() for b in bull_case_raw.split("\n\n") if b.strip()] or [bull_case_raw]
+    bear_args = [b.strip() for b in bear_case_raw.split("\n\n") if b.strip()] or [bear_case_raw]
+
+    idr = InvestmentDecisionRecord(
+        idr_id=idr_id,
+        ticker=ticker,
+        name=name,
+        as_of_date=data_as_of.isoformat(),
+        stage=OpportunityStage.THESIS_FORMULATED,
+        trigger_type="valuation_pullback" if thesis_type == "garp_value" else "factor_scan",
+        trigger_summary=f"{ticker} analyzed as of {data_as_of.isoformat()} with ARF={quant_profile.get('arf')} (D{quant_profile.get('decile')})",
+        observed_metrics=QuantFactorSnapshot(**quant_profile),
+        leg=leg,
+        layer=layer,
+        cost_of_equity=cost_of_equity,
+        policy_rules_evaluated=[
+            f"WACC Hurdle >= {cost_of_equity:.1%}",
+            "Froth flag exclusion on Long Opportunity",
+            "Mandatory quantitative invalidation criteria",
+        ],
+        bull_arguments=bull_args,
+        bear_arguments=bear_args,
+        deliberation_synthesis=parsed.get("synthesis", ""),
+        gate_verdict=gate_verdict,
+        gate_details=gate_details,
+        froth_flag=is_froth,
+        hurdle_met=hurdle_met,
+        recommended_action=recommended_action,
+        valuation_entry_zone=parsed.get("valuation_entry_zone", ""),
+        invalidation_criteria=invalidation_criteria,
+        confidence_score=float(parsed.get("confidence_score", 50.0)),
+        catalysts=parsed.get("catalysts", []),
+        citations=citations,
+        model=THESIS_MODEL,
+    )
 
     card = OpportunityCard(
         thesis_id=thesis_id,
@@ -171,18 +248,19 @@ def generate_opportunity_card(
         leg=leg,
         layer=layer,
         as_of_date=data_as_of.isoformat(),
-        thesis_type=parsed.get("thesis_type", "neutral_watch"),
+        thesis_type=thesis_type,
         title=parsed.get("title", f"Investment Thesis for {ticker}"),
         quant_profile=QuantFactorSnapshot(**quant_profile),
-        bull_case=parsed.get("bull_case", ""),
-        bear_case=parsed.get("bear_case", ""),
+        bull_case=bull_case_raw,
+        bear_case=bear_case_raw,
         synthesis=parsed.get("synthesis", ""),
         valuation_entry_zone=parsed.get("valuation_entry_zone", ""),
-        invalidation_criteria=parsed.get("invalidation_criteria", ""),
+        invalidation_criteria=invalidation_criteria,
         confidence_score=float(parsed.get("confidence_score", 50.0)),
         catalysts=parsed.get("catalysts", []),
         citations=citations,
         model=THESIS_MODEL,
+        idr_id=idr_id,
     )
 
     if persist:
@@ -203,7 +281,26 @@ def generate_opportunity_card(
                 "catalysts_json": card.catalysts,
                 "model": card.model,
             })
+            upsert_idr(conn, idr.model_dump())
         finally:
             conn.close()
 
+    return card, idr
+
+
+def generate_opportunity_card(
+    ticker: str,
+    as_of: date,
+    api_key: str | None = None,
+    db_path: Path = Path("data/arf.db"),
+    persist: bool = True,
+) -> OpportunityCard:
+    """Generate an institutional Opportunity Card for a stock using Gemini Flash."""
+    card, _ = compile_investment_decision_record(
+        ticker=ticker,
+        as_of=as_of,
+        api_key=api_key,
+        db_path=db_path,
+        persist=persist,
+    )
     return card

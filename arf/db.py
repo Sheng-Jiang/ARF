@@ -281,6 +281,55 @@ CREATE TABLE IF NOT EXISTS investment_theses (
 )
 """
 
+_SCHEMA_INVESTMENT_DECISION_RECORDS = """
+CREATE TABLE IF NOT EXISTS investment_decision_records (
+    idr_id                  TEXT        PRIMARY KEY,
+    ticker                  TEXT        NOT NULL,
+    name                    TEXT,
+    as_of_date              DATE        NOT NULL,
+    stage                   TEXT        NOT NULL,  -- 'discovered', 'qualified', 'under_review', 'thesis_formulated', 'committee_pending', 'active_watch', 'harvested', 'invalidated'
+    trigger_type            TEXT,
+    trigger_summary         TEXT,
+    observed_metrics_json   TEXT,
+    leg                     TEXT,
+    layer                   TEXT,
+    cost_of_equity          DOUBLE,
+    policy_rules_json       TEXT,
+    bull_arguments_json     TEXT,
+    bear_arguments_json     TEXT,
+    deliberation_synthesis  TEXT,
+    gate_verdict            TEXT,       -- 'PASSED', 'BLOCKED_FROTH', 'BLOCKED_HURDLE', etc.
+    gate_details            TEXT,
+    froth_flag              BOOLEAN,
+    hurdle_met              BOOLEAN,
+    recommended_action      TEXT,       -- 'BUY_ZONE', 'MONITOR', 'AVOID_FROTH', 'HARVEST', 'INVALIDATE'
+    valuation_entry_zone    TEXT,
+    invalidation_criteria   TEXT,
+    confidence_score        DOUBLE,
+    catalysts_json          TEXT,
+    citations_json          TEXT,
+    human_pm_decision       TEXT,
+    human_pm_notes          TEXT,
+    model                   TEXT,
+    created_at              TIMESTAMP   NOT NULL
+)
+"""
+
+_SCHEMA_OPPORTUNITY_STATE = """
+CREATE TABLE IF NOT EXISTS opportunity_states (
+    ticker                  TEXT        PRIMARY KEY,
+    name                    TEXT,
+    leg                     TEXT,
+    layer                   TEXT,
+    current_stage           TEXT        NOT NULL,
+    latest_idr_id           TEXT,
+    valuation_entry_zone    TEXT,
+    invalidation_criteria   TEXT,
+    notes                   TEXT,
+    updated_at              TIMESTAMP   NOT NULL
+)
+"""
+
 
 def init_db(path: Path = Path("data/arf.db")) -> duckdb.DuckDBPyConnection:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -300,6 +349,8 @@ def init_db(path: Path = Path("data/arf.db")) -> duckdb.DuckDBPyConnection:
     conn.execute(_SCHEMA_POOL_CHANGES)
     conn.execute(_SCHEMA_CANDIDATE_POOL)
     conn.execute(_SCHEMA_INVESTMENT_THESES)
+    conn.execute(_SCHEMA_INVESTMENT_DECISION_RECORDS)
+    conn.execute(_SCHEMA_OPPORTUNITY_STATE)
     _add_missing_columns(conn)
     conn.execute(_VIEW_SNAPSHOTS)
     _mark_stale_runs_interrupted(conn)
@@ -1062,7 +1113,7 @@ def upsert_thesis(
             thesis.get("invalidation_criteria", ""),
             thesis.get("confidence_score", 50.0),
             catalysts,
-            thesis.get("model", "gemini-3.7-flash"),
+            thesis.get("model", "gemini-3.8-flash"),
             ts,
         ],
     )
@@ -1090,5 +1141,223 @@ def query_theses(
         f"SELECT * FROM investment_theses {where} ORDER BY created_at DESC LIMIT {int(limit)}",
         params,
     ).fetchdf()
+
+
+def _json_dumps_safe(val: object) -> str:
+    """Safely convert a dict, list, or Pydantic model to a JSON string."""
+    if val is None:
+        return "[]"
+    if hasattr(val, "model_dump"):
+        return json.dumps(val.model_dump(), ensure_ascii=False)
+    if isinstance(val, (list, dict)):
+        return json.dumps(val, ensure_ascii=False)
+    if isinstance(val, str):
+        return val
+    return json.dumps(val, ensure_ascii=False)
+
+
+def upsert_idr(
+    conn: duckdb.DuckDBPyConnection,
+    idr: dict,
+    created_at: datetime | None = None,
+    auto_update_state: bool = True,
+) -> None:
+    """Insert or update a 5-step Investment Decision Record (IDR)."""
+    ts = created_at or datetime.now(UTC).replace(tzinfo=None)
+
+    observed_metrics = _json_dumps_safe(idr.get("observed_metrics_json") or idr.get("observed_metrics"))
+    policy_rules = _json_dumps_safe(idr.get("policy_rules_json") or idr.get("policy_rules_evaluated"))
+    bull_arguments = _json_dumps_safe(idr.get("bull_arguments_json") or idr.get("bull_arguments"))
+    bear_arguments = _json_dumps_safe(idr.get("bear_arguments_json") or idr.get("bear_arguments"))
+    catalysts = _json_dumps_safe(idr.get("catalysts_json") or idr.get("catalysts"))
+    citations = _json_dumps_safe(idr.get("citations_json") or idr.get("citations"))
+
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO investment_decision_records (
+            idr_id, ticker, name, as_of_date, stage,
+            trigger_type, trigger_summary, observed_metrics_json,
+            leg, layer, cost_of_equity, policy_rules_json,
+            bull_arguments_json, bear_arguments_json, deliberation_synthesis,
+            gate_verdict, gate_details, froth_flag, hurdle_met,
+            recommended_action, valuation_entry_zone, invalidation_criteria,
+            confidence_score, catalysts_json, citations_json,
+            human_pm_decision, human_pm_notes, model, created_at
+        ) VALUES (
+            ?, ?, ?, ?, ?,
+            ?, ?, ?,
+            ?, ?, ?, ?,
+            ?, ?, ?,
+            ?, ?, ?, ?,
+            ?, ?, ?,
+            ?, ?, ?,
+            ?, ?, ?, ?
+        )
+        """,
+        [
+            idr["idr_id"],
+            idr["ticker"],
+            idr.get("name", idr["ticker"]),
+            idr["as_of_date"],
+            str(idr.get("stage", "thesis_formulated")),
+            idr.get("trigger_type", "radar_scan"),
+            idr.get("trigger_summary", ""),
+            observed_metrics,
+            idr.get("leg", "US"),
+            idr.get("layer", "L3"),
+            float(idr.get("cost_of_equity", 0.10)),
+            policy_rules,
+            bull_arguments,
+            bear_arguments,
+            idr.get("deliberation_synthesis", ""),
+            str(idr.get("gate_verdict", "PASSED")),
+            idr.get("gate_details", ""),
+            bool(idr.get("froth_flag", False)),
+            bool(idr.get("hurdle_met", True)),
+            str(idr.get("recommended_action", "MONITOR")),
+            idr.get("valuation_entry_zone", ""),
+            idr.get("invalidation_criteria", ""),
+            float(idr.get("confidence_score", 50.0)),
+            catalysts,
+            citations,
+            idr.get("human_pm_decision"),
+            idr.get("human_pm_notes"),
+            idr.get("model", "gemini-3.8-flash"),
+            ts,
+        ],
+    )
+    if auto_update_state:
+        update_opportunity_stage(
+            conn,
+            ticker=idr["ticker"],
+            stage=str(idr.get("stage", "thesis_formulated")),
+            name=idr.get("name", idr["ticker"]),
+            leg=idr.get("leg", "US"),
+            layer=idr.get("layer", "L3"),
+            latest_idr_id=idr["idr_id"],
+            valuation_entry_zone=idr.get("valuation_entry_zone", ""),
+            invalidation_criteria=idr.get("invalidation_criteria", ""),
+            updated_at=ts,
+        )
+    conn.commit()
+
+
+def query_idrs(
+    conn: duckdb.DuckDBPyConnection,
+    ticker: str | None = None,
+    stage: str | None = None,
+    limit: int = 50,
+) -> pd.DataFrame:
+    """Query stored Investment Decision Records."""
+    clauses = []
+    params = []
+    if ticker is not None:
+        clauses.append("ticker = ?")
+        params.append(ticker)
+    if stage is not None:
+        clauses.append("stage = ?")
+        params.append(stage)
+
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    return conn.execute(
+        f"SELECT * FROM investment_decision_records {where} ORDER BY created_at DESC LIMIT {int(limit)}",
+        params,
+    ).fetchdf()
+
+
+def update_opportunity_stage(
+    conn: duckdb.DuckDBPyConnection,
+    ticker: str,
+    stage: str,
+    name: str = "",
+    leg: str = "",
+    layer: str = "",
+    latest_idr_id: str | None = None,
+    valuation_entry_zone: str = "",
+    invalidation_criteria: str = "",
+    notes: str = "",
+    updated_at: datetime | None = None,
+) -> None:
+    """Update or insert the current lifecycle stage for an Opportunity Alpha."""
+    ts = updated_at or datetime.now(UTC).replace(tzinfo=None)
+    existing = conn.execute(
+        "SELECT name, leg, layer, latest_idr_id, valuation_entry_zone, invalidation_criteria, notes "
+        "FROM opportunity_states WHERE ticker = ?",
+        [ticker],
+    ).fetchone()
+
+    if existing:
+        ex_name, ex_leg, ex_layer, ex_idr, ex_zone, ex_inval, ex_notes = existing
+        final_name = name or ex_name or ticker
+        final_leg = leg or ex_leg or "US"
+        final_layer = layer or ex_layer or "L3"
+        final_idr = latest_idr_id or ex_idr
+        final_zone = valuation_entry_zone or ex_zone or ""
+        final_inval = invalidation_criteria or ex_inval or ""
+        final_notes = notes or ex_notes or ""
+
+        conn.execute(
+            """
+            UPDATE opportunity_states SET
+                current_stage = ?,
+                latest_idr_id = ?,
+                name = ?,
+                leg = ?,
+                layer = ?,
+                valuation_entry_zone = ?,
+                invalidation_criteria = ?,
+                notes = ?,
+                updated_at = ?
+            WHERE ticker = ?
+            """,
+            [
+                stage,
+                final_idr,
+                final_name,
+                final_leg,
+                final_layer,
+                final_zone,
+                final_inval,
+                final_notes,
+                ts,
+                ticker,
+            ],
+        )
+    else:
+        conn.execute(
+            """
+            INSERT INTO opportunity_states (
+                ticker, name, leg, layer, current_stage,
+                latest_idr_id, valuation_entry_zone, invalidation_criteria,
+                notes, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                ticker,
+                name or ticker,
+                leg or "US",
+                layer or "L3",
+                stage,
+                latest_idr_id,
+                valuation_entry_zone,
+                invalidation_criteria,
+                notes,
+                ts,
+            ],
+        )
+    conn.commit()
+
+
+def query_opportunity_states(
+    conn: duckdb.DuckDBPyConnection,
+    stage: str | None = None,
+) -> pd.DataFrame:
+    """Query current opportunity alpha lifecycle states."""
+    if stage is not None:
+        return conn.execute(
+            "SELECT * FROM opportunity_states WHERE current_stage = ? ORDER BY updated_at DESC",
+            [stage],
+        ).fetchdf()
+    return conn.execute("SELECT * FROM opportunity_states ORDER BY updated_at DESC").fetchdf()
 
 

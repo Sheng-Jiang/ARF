@@ -15,7 +15,7 @@ from arf.db import init_db, upsert_candidate
 
 log = logging.getLogger(__name__)
 
-RADAR_MODEL = os.getenv("GEMINI_FLASH_MODEL", "gemini-2.5-flash")
+RADAR_MODEL = os.getenv("GEMINI_FLASH_MODEL", "gemini-3.8-flash")
 
 
 def _extract_json_payload(text: str) -> dict[str, Any]:

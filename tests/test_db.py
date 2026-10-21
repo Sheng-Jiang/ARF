@@ -11,8 +11,10 @@ from arf.db import (
     query_candidates,
     query_fetch_outcomes,
     query_gemini_summaries,
+    query_idrs,
     query_latest,
     query_latest_run,
+    query_opportunity_states,
     query_pool_membership,
     query_runs,
     query_snapshot,
@@ -20,8 +22,10 @@ from arf.db import (
     record_fetch_outcomes,
     start_run,
     update_candidate_status,
+    update_opportunity_stage,
     upsert_candidate,
     upsert_gemini_summaries,
+    upsert_idr,
     upsert_pool_membership,
     upsert_snapshot,
     upsert_thesis,
@@ -714,4 +718,105 @@ class TestInvestmentTheses:
         short_df = query_theses(conn, thesis_type="froth_short")
         assert len(short_df) == 1
         assert short_df.iloc[0]["ticker"] == "T2"
+
+
+class TestInvestmentDecisionRecords:
+    def test_upsert_and_query_idr(self, conn):
+        idr = {
+            "idr_id": "idr-nvda-001",
+            "ticker": "NVDA",
+            "name": "NVIDIA Corp",
+            "as_of_date": date(2026, 6, 1),
+            "stage": "thesis_formulated",
+            "trigger_type": "radar_scan",
+            "trigger_summary": "NVDA entered D4 with 90% ROE",
+            "observed_metrics_json": {"arf": 62.5, "decile": 4, "roe": 0.90},
+            "leg": "US",
+            "layer": "L2",
+            "cost_of_equity": 0.10,
+            "policy_rules_json": ["WACC Hurdle >= 10.0%", "Froth exclusion"],
+            "bull_arguments_json": ["Blackwell ramp", "Software moat"],
+            "bear_arguments_json": ["Hyperscaler capex moderation"],
+            "deliberation_synthesis": "Compelling GARP risk/reward",
+            "gate_verdict": "PASSED",
+            "gate_details": "G3 Gate: Passed all risk predicates",
+            "froth_flag": False,
+            "hurdle_met": True,
+            "recommended_action": "BUY_ZONE",
+            "valuation_entry_zone": "Forward P/E < 30",
+            "invalidation_criteria": "Gross margin compresses below 70%",
+            "confidence_score": 88.0,
+            "catalysts_json": ["Blackwell volume ramp", "Q2 Earnings"],
+            "citations_json": [{"title": "SEC 10-K", "uri": "https://sec.gov/edgar"}],
+            "model": "gemini-3.8-flash",
+        }
+        upsert_idr(conn, idr)
+
+        df = query_idrs(conn, ticker="NVDA")
+        assert len(df) == 1
+        row = df.iloc[0]
+        assert row["idr_id"] == "idr-nvda-001"
+        assert row["stage"] == "thesis_formulated"
+        assert row["gate_verdict"] == "PASSED"
+        assert row["recommended_action"] == "BUY_ZONE"
+        assert "Blackwell ramp" in row["bull_arguments_json"]
+        assert "Gross margin compresses" in row["invalidation_criteria"]
+
+        # Also verify opportunity_states auto-updated
+        st_df = query_opportunity_states(conn, stage="thesis_formulated")
+        assert len(st_df) == 1
+        assert st_df.iloc[0]["ticker"] == "NVDA"
+        assert st_df.iloc[0]["latest_idr_id"] == "idr-nvda-001"
+        assert st_df.iloc[0]["valuation_entry_zone"] == "Forward P/E < 30"
+
+    def test_query_idrs_filtering(self, conn):
+        upsert_idr(conn, {
+            "idr_id": "idr-1", "ticker": "T1", "as_of_date": date(2026, 6, 1),
+            "stage": "thesis_formulated", "gate_verdict": "PASSED"
+        })
+        upsert_idr(conn, {
+            "idr_id": "idr-2", "ticker": "T2", "as_of_date": date(2026, 6, 1),
+            "stage": "active_watch", "gate_verdict": "PASSED"
+        })
+
+        watch_df = query_idrs(conn, stage="active_watch")
+        assert len(watch_df) == 1
+        assert watch_df.iloc[0]["ticker"] == "T2"
+
+        t1_df = query_idrs(conn, ticker="T1")
+        assert len(t1_df) == 1
+        assert t1_df.iloc[0]["idr_id"] == "idr-1"
+
+
+class TestOpportunityStates:
+    def test_stage_lifecycle_transitions(self, conn):
+        update_opportunity_stage(
+            conn, ticker="300308.SZ", stage="discovered",
+            name="Innolight", leg="China", layer="L3",
+            notes="Found by optical transceiver scan"
+        )
+        df1 = query_opportunity_states(conn)
+        assert len(df1) == 1
+        assert df1.iloc[0]["current_stage"] == "discovered"
+
+        # Transition to thesis_formulated with IDR link
+        update_opportunity_stage(
+            conn, ticker="300308.SZ", stage="thesis_formulated",
+            latest_idr_id="idr-inno-001",
+            valuation_entry_zone="P/E < 25, CYQ support ¥115",
+            invalidation_criteria="Optical export revenue drops > 15%"
+        )
+        df2 = query_opportunity_states(conn)
+        assert len(df2) == 1
+        assert df2.iloc[0]["current_stage"] == "thesis_formulated"
+        assert df2.iloc[0]["latest_idr_id"] == "idr-inno-001"
+        assert df2.iloc[0]["name"] == "Innolight"
+
+        # Transition to active_watch
+        update_opportunity_stage(conn, ticker="300308.SZ", stage="active_watch")
+        df3 = query_opportunity_states(conn, stage="active_watch")
+        assert len(df3) == 1
+        assert df3.iloc[0]["ticker"] == "300308.SZ"
+        assert df3.iloc[0]["valuation_entry_zone"] == "P/E < 25, CYQ support ¥115"
+
 

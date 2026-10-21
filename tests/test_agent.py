@@ -7,14 +7,28 @@ import pandas as pd
 import pytest
 
 from arf.agent.radar import discover_supply_chain_candidates, scan_valuation_anomalies
-from arf.agent.thesis import generate_opportunity_card
+from arf.agent.schemas import (
+    DecisionAction,
+    GateVerdict,
+    OpportunityStage,
+)
+from arf.agent.thesis import (
+    compile_investment_decision_record,
+    generate_opportunity_card,
+)
 from arf.agent.tools import (
     _connect_db,
     get_stock_quant_profile,
     query_quant_database,
     search_value_chain_layer,
 )
-from arf.db import init_db, query_candidates, upsert_snapshot
+from arf.db import (
+    init_db,
+    query_candidates,
+    query_idrs,
+    query_opportunity_states,
+    upsert_snapshot,
+)
 
 
 @pytest.fixture
@@ -152,10 +166,117 @@ def test_generate_opportunity_card_mock(agent_test_db):
         assert card.thesis_type == "garp_value"
         assert card.confidence_score == 88.0
         assert card.quant_profile.roe == 0.90
+        assert card.idr_id is not None
+        assert card.idr_id.startswith("idr_nvda_")
+        assert card.model == "gemini-3.8-flash"
 
         # Verify client called with model
         call_kwargs = mock_client.models.generate_content.call_args[1]
         assert "gemini" in call_kwargs["model"]
+
+        # Verify DuckDB has both thesis, IDR, and opportunity state
+        conn = init_db(agent_test_db)
+        try:
+            idr_df = query_idrs(conn, ticker="NVDA")
+            assert len(idr_df) == 1
+            assert idr_df.iloc[0]["idr_id"] == card.idr_id
+            assert idr_df.iloc[0]["gate_verdict"] == "PASSED"
+            assert idr_df.iloc[0]["recommended_action"] == "BUY_ZONE"
+
+            st_df = query_opportunity_states(conn, stage="thesis_formulated")
+            assert len(st_df) == 1
+            assert st_df.iloc[0]["ticker"] == "NVDA"
+            assert st_df.iloc[0]["latest_idr_id"] == card.idr_id
+        finally:
+            conn.close()
+
+
+def test_compile_investment_decision_record_g3_gates(agent_test_db):
+    """Test outside-model G3 risk gate verdicts on various scenarios."""
+    mock_response = MagicMock()
+    mock_response.candidates = []
+
+    with patch("google.genai.Client") as mock_client_cls:
+        mock_client = MagicMock()
+        mock_client_cls.return_value = mock_client
+        mock_client.models.generate_content.return_value = mock_response
+
+        # Scenario 1: Froth bubble block
+        mock_response.text = """
+        {
+          "thesis_type": "long_opportunity",
+          "title": "PLTR: AI Growth Acceleration",
+          "bull_case": "High momentum and government enterprise contracts.",
+          "bear_case": "Extreme multiple stretch.",
+          "synthesis": "High valuation risk.",
+          "valuation_entry_zone": "Forward P/E < 50",
+          "invalidation_criteria": "Gross margin compresses below 70%",
+          "confidence_score": 70.0,
+          "catalysts": ["Earnings"]
+        }
+        """
+        # FROTH_CO has froth_flag=True in agent_test_db fixture!
+        card, idr = compile_investment_decision_record(
+            "FROTH_CO",
+            date(2026, 6, 1),
+            api_key="fake_test_key",
+            db_path=agent_test_db,
+            persist=False,
+        )
+        assert idr.froth_flag is True
+        assert idr.gate_verdict == GateVerdict.BLOCKED_FROTH
+        assert idr.recommended_action == DecisionAction.AVOID_FROTH
+        assert "froth-flagged" in idr.gate_details
+
+        # Scenario 2: Missing / insufficient invalidation criteria
+        mock_response.text = """
+        {
+          "thesis_type": "long_opportunity",
+          "title": "NVDA: Good stock",
+          "bull_case": "GPU demand.",
+          "bear_case": "Risks.",
+          "synthesis": "Good.",
+          "valuation_entry_zone": "Any",
+          "invalidation_criteria": "none",
+          "confidence_score": 60.0,
+          "catalysts": []
+        }
+        """
+        card, idr = compile_investment_decision_record(
+            "NVDA",
+            date(2026, 6, 1),
+            api_key="fake_test_key",
+            db_path=agent_test_db,
+            persist=False,
+        )
+        assert idr.gate_verdict == GateVerdict.BLOCKED_INSUFFICIENT_CRITERIA
+        assert idr.recommended_action == DecisionAction.MONITOR
+
+        # Scenario 3: Passed GARP with strong ROE
+        mock_response.text = """
+        {
+          "thesis_type": "garp_value",
+          "title": "NVDA: Blackwell Inflection",
+          "bull_case": "Moat and 90% ROE.",
+          "bear_case": "Hyperscaler capex.",
+          "synthesis": "Asymmetric upside.",
+          "valuation_entry_zone": "Forward P/E < 30",
+          "invalidation_criteria": "Gross margin compresses below 70%",
+          "confidence_score": 90.0,
+          "catalysts": ["Blackwell launch"]
+        }
+        """
+        card, idr = compile_investment_decision_record(
+            "NVDA",
+            date(2026, 6, 1),
+            api_key="fake_test_key",
+            db_path=agent_test_db,
+            persist=False,
+        )
+        assert idr.gate_verdict == GateVerdict.PASSED
+        assert idr.recommended_action == DecisionAction.BUY_ZONE
+        assert idr.stage == OpportunityStage.THESIS_FORMULATED
+
 
 
 def test_discover_supply_chain_candidates_mock(agent_test_db):

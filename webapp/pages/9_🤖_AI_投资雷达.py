@@ -208,7 +208,7 @@ with tab_theses:
             }.get(t_type, t_type)
 
             with st.expander(f"{tag_color} | **{row['ticker']}** — {row['title']} (信心分: {row.get('confidence_score', 50):.1f}分)", expanded=False):
-                st.markdown(f"**快照日期**：`{row['as_of_date']}` | **生成模型**：`{row.get('model', 'gemini-3.7-flash')}`")
+                st.markdown(f"**快照日期**：`{row['as_of_date']}` | **生成模型**：`{row.get('model', 'gemini-3.8-flash')}`")
                 
                 col_bull, col_bear = st.columns(2)
                 with col_bull:

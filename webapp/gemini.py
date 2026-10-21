@@ -28,7 +28,7 @@ log = logging.getLogger(__name__)
 # model via their own defaults (arf/agent/thesis.py, arf/agent/radar.py); set
 # GEMINI_MODEL / GEMINI_FLASH_MODEL to override any of them.
 MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-pro")
-FLASH_MODEL = os.getenv("GEMINI_FLASH_MODEL", "gemini-2.5-flash")
+FLASH_MODEL = os.getenv("GEMINI_FLASH_MODEL", "gemini-3.8-flash")
 MAX_PARALLEL = int(os.getenv("GEMINI_MAX_PARALLEL", "6"))
 
 
