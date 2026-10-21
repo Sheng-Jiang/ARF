@@ -140,13 +140,12 @@ run_remote() {
         --exclude 'data/*.db*' \
         ./ "${SSH_HOST}:${REMOTE_DIR}/"
 
-    # Propagate local HMAC credentials to ~/.arf/gcs_hmac.env if present
+    # Propagate local HMAC credentials to ~/.arf/gcs_hmac.env if present.
+    # Streamed over stdin (never in ssh's argv, which local users can read via ps).
     if [[ -n "${GCS_HMAC_KEY:-}" && -n "${GCS_HMAC_SECRET:-}" ]]; then
-        ssh "${SSH_HOST}" "cat <<'EOF' > ~/.arf/gcs_hmac.env
-export GCS_HMAC_KEY=\"${GCS_HMAC_KEY}\"
-export GCS_HMAC_SECRET=\"${GCS_HMAC_SECRET}\"
-EOF
-chmod 600 ~/.arf/gcs_hmac.env"
+        printf 'export GCS_HMAC_KEY=%q\nexport GCS_HMAC_SECRET=%q\n' \
+            "${GCS_HMAC_KEY}" "${GCS_HMAC_SECRET}" \
+            | ssh "${SSH_HOST}" "umask 077; cat > ~/.arf/gcs_hmac.env"
     fi
 
     echo "⚡ Executing remote runner on Lighthouse..."
