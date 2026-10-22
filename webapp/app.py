@@ -24,6 +24,9 @@ pages = {
         st.Page("pages/7_📝_一键研报.py", title="一键研报", icon="📝"),
         st.Page("pages/4_📈_技术指标与回测.py", title="技术指标与回测", icon="📈"),
     ],
+    "执行与模拟": [
+        st.Page("pages/10_💼_CIO_投资总监.py", title="AI CIO 投资总监", icon="💼"),
+    ],
     "系统": [
         st.Page("pages/6_⚙️_系统管理.py", title="系统管理", icon="⚙️"),
     ],
