@@ -203,14 +203,14 @@ with col4:
     )
 with col5:
     st.metric(
-        "📊 夏普比率 (Sharpe)",
+        "📊 夏普比率",
         f"{kpis['sharpe']:.2f}" if kpis else "—",
         "年化",
-        help="年化超额回报 / 波动率",
+        help="年化超额回报 / 波动率 (Sharpe ratio)",
     )
 with col6:
     st.metric(
-        "🛡️ 最大回撤 (Max DD)",
+        "🛡️ 最大回撤",
         f"{kpis['max_drawdown']:.2%}" if kpis else "—",
         f"{kpis['n_cycles']} 次调仓" if kpis else None,
         help="回放窗口内的峰谷回撤",
@@ -306,29 +306,27 @@ with tab_book:
     if cockpit is None or cockpit.positions.empty:
         st.info("没有可展示的持仓：回放尚未完成。")
     else:
-        col_pos, col_layer = st.columns([3, 2])
-        with col_pos:
-            st.markdown(f"##### 📑 最后交易日持仓 · {cockpit.last_session}")
-            shown = cockpit.positions.copy()
-            shown["组合权重"] = shown["组合权重"].map(lambda v: f"{v:+.1%}")
-            st.dataframe(shown, use_container_width=True, hide_index=True)
-        with col_layer:
-            st.markdown("##### 🍰 Jensen Huang 5 层价值链风险暴露")
-            fig_bar = px.bar(
-                cockpit.layer_exposure,
-                x="Layer",
-                y="Exposure",
-                color="Exposure",
-                color_continuous_scale=["#f87171", "#94a3b8", "#38bdf8"],
-            )
-            fig_bar.update_layout(
-                margin=dict(l=10, r=10, t=10, b=10),
-                height=280,
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(0,0,0,0)",
-                font=dict(color="#cbd5e1"),
-            )
-            st.plotly_chart(fig_bar, use_container_width=True)
+        st.markdown(f"##### 📑 最后交易日持仓 · {cockpit.last_session}")
+        shown = cockpit.positions.copy()
+        shown["组合权重"] = shown["组合权重"].map(lambda v: f"{v:+.1%}")
+        st.dataframe(shown, use_container_width=True, hide_index=True)
+
+        st.markdown("##### 🍰 Jensen Huang 5 层价值链风险暴露")
+        fig_bar = px.bar(
+            cockpit.layer_exposure,
+            x="Layer",
+            y="Exposure",
+            color="Exposure",
+            color_continuous_scale=["#f87171", "#94a3b8", "#38bdf8"],
+        )
+        fig_bar.update_layout(
+            margin=dict(l=10, r=10, t=10, b=10),
+            height=320,
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="#cbd5e1"),
+        )
+        st.plotly_chart(fig_bar, use_container_width=True)
 
 # ── TAB 3: 调仓指令与风控熔断 ────────────────────────────────────────────────
 with tab_rebalance:
