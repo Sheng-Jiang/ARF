@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ARF (AI Relevance Factor) is a Python data pipeline that computes a single 0–100 score per stock measuring how much a company's valuation is bent by the AI narrative. It covers 73 scored companies (36 in the US leg and 37 in the China leg — the China leg includes 0100.HK MiniMax) of Jensen Huang's "5-layer cake" AI stack, produces weekly ranked reports, and generates a bubble-thermometer chart over time.
 
-The full spec is in `ARF_PRD.md`. The reference research is in `Reference/`.
+The full spec is in `docs/ARF_PRD.md`. The reference research is in `Reference/`.
 
 ## Target Repo Layout (from PRD §7)
 

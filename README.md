@@ -174,3 +174,13 @@ ARF = percentile_rank(sqrt(E_score × V_score))   # within leg
 ```
 
 WACC: 10% for US, 12% for China.
+
+## Documentation
+
+Full project design, architectural decision records, and specifications are maintained in [`docs/`](docs/):
+
+* **[ADR-0001: Hybrid-Repo Single-Container Architecture](docs/ADR_0001_HYBRID_REPO_SINGLE_CONTAINER_INTEGRATION.md)** — Architectural decision record explaining the single-container deployment of `ARF` and `ai-hedge-fund` on Google Cloud Run.
+* **[ARF PRD](docs/ARF_PRD.md)** — Core product requirements document, stack topography, and scoring methodology.
+* **[ARF Investor Whitepaper](docs/ARF_Investor_Whitepaper.md)** — Foundational investment thesis and quantitative formulation.
+* **[China Data Plan](docs/ARF_CHINA_DATA_PLAN.md)** — Hybrid cross-cloud architecture between GCP and Tencent Cloud Lighthouse.
+* **[Digital Investment Analyst Vision](docs/ARF_DIGITAL_INVESTMENT_ANALYST_VISION.md)** — Multi-agent equity research analyst and AI CIO roadmap.
