@@ -2,8 +2,9 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# System deps for building Python packages
-RUN apt-get update && apt-get install -y --no-install-recommends gcc && \
+# System deps for building Python packages. git is required because the
+# AI CIO extras install ai-hedge-fund directly from a pinned GitHub commit.
+RUN apt-get update && apt-get install -y --no-install-recommends gcc git && \
     rm -rf /var/lib/apt/lists/*
 
 # Install project (arf package + webapp extras)

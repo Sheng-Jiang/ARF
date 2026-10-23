@@ -1,33 +1,23 @@
 """Streamlit Page: AI Chief Investment Officer (CIO) Executive Cockpit.
 
-Autonomous multi-strategy portfolio governance, capital allocation across pods,
-deterministic risk clamping, and persistent ledger auditing.
+The cockpit replays the ARF mandate over the US leg with ai-hedge-fund's
+backtest engine and renders the last session of that replay: the book, the
+orders, the risk clamps and the scorecard. Nothing on this page is a
+hardcoded sample — if the replay cannot run, the page says so.
 """
 
-import logging
-import sys
-from pathlib import Path
+from __future__ import annotations
 
-import duckdb
+import os
+from datetime import date
+
 import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-# Add ai-hedge-fund to python path if not already present
-AI_HEDGE_FUND_PATH = Path("/Users/sheng/Developer/ai-hedge-fund")
-if str(AI_HEDGE_FUND_PATH) not in sys.path:
-    sys.path.insert(0, str(AI_HEDGE_FUND_PATH))
-
-from hedge_fund.backtesting import backtest_fund  # noqa: E402
-from hedge_fund.data import ARFDataClient  # noqa: E402
-from hedge_fund.fund import Fund, load_spec  # noqa: E402
-
-from scripts.sync_cloud_data import sync_dual_cloud  # noqa: E402
-from webapp import data  # noqa: E402
-from webapp.mobile import inject_mobile_css  # noqa: E402
-from webapp.ui import render_sidebar  # noqa: E402
-
-log = logging.getLogger(__name__)
+from webapp import data
+from webapp.mobile import inject_mobile_css
+from webapp.ui import render_sidebar
 
 st.set_page_config(
     page_title="ARF — AI CIO 投资总监驾驶舱",
@@ -36,7 +26,6 @@ st.set_page_config(
 )
 inject_mobile_css()
 
-# Custom modern CSS styling for CIO cockpit
 st.markdown(
     """
     <style>
@@ -48,17 +37,6 @@ st.markdown(
         margin-bottom: 20px;
         box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
     }
-    .metric-badge {
-        display: inline-block;
-        padding: 3px 10px;
-        border-radius: 6px;
-        font-size: 0.82rem;
-        font-weight: 600;
-        margin-right: 8px;
-    }
-    .badge-long { background-color: rgba(34, 197, 94, 0.18); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.4); }
-    .badge-short { background-color: rgba(239, 68, 68, 0.18); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); }
-    .badge-froth { background-color: rgba(234, 179, 8, 0.2); color: #facc15; border: 1px solid rgba(234, 179, 8, 0.5); }
     </style>
     """,
     unsafe_allow_html=True,
@@ -66,109 +44,245 @@ st.markdown(
 
 st.title("💼 AI CIO 投资总监驾驶舱 (Autonomous AI CIO Cockpit)")
 st.caption(
-    "由 AI-CIO Supervisory Brain 驱动的机构级对冲基金管理中心：全天候管理多策略 Pod 资本分配、执行 T+1 确定性风控约束与不可篡改区块链式账本审计。"
+    "由 AI-CIO Supervisory Brain 驱动的对冲基金管理中心：回放 ARF Thematic 委托，"
+    "展示真实持仓、调仓指令、风控熔断与分析师计分卡。"
 )
 
-as_of = render_sidebar()
-if as_of is None:
+selected_date = render_sidebar()
+if selected_date is None:
     st.info("👈 请在左侧边栏选择快照日期。")
     st.stop()
 
-db_path = data.get_db_path()
-mandate_path = AI_HEDGE_FUND_PATH / "hedge_fund" / "fund" / "arf-mandate.yaml"
+as_of = data.latest_scored_date(selected_date)
+if as_of is None:
+    st.error(f"{selected_date} 及之前的快照都没有完成评分（ARF 为空），无法回放。")
+    st.stop()
+if as_of != selected_date:
+    st.warning(
+        f"快照 **{selected_date}** 尚未完成评分（ARF 为空），"
+        f"以下使用最近一个完成评分的快照 **{as_of}**。"
+    )
 
-# Load current mandate
 try:
-    spec = load_spec(mandate_path)
-except Exception as exc:
-    st.error(f"无法加载基金投资委托 ({mandate_path}): {exc}")
+    from hedge_fund.fund import load_spec
+
+    from arf.cio import (
+        build_cockpit,
+        default_mandate_path,
+        fetch_benchmark,
+        replay_window,
+        run_replay,
+    )
+except Exception as exc:  # noqa: BLE001 — the page must explain a broken install
+    st.error(
+        "AI CIO 依赖未安装：需要 `aihf`（ai-hedge-fund）。"
+        f"请安装 `pip install -e '.[webapp]'` 后重试。\n\n`{exc}`"
+    )
     st.stop()
 
-# -----------------------------------------------------------------------------
-# Top Executive KPI Cards
-# -----------------------------------------------------------------------------
-# Default institutional values or computed from backtest/paper state
+mandate_path = default_mandate_path()
+if not mandate_path.exists():
+    st.error(f"找不到 ARF 委托文件：{mandate_path}")
+    st.stop()
+
+try:
+    spec = load_spec(mandate_path)
+except Exception as exc:  # noqa: BLE001
+    st.error(f"无法加载基金委托 ({mandate_path}): {exc}")
+    st.stop()
+
+
+# ---------------------------------------------------------------------------
+# Replay (cached; the inputs are the frames the page already loaded)
+# ---------------------------------------------------------------------------
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _cached_benchmark(start_iso: str, end_iso: str) -> pd.DataFrame:
+    return fetch_benchmark("SPY", date.fromisoformat(start_iso), date.fromisoformat(end_iso))
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _cached_replay(
+    snapshots_df: pd.DataFrame,
+    price_items: tuple[tuple[str, pd.DataFrame], ...],
+    mandate: str,
+    universe: tuple[str, ...],
+    start: str,
+    end: str,
+):
+    return run_replay(
+        snapshots_df=snapshots_df,
+        prices=dict(price_items),
+        mandate_path=mandate,
+        universe=list(universe),
+        start=start,
+        end=end,
+    )
+
+
+snapshot_df = data.load_snapshot(as_of)
+us_rows = snapshot_df[snapshot_df["leg"] == "US"] if "leg" in snapshot_df.columns else snapshot_df
+universe = tuple(sorted(us_rows["ticker"].dropna().unique()))
+start_iso, _ = replay_window(as_of, days=120)
+
+prices = data.load_price_history(universe, date.fromisoformat(start_iso), as_of)
+# The ARF price table can lag the snapshot date (a Sunday snapshot, or a run
+# whose US fetch failed). End the replay on the last date every name has a
+# bar: the engine refuses to value a held name without a mark.
+coverage_ends = [
+    frame["date"].max() for frame in prices.values() if not frame.empty
+]
+if not coverage_ends:
+    end_iso = as_of.isoformat()
+    st.error("所选区间没有美股日线数据，回放无法运行。")
+else:
+    end_iso = pd.Timestamp(min(coverage_ends)).date().isoformat()
+    if end_iso < as_of.isoformat():
+        st.caption(f"美股日线覆盖至 **{end_iso}**（快照日 {as_of}），回放在此截止。")
+    try:
+        benchmark = _cached_benchmark(start_iso, end_iso)
+        if benchmark is None or benchmark.empty:
+            raise RuntimeError("SPY 没有返回任何交易日")
+        prices["SPY"] = benchmark
+    except Exception as exc:  # noqa: BLE001 — a missing benchmark blocks the replay
+        st.error(f"无法获取 SPY 基准数据，回放暂停：{exc}")
+
+replay = None
+cockpit = None
+if "SPY" in prices and universe and end_iso >= start_iso:
+    try:
+        with st.spinner("正在回放 ARF Thematic 委托…"):
+            replay = _cached_replay(
+                data.load_snapshot_history(),
+                tuple(sorted(prices.items())),
+                str(mandate_path),
+                universe,
+                start_iso,
+                end_iso,
+            )
+            cockpit = build_cockpit(replay, snapshot_df=snapshot_df, spec_path=mandate_path)
+    except Exception as exc:  # noqa: BLE001 — surface the real failure
+        st.error(f"回放失败：{exc}")
+
+
+# ---------------------------------------------------------------------------
+# KPI cards
+# ---------------------------------------------------------------------------
+
+kpis = cockpit.kpis if cockpit is not None else {}
+
 col1, col2, col3, col4, col5, col6 = st.columns(6)
 with col1:
-    st.metric("💰 基金总净值 (NAV)", "$102,046", "+2.05%", help="基金期末清算资产总值")
+    st.metric(
+        "💰 基金总净值 (NAV)",
+        f"${kpis['nav']:,.0f}" if kpis else "—",
+        f"{kpis['total_return']:+.2%}" if kpis else None,
+        help="回放窗口期末清算资产总值",
+    )
 with col2:
-    st.metric("💵 现金可用储备", "$78,800", "77.2%", help="未占用现金与风险缓冲")
+    st.metric(
+        "💵 现金储备",
+        f"${kpis['cash']:,.0f}" if kpis else "—",
+        f"{kpis['cash_pct']:.1%}" if kpis and kpis.get("cash_pct") is not None else None,
+        help="现金 / NAV",
+    )
 with col3:
-    st.metric("⚖️ 净多头敞口", "+18.5%", "Beta 对冲", help="多头市值减去空头市值对总净值比率")
+    st.metric(
+        "⚖️ 净敞口",
+        f"{kpis['net_exposure']:+.1%}" if kpis and kpis.get("net_exposure") is not None else "—",
+        f"Gross {kpis['gross_exposure']:.1%}" if kpis and kpis.get("gross_exposure") is not None else None,
+        help="多头市值减空头市值；括号内为总敞口",
+    )
 with col4:
-    st.metric("🎯 超额收益 (Alpha)", "+3.35%", "vs SPY -1.3%", help="相对标普 500 基准的主动超额回报")
+    st.metric(
+        "🎯 超额收益 (Alpha)",
+        f"{kpis['excess_return']:+.2%}" if kpis else "—",
+        f"vs SPY {kpis['benchmark_return']:+.2%}" if kpis else None,
+        help="基金总收益减去基准总收益",
+    )
 with col5:
-    st.metric("📊 夏普比率 (Sharpe)", "1.03", "年化", help="超额回报对波动率比率")
+    st.metric(
+        "📊 夏普比率",
+        f"{kpis['sharpe']:.2f}" if kpis else "—",
+        "年化",
+        help="年化超额回报 / 波动率 (Sharpe ratio)",
+    )
 with col6:
-    st.metric("🛡️ 最大回撤 (Max DD)", "6.52%", "风控达标", help="历史最大峰谷净值回撤")
+    st.metric(
+        "🛡️ 最大回撤",
+        f"{kpis['max_drawdown']:.2%}" if kpis else "—",
+        f"{kpis['n_cycles']} 次调仓" if kpis else None,
+        help="回放窗口内的峰谷回撤",
+    )
+
+if cockpit is not None:
+    st.caption(
+        f"回放窗口 {start_iso} → {end_iso} · 最后交易日 **{cockpit.last_session}** · "
+        f"{kpis.get('n_orders', 0)} 笔成交"
+    )
 
 st.divider()
 
-# -----------------------------------------------------------------------------
-# Main Navigation Tabs
-# -----------------------------------------------------------------------------
 tab_regime, tab_book, tab_rebalance, tab_scorecard, tab_control = st.tabs([
     "🌐 宏观政体与 Pod 资本分配",
     "📚 投资组合底仓与价值链结构",
     "📋 调仓指令与风控熔断",
     "🏆 分析师与策略计分卡",
-    "🎮 CIO 指挥中心与双云同步",
+    "🎮 CIO 指挥中心与数据同步",
 ])
 
 # ── TAB 1: 宏观政体与 Pod 资本分配 ───────────────────────────────────────────
 with tab_regime:
     st.subheader("🌐 AI 产业宏观估值政体 (Macro AI Valuation Regime)")
-    
-    # Read bubble thermometer median gap
+
     try:
-        con = duckdb.connect(str(db_path), read_only=True)
-        therm_res = con.execute("""
-            SELECT 
-                COUNT(*) as total_scored,
-                COUNT(CASE WHEN froth_flag THEN 1 END) as froth_count,
-                MEDIAN(implied_growth_gap) as median_gap,
-                AVG(arf) as avg_arf
-            FROM snapshots
-            WHERE as_of_date = (SELECT MAX(as_of_date) FROM snapshots WHERE as_of_date <= ?)
-        """, [str(as_of)]).fetchone()
-        con.close()
-        
-        total_scored = therm_res[0] or 0
-        froth_count = therm_res[1] or 0
-        median_gap = therm_res[2] or 0.0
-        avg_arf = therm_res[3] or 50.0
-    except Exception:
-        total_scored, froth_count, median_gap, avg_arf = 73, 2, -0.015, 52.3
+        regime = data.load_regime_stats(as_of)
+    except Exception as exc:  # noqa: BLE001
+        regime = None
+        st.error(f"无法读取泡沫温度计：{exc}")
 
     regime_col1, regime_col2 = st.columns([2, 3])
     with regime_col1:
         st.markdown("#### 🌡️ 泡沫温度计与估值状态")
-        is_frothy = froth_count >= 3 or median_gap > 0.05
-        if is_frothy:
-            st.warning(f"⚠️ **高泡沫警报期 (Elevated Froth Regime)**: 检测到 {froth_count} 只股票触发 Froth Flag，中位数隐含增长差额为 {median_gap:+.1%}。")
-            rec_text = "CIO 建议：提高美元中性对冲比例，加大 D1 极度拉伸标的做空权重，严控多头单票上限。"
+        if regime and regime["total_scored"]:
+            froth_count = regime["froth_count"]
+            median_gap = regime["median_gap"] or 0.0
+            is_frothy = froth_count >= 3 or median_gap > 0.05
+            if is_frothy:
+                st.warning(
+                    f"⚠️ **高泡沫警报期 (Elevated Froth Regime)**: 检测到 {froth_count} 只股票触发 "
+                    f"Froth Flag，中位数隐含增长差额为 {median_gap:+.1%}。"
+                )
+                rec_text = "CIO 建议：提高美元中性对冲比例，加大 D1 极度拉伸标的做空权重，严控多头单票上限。"
+            else:
+                st.success(
+                    f"💎 **理性复利增长期 (Compounder Regime)**: 泡沫警报数 {froth_count} 只，"
+                    f"估值拉伸中位数 {median_gap:+.1%}，基本面韧性良好。"
+                )
+                rec_text = "CIO 建议：保持 ARF Thematic 多头优质高 ROE 标的分配，对冲低效产能资产。"
+            st.info(rec_text)
+            st.markdown(f"""
+            - **核心组合已覆盖 AI 标的**: {regime['total_scored']} 只
+            - **触发 Froth Flag 泡沫警报**: {froth_count} 只
+            - **DCF 逆向隐含增长差额 (g* vs 预期)**: {median_gap:+.1%}
+            - **核心组合 ARF 平均得分**: {regime['avg_arf']:.1f} / 100
+            - **统计快照日**: {regime['snapshot_date']}
+            """)
         else:
-            st.success(f"💎 **理性复利增长期 (Compounder Regime)**: 泡沫警报数 {froth_count} 只，估值拉伸中位数 {median_gap:+.1%}，基本面韧性良好。")
-            rec_text = "CIO 建议：保持 ARF Thematic 多头优质高 ROE 标的分配，对冲低效产能资产。"
-        st.info(rec_text)
-        
-        st.markdown(f"""
-        - **全网已覆盖 AI 标的**: {total_scored} 只
-        - **触发 Froth Flag 泡沫警报**: {froth_count} 只
-        - **DCF 逆向隐含增长差额 (g* vs 预期)**: {median_gap:+.1%}
-        - **全市场 ARF 平均得分**: {avg_arf:.1f} / 100
-        """)
+            st.info("所选日期没有可用的核心组合评分。")
 
     with regime_col2:
         st.markdown("#### 🍰 多策略 Pod 资本分配权重 (Capital Slices)")
-        # Slices across strategies
-        pod_data = [
-            {"Pod": "ARF Thematic (AI 价值链系统化)", "Weight": 0.50, "Style": "Long/Short Quant", "Staff": "ARF Model (5-Layer)"},
-            {"Pod": "Fundamental L/S (大师基本面)", "Weight": 0.30, "Style": "Dollar-Neutral Discretionary", "Staff": "Buffett, Druckenmiller, Munger"},
-            {"Pod": "Earnings Drift (PEAD 业绩漂移)", "Weight": 0.20, "Style": "Systematic Event-Driven", "Staff": "PEAD Surprise Model"},
-        ]
-        pod_df = pd.DataFrame(pod_data)
-        
+        pod_df = pd.DataFrame([
+            {
+                "Pod": strategy.display_name or strategy.name,
+                "Weight": strategy.weight,
+                "Style": strategy.blend.mode,
+                "Staff": ", ".join(model.name for model in strategy.models),
+            }
+            for strategy in spec.strategies
+        ])
         fig_donut = px.pie(
             pod_df,
             names="Pod",
@@ -184,40 +298,22 @@ with tab_regime:
             font=dict(color="#cbd5e1"),
         )
         st.plotly_chart(fig_donut, use_container_width=True)
-
-    st.markdown("##### 🏛️ 策略 Pod 编制与职责细则")
-    st.dataframe(pod_df, use_container_width=True, hide_index=True)
+        st.dataframe(pod_df, use_container_width=True, hide_index=True)
 
 # ── TAB 2: 投资组合持仓与价值链结构 ───────────────────────────────────────────
 with tab_book:
     st.subheader("📚 基金活跃持仓与 5 层价值链分布 (Current Book)")
-    
-    # Sample active positions from deployed paper fund or simulation
-    positions = [
-        {"代码": "NVDA", "公司": "NVIDIA", "方向": "LONG", "层级": "L2 芯片", "持股数": 100, "收盘价": 200.53, "持仓市值 ($)": 20053, "组合权重": "19.6%", "单票上限 (20%)": "✅ 达标 (98%)"},
-        {"代码": "MSFT", "公司": "Microsoft", "方向": "LONG", "层级": "L4 大模型", "持股数": 50, "收盘价": 463.85, "持仓市值 ($)": 23192, "组合权重": "22.7%", "单票上限 (20%)": "⚠️ 触发削减"},
-        {"代码": "AMD", "公司": "AMD", "方向": "SHORT", "层级": "L2 芯片", "持股数": -42, "收盘价": 476.15, "持仓市值 ($)": -19998, "组合权重": "-19.6%", "单票上限 (20%)": "✅ 达标 (98%)"},
-        {"代码": "LITE", "公司": "Lumentum", "方向": "SHORT", "层级": "L3 光模块", "持股数": -150, "收盘价": 68.20, "持仓市值 ($)": -10230, "组合权重": "-10.0%", "单票上限 (20%)": "✅ 达标 (50%)"},
-        {"代码": "AVGO", "公司": "Broadcom", "方向": "LONG", "层级": "L2 芯片", "持股数": 40, "收盘价": 245.10, "持仓市值 ($)": 9804, "组合权重": "9.6%", "单票上限 (20%)": "✅ 达标 (48%)"},
-    ]
-    pos_df = pd.DataFrame(positions)
+    if cockpit is None or cockpit.positions.empty:
+        st.info("没有可展示的持仓：回放尚未完成。")
+    else:
+        st.markdown(f"##### 📑 最后交易日持仓 · {cockpit.last_session}")
+        shown = cockpit.positions.copy()
+        shown["组合权重"] = shown["组合权重"].map(lambda v: f"{v:+.1%}")
+        st.dataframe(shown, use_container_width=True, hide_index=True)
 
-    col_pos, col_layer = st.columns([3, 2])
-    with col_pos:
-        st.markdown("##### 📑 实时多空头头寸表")
-        st.dataframe(pos_df, use_container_width=True, hide_index=True)
-    
-    with col_layer:
         st.markdown("##### 🍰 Jensen Huang 5 层价值链风险暴露")
-        layer_summary = pd.DataFrame([
-            {"Layer": "L1 能源与算力中心", "Exposure": 0.0},
-            {"Layer": "L2 芯片与硬件系统", "Exposure": 9859.0},
-            {"Layer": "L3 网络与光互联", "Exposure": -10230.0},
-            {"Layer": "L4 云计算与基础模型", "Exposure": 23192.0},
-            {"Layer": "L5 行业 AI 软件应用", "Exposure": 0.0},
-        ])
         fig_bar = px.bar(
-            layer_summary,
+            cockpit.layer_exposure,
             x="Layer",
             y="Exposure",
             color="Exposure",
@@ -225,7 +321,7 @@ with tab_book:
         )
         fig_bar.update_layout(
             margin=dict(l=10, r=10, t=10, b=10),
-            height=280,
+            height=320,
             paper_bgcolor="rgba(0,0,0,0)",
             plot_bgcolor="rgba(0,0,0,0)",
             font=dict(color="#cbd5e1"),
@@ -234,111 +330,201 @@ with tab_book:
 
 # ── TAB 3: 调仓指令与风控熔断 ────────────────────────────────────────────────
 with tab_rebalance:
-    st.subheader("📋 下一交易日调仓指令与风控审计 (T+1 Execution Pipeline)")
-    st.markdown(
-        "根据 **Decide at T, Execute at T+1** 铁律，当前决策基于最新收盘数据演算，将于下一交易日以确定性算术执行："
-    )
-
-    col_orders, col_clamps = st.columns([3, 2])
-    with col_orders:
-        st.markdown("##### 🎯 拟生成报单票据 (Staged Orders)")
-        orders = [
-            {"代码": "NVDA", "操作": "BUY", "数量": 15, "预估成交价": "$201.20", "金额": "$3,018", "理由": "E分持续上升，高质量复利加仓"},
-            {"代码": "MSFT", "操作": "SELL", "数量": -8, "预估成交价": "$464.00", "金额": "$3,712", "理由": "触发单票 20% 硬上限削减 (G3 Gate)"},
-            {"代码": "LITE", "操作": "SELL_SHORT", "数量": -30, "预估成交价": "$68.50", "金额": "$2,055", "理由": "Froth Flag 触发，加深空头对冲"},
-        ]
-        st.dataframe(pd.DataFrame(orders), use_container_width=True, hide_index=True)
-
-    with col_clamps:
-        st.markdown("##### 🛡️ 主风控硬阈值触发日志 (Risk Clamps)")
-        clamps = [
-            {"Ticker": "MSFT", "Limit": "max_position_pct", "Before": "22.7%", "After": "20.0%", "Status": "Clamped"},
-            {"Ticker": "NVDA", "Limit": "max_position_pct", "Before": "19.6%", "After": "19.6%", "Status": "Passed"},
-            {"Ticker": "FUND", "Limit": "max_gross_exposure", "Before": "81.5%", "After": "81.5%", "Status": "Passed (<100%)"},
-        ]
-        st.dataframe(pd.DataFrame(clamps), use_container_width=True, hide_index=True)
+    st.subheader("📋 调仓指令与风控审计 (T+1 Execution Pipeline)")
+    if cockpit is None:
+        st.info("没有可展示的调仓记录：回放尚未完成。")
+    else:
+        st.markdown(
+            "根据 **Decide at T, Execute at T+1** 铁律，以下订单来自回放引擎的实际决策与撮合记录："
+        )
+        col_orders, col_clamps = st.columns([3, 2])
+        with col_orders:
+            st.markdown("##### 🎯 报单票据 (Orders)")
+            if cockpit.order_note:
+                st.caption(cockpit.order_note)
+            if cockpit.staged_orders.empty:
+                st.info("该交易日没有产生订单。")
+            else:
+                st.dataframe(cockpit.staged_orders, use_container_width=True, hide_index=True)
+        with col_clamps:
+            st.markdown("##### 🛡️ 主风控硬阈值触发日志 (Risk Clamps)")
+            if cockpit.clamps.empty:
+                st.info("该周期没有触发风控阈值。")
+            else:
+                st.dataframe(cockpit.clamps, use_container_width=True, hide_index=True)
+        for note in cockpit.notes:
+            st.caption(f"ℹ️ {note}")
 
 # ── TAB 4: 分析师与策略计分卡 ────────────────────────────────────────────────
 with tab_scorecard:
-    st.subheader("🏆 机构级分析师与策略量化计分卡 (Scorecard)")
-    st.caption("基于前瞻预测与实际价格反馈（无前视偏误），统计分析师胜率、赔率与 IC 信息系数：")
+    st.subheader("🏆 分析师与策略量化计分卡 (Scorecard)")
+    st.caption("基于回放期间的前瞻预测与实际价格反馈（无前视偏误）统计：")
 
-    col_analyst, col_strat = st.columns(2)
-    with col_analyst:
-        st.markdown("##### 🧑‍💼 分析师能力评估 (Analyst Performance)")
-        analysts_score = [
-            {"Analyst": "arf (量化因子)", "Views": 424, "Hit Rate": "53.1%", "Slugging": "1.11×", "IC": "-0.026", "Status": "Core Alpha"},
-            {"Analyst": "druckenmiller (宏观动量)", "Views": 120, "Hit Rate": "58.3%", "Slugging": "1.25×", "IC": "+0.045", "Status": "Top Performer"},
-            {"Analyst": "buffett (经济护城河)", "Views": 85, "Hit Rate": "62.0%", "Slugging": "0.95×", "IC": "+0.038", "Status": "Stable"},
-            {"Analyst": "munger (理性纠偏)", "Views": 85, "Hit Rate": "55.0%", "Slugging": "1.05×", "IC": "+0.012", "Status": "Veto Role"},
-        ]
-        st.dataframe(pd.DataFrame(analysts_score), use_container_width=True, hide_index=True)
+    scorecard = cockpit.scorecard if cockpit is not None else None
+    if scorecard is None:
+        st.info("计分卡不可用：回放尚未完成，或窗口内没有足够的决策记录。")
+    else:
+        col_analyst, col_strat = st.columns(2)
+        with col_analyst:
+            st.markdown("##### 🧑‍💼 分析师能力评估 (Analyst Performance)")
+            analysts_score = pd.DataFrame([
+                {
+                    "Analyst": row.name,
+                    "Views": row.n_views,
+                    "Hit Rate": row.hit_rate,
+                    "Slugging": row.slugging,
+                    "IC": row.ic_mean,
+                    "Dates": row.n_dates,
+                }
+                for row in scorecard.analysts
+            ])
+            st.dataframe(
+                analysts_score.style.format({
+                    "Hit Rate": "{:.1%}", "Slugging": "{:.2f}×", "IC": "{:+.3f}",
+                }, na_rep="—"),
+                use_container_width=True,
+                hide_index=True,
+            )
+        with col_strat:
+            st.markdown("##### 💼 策略 Pod 盈亏归因 (Strategy Attribution)")
+            strategy_score = pd.DataFrame([
+                {
+                    "Strategy": row.name,
+                    "Periods": row.n_periods,
+                    "P&L ($)": row.pnl,
+                    "Return": row.return_pct,
+                    "Win Rate": row.win_rate,
+                    "Max DD": row.max_drawdown_pct,
+                }
+                for row in scorecard.strategies
+            ])
+            st.dataframe(
+                strategy_score.style.format({
+                    "P&L ($)": "{:,.0f}", "Return": "{:+.2%}",
+                    "Win Rate": "{:.1%}", "Max DD": "{:.2%}",
+                }, na_rep="—"),
+                use_container_width=True,
+                hide_index=True,
+            )
 
-    with col_strat:
-        st.markdown("##### 💼 策略 Pod 盈亏归因 (Strategy Attribution)")
-        strat_score = [
-            {"Strategy": "arf-thematic", "Cycles": 14, "P&L ($)": "-1,619", "Return": "-1.61%", "Win Rate": "57.1%", "Max DD": "11.5%"},
-            {"Strategy": "fundamental-ls", "Cycles": 14, "P&L ($)": "+3,240", "Return": "+3.24%", "Win Rate": "64.3%", "Max DD": "4.2%"},
-            {"Strategy": "earnings-drift", "Cycles": 14, "P&L ($)": "+435", "Return": "+0.44%", "Win Rate": "50.0%", "Max DD": "3.1%"},
-        ]
-        st.dataframe(pd.DataFrame(strat_score), use_container_width=True, hide_index=True)
-
-# ── TAB 5: CIO 指挥中心与双云同步 ────────────────────────────────────────────
+# ── TAB 5: CIO 指挥中心与数据同步 ────────────────────────────────────────────
 with tab_control:
-    st.subheader("🎮 CIO 控制中心与混合云数据同步 (Control Center)")
-    st.markdown(
-        "在此直接调度本地终端引擎、双云基础设施与实盘模拟推进："
-    )
+    st.subheader("🎮 CIO 控制中心与数据同步 (Control Center)")
+    st.caption("生产环境的数据源是 GCS 中的权威 arf.db；Lighthouse 定时把中国腿推送进同一对象。")
+
+    st.session_state.setdefault("cio_halted", False)
+    halted = bool(st.session_state["cio_halted"])
+
+    if halted:
+        st.error("🛑 **本会话已冻结**：驾驶舱操作已锁定。解除后需重新运行回放。")
+    else:
+        st.success("🟢 **ACTIVE NORMAL**：回放只读运行，未发现挂起风控违规。")
+
+    try:
+        freshness = data.load_data_freshness()
+    except Exception as exc:  # noqa: BLE001
+        freshness = {"legs": {}, "runs": {}}
+        st.warning(f"无法读取数据新鲜度：{exc}")
+
+    from arf.cloud_sync import SyncResult, gcs_blob_info, sync_dual_cloud
+
+    @st.cache_data(ttl=300, show_spinner=False)
+    def _blob_info() -> dict[str, object]:
+        return gcs_blob_info()
 
     act_col1, act_col2, act_col3 = st.columns(3)
-    
+
     with act_col1:
-        st.markdown("#### ☁️ 1. 双云数据汇聚 (Dual-Cloud Sync)")
-        st.caption("从腾讯云 Lighthouse (中国 A 股/筹码) 与 Google Cloud (全网快照) 同步至本地 DuckDB。")
-        if st.button("🔄 一键同步双云数据", use_container_width=True):
-            with st.spinner("正在连接 Lighthouse 与 GCS 同步最新数据..."):
-                try:
-                    res = sync_dual_cloud("all")
-                    st.success(f"同步成功！GCS: {res.get('gcs')}, Lighthouse: {res.get('lighthouse')}")
-                except Exception as e:
-                    st.error(f"同步失败: {e}")
+        st.markdown("#### ☁️ 1. 刷新权威数据")
+        st.caption("GCS 模式：丢弃缓存并重新下载权威 arf.db。")
+        if st.button("🔄 刷新数据", use_container_width=True, disabled=halted):
+            with st.spinner("正在刷新…"):
+                report: dict[str, SyncResult] = {}
+                if os.getenv("DATA_SOURCE", "local").lower() == "gcs":
+                    try:
+                        data.refresh_data()
+                        data.get_conn()  # forces a fresh download
+                        report["gcs"] = SyncResult(
+                            "gcs", "ok", "re-downloaded the authoritative GCS database"
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        report["gcs"] = SyncResult("gcs", "error", str(exc))
+                    report["lighthouse"] = SyncResult(
+                        "lighthouse",
+                        "skipped",
+                        "Lighthouse publishes the China leg to GCS on its systemd timer.",
+                    )
+                else:
+                    report = sync_dual_cloud(
+                        data.get_db_path(), connection=data.get_conn()
+                    )
+                    data.refresh_data()
+            st.session_state["cio_sync_report"] = {
+                name: (result.status, result.message, result.rows)
+                for name, result in report.items()
+            }
+            st.rerun()
+
+        for name, (status, message, rows) in st.session_state.get("cio_sync_report", {}).items():
+            if status == "error":
+                st.error(f"{name}: {message}")
+            elif status == "skipped":
+                st.info(f"{name}: {message}")
+            else:
+                suffix = f" · {rows}" if rows else ""
+                st.success(f"{name}: {message}{suffix}")
+
+        blob = _blob_info()
+        if blob:
+            st.caption(
+                f"GCS: gs://{blob.get('bucket')}/{blob.get('object')} · "
+                f"{blob.get('size', 0) / 1e6:.1f} MB · updated {blob.get('updated')}"
+            )
+        legs = freshness.get("legs", {})
+        if legs:
+            st.caption(
+                "最新快照 · " + " · ".join(f"{leg}: {latest}" for leg, latest in legs.items())
+            )
+        runs = freshness.get("runs", {})
+        if runs:
+            st.caption(
+                "最近运行 · " + " · ".join(
+                    f"{source}: {started} ({status})"
+                    for source, (started, status) in runs.items()
+                )
+            )
 
     with act_col2:
-        st.markdown("#### ⚡ 2. 模拟实盘推进 (Advance Paper Tick)")
-        st.caption("推进一个交易日，完成订单撮合并向哈希链式账本写入不可篡改记录。")
-        if st.button("⚡ 推进下一个交易日 (Tick)", use_container_width=True):
-            with st.spinner("正在推进交易日并校验证券账本..."):
-                st.success("✅ 交易日执行完毕！新增 1 条不可篡改 SessionRecord，NAV 更新至 $102,046。")
+        st.markdown("#### ⚡ 2. 模拟实盘状态")
+        st.caption("本环境未部署持久化 paper fund；驾驶舱展示的是只读回放。")
+        st.info(
+            "Paper tick 需要 `aihf paper create` 部署的基金目录。"
+            "生产容器没有持久磁盘，因此这里不伪造推进结果。"
+        )
 
     with act_col3:
-        st.markdown("#### 📈 3. 全局历史回测 (Run Backtest)")
-        st.caption("在本地 Mac 运行 36 只美股 AI 核心标的全历史模拟，生成完整收益曲线。")
-        if st.button("🚀 启动全历史回测", use_container_width=True):
-            with st.spinner("本地 Apple Silicon 高速执行中 (预计 10 秒)..."):
-                try:
-                    client = ARFDataClient()
-                    fund = Fund(spec)
-                    test_universe = ["NVDA", "AMD", "MSFT", "AVGO", "LITE", "MRVL"]
-                    b_res = backtest_fund(fund, "2026-06-01", "2026-08-01", client, test_universe)
-                    st.success(f"回测完成！总收益: {b_res.metrics.total_return_pct:+.2%} vs SPY {b_res.metrics.benchmark_return_pct:+.2%}")
-                    
-                    # Plot equity curve
-                    chart_df = pd.DataFrame({
-                        "Date": pd.to_datetime(b_res.dates),
-                        "ARF Fund NAV": b_res.nav,
-                        "SPY Benchmark": b_res.benchmark_nav,
-                    })
-                    fig_curve = px.line(chart_df, x="Date", y=["ARF Fund NAV", "SPY Benchmark"], title="NAV 净值增长对比")
-                    fig_curve.update_layout(height=350, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font=dict(color="#cbd5e1"))
-                    st.plotly_chart(fig_curve, use_container_width=True)
-                except Exception as e:
-                    st.error(f"回测执行错误: {e}")
+        st.markdown("#### 📈 3. 重新回放")
+        st.caption(f"窗口 {start_iso} → {end_iso}，{len(universe)} 只美股 AI 标的。")
+        if st.button("🚀 重新运行回放", use_container_width=True, disabled=halted):
+            st.cache_data.clear()
+            st.rerun()
 
     st.divider()
-    st.markdown("#### 🛡️ 风控硬熔断开关 (Fund Kill-Switch)")
-    st.caption("遇极端黑天鹅或单日净值回撤超过 5% 时，立即锁定当前账本，拒绝任何新订单撮合。")
+    st.markdown("#### 🛡️ 风控冻结开关 (Session Kill-Switch)")
+    st.caption(
+        "本环境没有持久化账本，此开关只冻结当前浏览器会话中的驾驶舱操作；"
+        "它不会改写 GCS 中的数据，也不会阻止其他会话。"
+    )
     c_halt1, c_halt2 = st.columns([1, 4])
     with c_halt1:
-        st.button("🛑 紧急熔断冻结 (Halt)", type="primary", use_container_width=True)
+        if halted:
+            if st.button("✅ 解除冻结", use_container_width=True):
+                st.session_state["cio_halted"] = False
+                st.rerun()
+        else:
+            if st.button("🛑 冻结本会话", type="primary", use_container_width=True):
+                st.session_state["cio_halted"] = True
+                st.rerun()
     with c_halt2:
-        st.caption("当前运行状态：🟢 **ACTIVE NORMAL** (无挂起风控违规，账本校验通过)")
+        state_text = "🛑 **SESSION FROZEN**" if halted else "🟢 **ACTIVE NORMAL**"
+        st.caption(f"当前会话状态：{state_text}")

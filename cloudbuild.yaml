@@ -29,8 +29,11 @@ steps:
       - --min-instances=0
       - --max-instances=1
       - --allow-unauthenticated
-      - --memory=512Mi
+      # The CIO page imports pandas/plotly/ai-hedge-fund and runs an in-memory
+      # replay; 512Mi left too little headroom for concurrent requests.
+      - --memory=1Gi
       - --cpu=1
+      - --timeout=900
       - --set-env-vars=DATA_SOURCE=gcs,GCS_BUCKET=${_GCS_BUCKET},GCS_DB_OBJECT=arf.db,GCP_PROJECT=$PROJECT_ID,GCP_REGION=${_REGION},PIPELINE_JOB=arf-pipeline
       - --update-secrets=GEMINI_API_KEY=gemini-api-key:latest
 

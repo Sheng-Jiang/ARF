@@ -21,7 +21,9 @@ dependencies = [
     "beautifulsoup4>=4.12",
     "jinja2>=3.1",
     "lxml>=5.2",
-    "pyarrow>=14.0",
+    # ai-hedge-fund pins numpy <2.0; pyarrow >=19 (Linux wheels) requires
+    # NumPy 2 and fails at import. 18.x is the last NumPy-1.x-compatible line.
+    "pyarrow>=14.0,<19",
     "akshare>=1.16.81",
     "pysocks>=1.7.1",
     "backtrader==1.9.78.123",
@@ -41,6 +43,10 @@ webapp = [
     "pyecharts>=2.0.8",
     "streamlit-echarts>=0.4.0",
     "socksio>=1.0",
+    # AI CIO cockpit: the ARF alpha model, replay engine and scorecard.
+    # Pinned to the commit on feat/arf-production-integration; move the pin
+    # to a main commit once that PR is merged.
+    "aihf @ git+https://github.com/Sheng-Jiang/ai-hedge-fund.git@501e432bd0c944f74f50bbf03abe68b0772dd54a",
 ]
 cloud = [
     "google-cloud-storage>=2.16",
