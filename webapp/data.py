@@ -91,7 +91,148 @@ def load_thermometer_series() -> pd.DataFrame:
 
 
 def refresh_data() -> None:
+    """Drop the cached connection so the next query re-reads the source.
+
+    In GCS mode the active path is a downloaded temp file; it must be cleared
+    too, otherwise `get_db_path()` keeps handing out the stale download.
+    """
+    global _ACTIVE_DB_PATH
     _open_conn.clear()
+    _ACTIVE_DB_PATH = None
+
+
+def get_conn() -> duckdb.DuckDBPyConnection:
+    """The process-wide connection.
+
+    Pages that need to hand data to another component (the CIO replay engine)
+    must use this rather than opening a second connection: DuckDB refuses two
+    connections to the same file with different configurations.
+    """
+    return _open_conn()
+
+
+def load_snapshot_history() -> pd.DataFrame:
+    """Every snapshot revision, for point-in-time filtering by the ARF model.
+
+    The `snapshots` view intentionally hides `revision`/`fetched_at`; a
+    backtest needs them to avoid reading a correction made after its date.
+    """
+    try:
+        return _open_conn().execute(
+            """
+            SELECT ticker, as_of_date, revision, fetched_at, leg, arf, decile,
+                   froth_flag, e_score, v_score, implied_growth_gap, roe, ps_ratio
+            FROM snapshot_revisions
+            """
+        ).fetchdf()
+    except duckdb.Error:
+        return _open_conn().execute(
+            """
+            SELECT ticker, as_of_date, NULL::INTEGER AS revision,
+                   NULL::TIMESTAMP AS fetched_at, leg, arf, decile, froth_flag,
+                   e_score, v_score, implied_growth_gap, roe, ps_ratio
+            FROM snapshots
+            """
+        ).fetchdf()
+
+
+def load_price_history(
+    tickers: list[str] | tuple[str, ...], start: date, end: date
+) -> dict[str, pd.DataFrame]:
+    """Daily OHLCV for *tickers* in [start, end], keyed by ticker.
+
+    One query for the whole universe: a replay asks for a rolling window on
+    every session, and per-session queries would dominate its runtime.
+    """
+    if not tickers:
+        return {}
+    placeholders = ",".join("?" for _ in tickers)
+    frame = _open_conn().execute(
+        f"""
+        SELECT ticker, date, open, high, low, close, volume
+        FROM daily_prices
+        WHERE ticker IN ({placeholders}) AND date >= ? AND date <= ?
+        ORDER BY ticker, date
+        """,
+        [*tickers, start, end],
+    ).fetchdf()
+    return {ticker: group.reset_index(drop=True) for ticker, group in frame.groupby("ticker")}
+
+
+def load_regime_stats(as_of: date) -> dict[str, float | int | date | None]:
+    """Bubble-thermometer stats for the latest core-cohort snapshot <= as_of."""
+    from arf.db import CORE_ONLY
+
+    row = _open_conn().execute(
+        f"""
+        SELECT COUNT(*)                                   AS total_scored,
+               COUNT(*) FILTER (WHERE froth_flag)         AS froth_count,
+               MEDIAN(implied_growth_gap)                 AS median_gap,
+               AVG(arf)                                   AS avg_arf,
+               MAX(as_of_date)                            AS snapshot_date
+        FROM snapshots
+        WHERE as_of_date = (
+                  SELECT MAX(as_of_date) FROM snapshots
+                  WHERE as_of_date <= ? AND arf IS NOT NULL
+              )
+          AND {CORE_ONLY}
+        """,
+        [as_of],
+    ).fetchone()
+    return {
+        "total_scored": int(row[0] or 0),
+        "froth_count": int(row[1] or 0),
+        "median_gap": float(row[2]) if row[2] is not None else None,
+        "avg_arf": float(row[3]) if row[3] is not None else None,
+        "snapshot_date": row[4],
+    }
+
+
+def load_data_freshness() -> dict[str, object]:
+    """Latest snapshot per leg and latest pipeline run per trigger source."""
+    conn = _open_conn()
+    legs = {
+        leg: latest
+        for leg, latest in conn.execute(
+            "SELECT leg, MAX(as_of_date) FROM snapshots GROUP BY leg ORDER BY leg"
+        ).fetchall()
+    }
+    runs = {
+        source or "unknown": (started, status)
+        for source, started, status in conn.execute(
+            """
+            SELECT trigger_source, MAX(started_at), arg_max(status, started_at)
+            FROM runs GROUP BY trigger_source
+            """
+        ).fetchall()
+    }
+    return {"legs": legs, "runs": runs}
+
+
+def latest_scored_date(as_of: date, leg: str = "US") -> date | None:
+    """The newest snapshot on or before *as_of* whose scores are computed.
+
+    A partially written snapshot (prices/fundamentals fetched, scoring not yet
+    run) has rows but NULL ARF; replaying it would silently produce a flat,
+    all-neutral book. Filter by *leg* because the two legs complete scoring at
+    different times — a China-only score is useless to a US replay.
+    """
+    row = _open_conn().execute(
+        """
+        SELECT MAX(as_of_date) FROM snapshots
+        WHERE as_of_date <= ? AND leg = ? AND arf IS NOT NULL
+        """,
+        [as_of, leg],
+    ).fetchone()
+    return row[0] if row else None
+
+
+def db_signature() -> str:
+    """A cheap fingerprint used as part of replay cache keys."""
+    row = _open_conn().execute(
+        "SELECT MAX(as_of_date), COUNT(*) FROM snapshots"
+    ).fetchone()
+    return f"{row[0]}:{row[1]}"
 
 
 def load_runs(limit: int = 20) -> pd.DataFrame:
