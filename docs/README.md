@@ -6,6 +6,7 @@ This directory houses the authoritative architecture records, product requiremen
 
 ## 1. Architecture Decision Records (ADRs)
 * **[ADR-0001: Hybrid-Repo Single-Container Architecture for AI CIO Integration](file:///Users/sheng/Developer/ARF/docs/ADR_0001_HYBRID_REPO_SINGLE_CONTAINER_INTEGRATION.md)**: Architectural design detailing how `ARF` and `ai-hedge-fund` are built into a single Google Cloud Run container image using Git-pinned dependency resolution and an in-memory runtime data adapter.
+* **[ADR-001: Lightweight Code-First Ontology & Deterministic Domain Modeling for AI Agents](file:///Users/sheng/Developer/ARF/docs/ADR-001-Next-Gen-Modeling-and-Lightweight-Ontology-for-Agents.md)**: Cross-repo architecture standard establishing the 4-element kinetic ontology, deterministic isolation, and lightweight tech stack across `BidAgent`, `Architect`, and `ARF`.
 
 ---
 
