@@ -1,39 +1,44 @@
-# ARF Digital Investment Analyst & Autonomous Research Partner
-## Product Vision, Multi-Agent Architecture & Implementation Roadmap
+# ARF Digital Investment Analyst & Autonomous AI-CIO
+## Product Vision, Multi-Agent Architecture, Value Chain Transmission & The Continuous Improvement Loop
 
-**Date:** 2026-10-21  
-**Status:** Approved Strategic Vision & Architecture Specification  
-**Target:** `ARF` (`arf/agent/`, `arf/scoring.py`, `arf/db.py`, `webapp/`)  
-**Context:** Autonomous Buy-Side AI Analyst, Digital Investment Employee, Supply Chain Discovery Engine  
-**Architectural Pedigree:** Adapted from the Enterprise AI Project Manager Governance Platform (`WoW` / `wow-ai-pm`)
+**Date:** 2026-10-28  
+**Status:** Approved Strategic Vision & System Architecture Specification  
+**Target:** `ARF` / `AI-CIO` (`arf/agent/`, `arf/scoring.py`, `arf/db.py`, `arf/cio.py`, `arf/value_chain.py`, `webapp/`)  
+**Context:** Autonomous Buy-Side AI-CIO, Digital Investment Colleague, 5-Layer Supply Chain Discovery Engine, Causal Financial Modeling  
+**Architectural Pedigree:** Adapted from the Enterprise AI Project Manager Governance Platform (`WoW` / `wow-ai-pm`) & `ADR-001` (Code-First Operational Ontology)
 
 ---
 
 ## 1. Executive Summary: The Paradigm Shift
 
-Modern quantitative and equity research tools remain fundamentally **passive and reactive**: they store historical snapshots, compute formulaic scores, render static charts, and wait for human analysts to run manual screens or query conversational chatbots.
+Modern quantitative and equity research tools remain fundamentally **passive and reactive**: they store historical snapshots, compute formulaic scores, render static charts, and wait for human analysts to run manual screens or query conversational chatbots. 
 
-This document establishes the strategic vision and architectural blueprint to transform **ARF (AI Relevance Factor)** from a passive equity screening dashboard into an autonomous, proactive **Digital Investment Partner & Research Analyst (Digital Employee)**.
+Furthermore, generic AI chat interfaces analyze companies as **isolated corporate silos**—generating a standalone memo on Nvidia, an isolated note on Microsoft, or a disconnected report on Innolight (300308.SZ). In doing so, they miss the fundamental reality of modern industrial revolutions:
+
+> **Companies in the AI economy do not exist in isolation. They are interconnected nodes in a closed, physical and financial circuit where one company's capital expenditure is another company's top-line revenue, and where upstream supply bottlenecks govern downstream software returns.**
+
+This document establishes the strategic vision and architectural blueprint to transform **ARF (AI Relevance Factor)** into an autonomous, proactive **Digital Investment Partner & Research Analyst (Digital Employee / AI-CIO)**.
 
 ```
-       CONVENTIONAL ARF (Static)                    AUTONOMOUS ARF (Digital Colleague)
+       CONVENTIONAL ARF (Static)                    AUTONOMOUS ARF (Digital AI-CIO)
 ┌──────────────────────────────────────┐     ┌──────────────────────────────────────────────────┐
-│ • Weekly batch pipeline              │     │ • 24/7 autonomous market cadence                 │
+│ • Weekly batch pipeline              │     │ • 24/7 autonomous market cadence & telemetry     │
 │ • Static 73-stock coverage universe  │     │ • Open-World AI supply chain exploration         │
 │ • Formulaic E and V factor percentiles│ ──▶ │ • Multi-agent Bull vs. Bear adversarial research │
 │ • Reactive Streamlit dashboards      │     │ • G1–G4 outside-model deterministic risk gates   │
-│ • Manual report exports              │     │ • Living "Opportunity Alpha" state lifecycle     │
+│ • Isolated single-stock analysis     │     │ • 5-Layer Causal Value Chain Transmission Engine │
+│ • Manual report exports              │     │ • Closed-loop backtesting & self-improving loop  │
 └──────────────────────────────────────┘     │ • Grounded NotebookLM citations & audio debriefs │
                                              └──────────────────────────────────────────────────┘
 ```
 
-By borrowing the battle-tested multi-agent supervisory patterns from **WoW** (`wow-ai-pm`), ARF separates **macro supervisory orchestration** from **specialist task execution**, enforces **outside-model mechanical risk gates**, and tracks ideas through a formal **living state machine**.
+By borrowing the battle-tested multi-agent supervisory patterns from **WoW** (`wow-ai-pm`) and the domain modeling standards of [`ADR-001`](file:///Users/sheng/Developer/ARF/docs/ADR-001-Next-Gen-Modeling-and-Lightweight-Ontology-for-Agents.md), ARF separates **macro supervisory orchestration** from **specialist task execution**, enforces **outside-model mechanical risk gates**, and tracks ideas through a formal **living state machine**.
 
 ---
 
 ## 2. Core Concepts: The Investment Meta-Model
 
-Following the foundational ontology of the WoW Governance Engine, the Digital Investment Analyst is governed by four core concepts:
+Following the foundational ontology of the WoW Governance Engine, the Digital Investment Analyst is governed by five core pillars:
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────────────────────┐
@@ -41,12 +46,13 @@ Following the foundational ontology of the WoW Governance Engine, the Digital In
 ├──────────────────────────┬───────────────────────────┬───────────────────────────────────────┤
 │ 1. Opportunity Alpha     │ 2. Dual-Layer Execution   │ 3. Deterministic G1–G4 Governance     │
 │    Living state machine  │    Supervisor orchestrator│    Outside-model financial guardrails │
-│    tracking idea from    │    vs. sandboxed worker   │    where LLM cannot talk itself       │
+│    tracking idea from    │    vs. sandboxed worker   │    where LLMs cannot talk themselves  │
 │    discovery to harvest  │    subagent specialists   │    past capital constraints           │
-├──────────────────────────┴───────────────────────────┴───────────────────────────────────────┤
-│ 4. Investment Decision Record (IDR) & Grounded Provenance (NotebookLM)                        │
-│    5-step causal decision audit trail with clickable source pills for every fact and claim   │
-└──────────────────────────────────────────────────────────────────────────────────────────────┘
+├──────────────────────────┼───────────────────────────┴───────────────────────────────────────┤
+│ 4. 5-Layer Causal Mesh   │ 5. Continuous Improvement Loop (The Flywheel)                     │
+│    Connecting dots via   │    Closed-loop OODA error attribution (Graph Topology, BoM Share, │
+│    Leontief & CapEx flow │    Macro Shock) driving automated edge re-calibration             │
+└──────────────────────────┴───────────────────────────────────────────────────────────────────┘
 ```
 
 ### 2.1 The "Opportunity Alpha" Lifecycle
@@ -55,14 +61,24 @@ In WoW, an **Alpha** is an entity whose progress is tracked across ordered, veri
 
 ```mermaid
 flowchart LR
-    Discovered["1. Discovered\n(Open-World Radar)"] --> Qualified["2. Quant Qualified\n(ARF & Factor Gates)"]
-    Qualified --> Deliberating["3. Adversarial Review\n(Bull vs. Bear Debate)"]
-    Deliberating --> Formulated["4. Thesis Formulated\n(Entry Zone & Invalidation)"]
-    Formulated --> CommitteeGate{"5. Committee Gate\n(Human PM Interrupt)"}
-    CommitteeGate -- Approved --> Active["6. Active Watch / Paper\n(Continuous Sentinel)"]
+    Discovered["1. Discovered<br/>(Open-World Radar)"] --> Qualified["2. Quant Qualified<br/>(ARF & Factor Gates)"]
+    Qualified --> Deliberating["3. Adversarial Review<br/>(Bull vs. Bear Debate)"]
+    Deliberating --> Formulated["4. Thesis Formulated<br/>(Entry Zone & Invalidation)"]
+    Formulated --> CommitteeGate{"5. Committee Gate<br/>(Human PM Interrupt)"}
+    CommitteeGate -- Approved --> Active["6. Active Watch / Paper<br/>(Continuous Sentinel)"]
     CommitteeGate -- Rejected --> Archived["Archived / Monitored"]
-    Active --> Harvested["7a. Harvested\n(Target Multiples Met)"]
-    Active --> Invalidated["7b. Invalidated\n(Stop Loss / Moat Broken)"]
+    Active --> Harvested["7a. Harvested<br/>(Target Multiples Met)"]
+    Active --> Invalidated["7b. Invalidated<br/>(Stop Loss / Moat Broken)"]
+
+    style Discovered fill:#f0f9ff,stroke:#0288d1,stroke-width:2px,color:#0f172a
+    style Qualified fill:#e0f2fe,stroke:#0369a1,stroke-width:2px,color:#0f172a
+    style Deliberating fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#0f172a
+    style Formulated fill:#f3e8ff,stroke:#7e22ce,stroke-width:2px,color:#0f172a
+    style CommitteeGate fill:#ffedd5,stroke:#ea580c,stroke-width:2px,color:#0f172a
+    style Active fill:#dcfce7,stroke:#15803d,stroke-width:2px,color:#0f172a
+    style Archived fill:#f1f5f9,stroke:#64748b,stroke-width:2px,color:#0f172a
+    style Harvested fill:#bbf7d0,stroke:#16a34a,stroke-width:2px,color:#0f172a
+    style Invalidated fill:#fee2e2,stroke:#dc2626,stroke-width:2px,color:#0f172a
 ```
 
 | Lifecycle State | Description | Transition Gate |
@@ -77,7 +93,66 @@ flowchart LR
 
 ---
 
-## 3. Dual-Layer Multi-Agent Architecture
+## 3. The 5-Layer Value Chain Transmission Engine ("Connecting the Dots")
+
+As established in [`docs/AI_CIO_CONNECTING_THE_DOTS_FINANCIAL_MODELING.md`](file:///Users/sheng/Developer/ARF/docs/AI_CIO_CONNECTING_THE_DOTS_FINANCIAL_MODELING.md), our 73-stock coverage universe across the US and China legs (`config/universe.yaml`, `config/value_chain.yaml`) is modeled as an integrated network:
+
+```mermaid
+flowchart TD
+    subgraph L3["Layer 3: Cloud Hyperscalers (CapEx Outflow)"]
+        MSFT["MSFT / GOOGL / META / AMZN<br/>Combined CapEx: $250B+"]
+    end
+
+    subgraph L2["Layer 2: Compute Engines & Silicon"]
+        NVDA["NVIDIA (GPUs)<br/>Gross Margin: ~75%"]
+        AVGO["Broadcom (Custom Silicon ASICs)"]
+    end
+
+    subgraph Chokepoints["Layer 2: Foundry & Lithography Chokepoints"]
+        TSM["TSMC (CoWoS / Advanced Packaging)"]
+        ASML["ASML (High-NA EUV)"]
+    end
+
+    subgraph Optical["Layer 3: Optical Interconnect & A-Share Leg"]
+        Innolight["Innolight 300308.SZ / Eoptolink 300502.SZ<br/>800G / 1.6T Optical Transceivers"]
+    end
+
+    subgraph L1["Layer 1: Physical Energy & Grid Infrastructure"]
+        Power["NextEra / Siemens Energy / Vertiv<br/>Substations, Transformers, Liquid Cooling"]
+    end
+
+    MSFT -->|"1. CapEx Allocation"| NVDA
+    MSFT -->|"Custom Silicon Budgets"| AVGO
+    NVDA -->|"2. Wafer Allocation"| TSM
+    TSM -->|"3. Tool Orders"| ASML
+    NVDA & AVGO -->|"4. Optical Interconnect"| Innolight
+    MSFT & NVDA -->|"5. Grid & Cooling Drawdown"| Power
+
+    style L3 fill:#e0f2fe,stroke:#0288d1,stroke-width:2px,color:#0f172a
+    style L2 fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#0f172a
+    style Chokepoints fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#0f172a
+    style Optical fill:#fce7f3,stroke:#db2777,stroke-width:2px,color:#0f172a
+    style L1 fill:#f3e8ff,stroke:#9333ea,stroke-width:2px,color:#0f172a
+
+    style MSFT fill:#ffffff,stroke:#0288d1,stroke-width:2px,color:#0f172a
+    style NVDA fill:#ffffff,stroke:#16a34a,stroke-width:2px,color:#0f172a
+    style AVGO fill:#ffffff,stroke:#16a34a,stroke-width:2px,color:#0f172a
+    style TSM fill:#ffffff,stroke:#d97706,stroke-width:2px,color:#0f172a
+    style ASML fill:#ffffff,stroke:#d97706,stroke-width:2px,color:#0f172a
+    style Innolight fill:#ffffff,stroke:#db2777,stroke-width:2px,color:#0f172a
+    style Power fill:#ffffff,stroke:#9333ea,stroke-width:2px,color:#0f172a
+```
+
+### 3.1 Four Core Financial Transmission Mechanisms
+1. **The CapEx-to-Revenue Closed Circuit:** Enforces cash flow conservation:
+   $$\sum \text{CapEx}_{\text{Hyperscalers (L3)}} \times \alpha_{\text{AI Infrastructure \%}} \times \beta_{\text{BoM Component \%}} \equiv \text{Revenue}_{\text{NVDA / AVGO (L2)}}$$
+2. **Margin Transfer & Pricing Power Squeeze:** Tracks whether cost inflation (wafer price hikes, electricity tariff increases) is absorbed or passed downstream. If enterprise software seats (L5) cannot monetize AI at scale, margins become compressed in Layer 3, while monopolistic Layer 2 silicon and Layer 1 utilities capture economic rents.
+3. **Cross-Border Dual Value Chain Arbitrage:** Models the systemic interdependence between the US stack (Meta, Google, Nvidia) and the China stack (Innolight optical transceivers, SMIC foundry, Huawei/Cambricon domestic accelerators) and Europe's physical monopolies (ASML, Siemens Energy).
+4. **Reverse-DCF Growth Harmonization ($g^*$ Consistency):** Compares market-implied growth rates ($g^*$) across layers. If upstream chipmakers imply 38% CAGR while downstream customers imply only 12% CAGR, the model flags systemic valuation froth.
+
+---
+
+## 4. Dual-Layer Multi-Agent Architecture
 
 WoW established the critical distinction between **Supervisor (Governor)** and **Work Package Owner (Specialist Worker)**. Applying this to quantitative equity research:
 
@@ -101,59 +176,25 @@ WoW established the critical distinction between **Supervisor (Governor)** and *
 └────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 3.1 The LangGraph Supervisory StateGraph
-
-The Investment Supervisor runs as an autonomous, cyclic directed graph with durable PostgreSQL / DuckDB checkpointing:
-
-```mermaid
-flowchart TD
-    START([Market Cadence Trigger]) --> Scan[1. scan_market_anomalies]
-    Scan --> CheckDrift[2. evaluate_portfolio_tolerances]
-    CheckDrift --> DriftDecision{Anomalies or Drift Detected?}
-    
-    DriftDecision -- No --> Journal[7. record_market_journal]
-    Journal --> END([Cycle Complete])
-    
-    DriftDecision -- Yes --> DispatchWorkers[3. dispatch_specialist_workers]
-    DispatchWorkers --> Synthesize[4. synthesize_investment_thesis]
-    Synthesize --> RiskGate{5. mechanical_risk_gate (G3)}
-    
-    RiskGate -- Rejected / Froth --> AlertFroth[8. emit_risk_warning]
-    AlertFroth --> Journal
-    
-    RiskGate -- Passed PM Band --> StageCandidate[9. stage_to_candidate_pool]
-    StageCandidate --> Journal
-    
-    RiskGate -- High-Conviction Core Admission --> HumanInterrupt[6. human_pm_interrupt (CIO Review)]
-    HumanInterrupt -- PM Approves --> PromoteUniverse[10. promote_to_portfolio]
-    HumanInterrupt -- PM Rejects --> RefineThesis[11. archive_or_rework]
-    
-    PromoteUniverse --> Journal
-    RefineThesis --> Journal
-```
-
-### 3.2 Specialist Worker Agents (Dispatched Subprocesses)
-
-Instead of a single monolithic prompt, task execution is distributed to dedicated specialist worker agents:
-
+### 4.1 Specialist Worker Agents
 1. **Supply Chain Traversal Agent:**
-   - *Mission:* Maps customer-supplier dependencies across Jensen Huang's 5 layers.
+   - *Mission:* Maps customer-supplier dependencies across the 5 layers.
    - *Tools:* Google Search, SEC EDGAR 10-K Item 1 parser, CapEx tracker.
-   - *Output:* Verified key customers, estimated AI revenue percentage (pure-play %), and single-customer concentration metrics.
+   - *Output:* Verified key customers, estimated AI revenue percentage (pure-play %), and customer concentration weights ($w_{ij}$).
 2. **Forensic Quant & Valuation Agent:**
    - *Mission:* Conducts rigorous financial audits using local reporting currencies.
-   - *Tools:* Reverse-DCF solver (`implied_growth`), 扣非 (after non-recurring) ROE calculation, FX normalization (matching trading currency to reporting currency to avoid FCF yield distortion).
+   - *Tools:* Reverse-DCF solver (`implied_growth`), 扣非 (after non-recurring) ROE calculation, FX normalization.
    - *Output:* Implied growth rate $g^*$, growth gap vs consensus, historical EV/Sales percentile.
 3. **Red-Team Short-Seller Agent:**
    - *Mission:* Adversarially challenges every proposed bull thesis.
    - *Tools:* Financial statement anomaly scanner, ASIC substitution risk analyzer, margin compression monitor.
-   - *Output:* Specific invalidation criteria (e.g. *"Gross margin drops below 55%"*, *"Loss of tier-1 optical transceiver allocation"*), bear-case probability, and downside valuation floor.
+   - *Output:* Verifiable invalidation criteria (e.g. *"Gross margin drops below 55%"*, *"Loss of tier-1 optical transceiver allocation"*), bear-case probability, and downside valuation floor.
 
 ---
 
-## 4. Deterministic Governance Guarantees (G1–G4) for Capital
+## 5. Deterministic Governance Guarantees (G1–G4) for Capital
 
-In generative AI, hallucinations in creative writing are harmless; in asset management, hallucinations and narrative FOMO cause permanent capital impairment. ARF implements WoW's **Governance Guarantees**:
+In generative AI, hallucinations in creative writing are harmless; in asset management, hallucinations cause catastrophic capital impairment. ARF implements WoW's **Governance Guarantees**:
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
@@ -173,8 +214,7 @@ In generative AI, hallucinations in creative writing are harmless; in asset mana
 └────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 4.1 The G3 Mechanical Risk Gate (Code-Level Predicate)
-
+### 5.1 The G3 Mechanical Risk Gate (Code-Level Predicate)
 ```python
 def mechanical_risk_gate(profile: dict[str, Any], thesis: dict[str, Any]) -> GovernanceResult:
     """Deterministic outside-model risk gate. Executes independently of LLM reasoning."""
@@ -208,9 +248,94 @@ def mechanical_risk_gate(profile: dict[str, Any], thesis: dict[str, Any]) -> Gov
 
 ---
 
-## 5. The Investment Decision Record (IDR)
+## 6. How We Verify the Model and Continuously Improve It: "The Loop"
 
-Mirroring WoW's **Agent Decision Record (ADR)**, every thesis produced by the Digital Analyst generates a structured, immutable **Investment Decision Record (IDR)** ensuring 100% causal explainability:
+A quantitative investment architecture is only as good as its verification rigor and adaptation feedback. We reject black-box statistical fitting in favor of a **deterministic, causal verification framework** paired with a **closed-loop active learning flywheel**.
+
+```mermaid
+flowchart TD
+    subgraph Flywheel["The Continuous OODA Learning Loop"]
+        O1["1. OBSERVE & INGEST<br/>(10-K/Q, Transcripts, Market Telemetry, CYQ)"] --> O2["2. ORIENT & PREDICT<br/>(Leontief Flow-Through, E/V Scores, g*, Opportunity Alphas)"]
+        O2 --> O3["3. DECIDE & EXECUTE<br/>(G1–G4 Risk Gates, Human-in-the-Loop, Mandate Replay)"]
+        O3 --> O4["4. AUDIT & MEASURE<br/>(Quarterly Earnings Realization vs Forecast)"]
+        O4 --> O5["5. ATTRIBUTE ERROR<br/>(Topology vs BoM Share vs Macro Shock)"]
+        O5 --> O6["6. LEARN & RE-CALIBRATE<br/>(Edge Weights w_ij, WACC, Agent Prompts)"]
+        O6 --> O1
+    end
+
+    style Flywheel fill:#f8fafc,stroke:#334155,stroke-width:2px,color:#0f172a
+    style O1 fill:#e0f2fe,stroke:#0288d1,stroke-width:2px,color:#0f172a
+    style O2 fill:#ede9fe,stroke:#6366f1,stroke-width:2px,color:#0f172a
+    style O3 fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#0f172a
+    style O4 fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#0f172a
+    style O5 fill:#fee2e2,stroke:#dc2626,stroke-width:2px,color:#0f172a
+    style O6 fill:#f3e8ff,stroke:#9333ea,stroke-width:2px,color:#0f172a
+```
+
+### 6.1 The 5 Dimensions of Model Verification
+
+To guarantee that the model reflects reality and avoids spurious correlations:
+
+1. **Point-in-Time Historical Replay (Zero Lookahead Bias):**
+   * Stored in DuckDB (`snapshot_revisions`), readers query only historical revisions as of date $T$.
+   * Replays verify whether a factor profile generated in June 2026 accurately predicted subsequent performance without using any restated data or future earnings releases.
+2. **Lead-Lag Consensus Revision Predictability (The Front-Running Test):**
+   * *Metric:* Information Coefficient (IC) and hit rate measuring whether customer CapEx announcements reliably predict supplier earnings revisions $30\text{–}60$ days later:
+     $$\text{IC} = \text{Corr}\left( \Delta \text{CapEx}_{\text{Customer}, t}, \Delta \text{Consensus EPS}_{\text{Supplier}, t+45d} \right)$$
+   * An effective model demonstrates an $\text{IC} \ge 0.08$ with statistical significance ($t\text{-stat} > 3.0$).
+3. **Flow-Through Tracking Error ($\beta_{\text{BoM}}$ Calibration):**
+   * Verifies the predicted hardware Bill of Materials (BoM) allocation against reported supplier revenues.
+   * If the model assumed Nvidia accounts for 68% of hyperscaler server CapEx, but realized revenue indicates 54%, the tracking error is recorded and flagged for parameter adjustment.
+4. **Reverse-DCF Decile Spread & Froth Realization:**
+   * Validates whether Decile 1 (D1) froth-flagged stocks subsequently underperform or experience multiple contraction, while D2–D4 compounders maintain superior ROE.
+5. **Adversarial Invalidation Stress Testing:**
+   * Replays historical drawdown events (e.g., April 2024 ASML order drop, August 2024 Blackwell packaging delay) to verify whether the Red-Team Agent's invalidation criteria triggered early defensive stop-losses before major capital impairment occurred.
+
+---
+
+### 6.2 The Closed-Loop Feedback Flywheel ("The Loop")
+
+The self-improving loop operates across five systematic stages:
+
+#### Stage 1: Ingest & Observe (Continuous Market Cadence)
+* Scrapes and parses SEC 10-K/Q filings, AkShare quarterly disclosures, Taiwan MoEA optical export ledgers, and exchange chip profit distributions (CYQ).
+* Emits point-in-time structured snapshots into DuckDB.
+
+#### Stage 2: Orient & Predict (Network Flow-Through)
+* Solves the firm-level Micro-Leontief equation $x = (I - W)^{-1} f$.
+* Computes $E$-score, $V$-score, and reverse-DCF $g^*$.
+* Generates structured Opportunity Alphas with strict, quantitative **Entry Zones** and **Invalidation Triggers**.
+
+#### Stage 3: Decide & Execute (Gated Replay)
+* Evaluates portfolio allocations via the G3 Mechanical Risk Gate (blocking froth-flagged names).
+* Human PM reviews high-conviction ideas via LangGraph `interrupt()`.
+* Logs an immutable **Investment Decision Record (IDR)** documenting the exact causal justification.
+
+#### Stage 4: Audit & Error Attribution (Quarterly Post-Mortem)
+When actual quarterly numbers are reported, the system computes the forecast deviation:
+$$\epsilon_{\text{Forecast}} = \text{Actual Revenue} - \text{Predicted Revenue}$$
+
+The AI-CIO automatically attributes the error into one of three structural categories:
+* **Category A: Graph Topology Error (Missed Link or Allocation Shift):**
+  * *Diagnosis:* The customer allocated spend to a competitor (e.g., Nvidia shifted 15% of optical transceiver volume from Innolight to Eoptolink or Coherent).
+  * *Action:* The Supply Chain Traversal Agent updates the directed edge weights in `config/value_chain.yaml`.
+* **Category B: Parameter / BoM Estimation Error:**
+  * *Diagnosis:* The overall dollar size of the server rack was correct, but cooling or PCB content was higher/lower than expected.
+  * *Action:* Calibrates the $\beta_{\text{BoM}}$ multipliers in `arf/scoring.py`.
+* **Category C: Exogenous Macro Shock:**
+  * *Diagnosis:* Currency fluctuations (e.g., Innolight’s ¥2.7B FX swing in 2025) or export control restrictions distorted GAAP net income.
+  * *Action:* Normalizes non-operating items and reinforces local reporting currency FCF adjustments.
+
+#### Stage 5: Learn & Adapt (Automated Self-Calibration)
+* **Prompt Optimization via DSPy:** Refines specialist agent system prompts using historical failure cases as negative few-shot examples.
+* **Dynamic WACC & Terminal Growth Decay:** Automatically recalibrates cost of capital baselines as central bank policy rates evolve.
+* **Invalidation Threshold Refinement:** Tightens or loosens trailing stop criteria based on observed sector volatility.
+
+---
+
+## 7. The Investment Decision Record (IDR)
+
+Mirroring WoW's **Agent Decision Record (ADR)**, every thesis produced by the Digital Analyst generates an immutable **Investment Decision Record (IDR)** ensuring 100% causal explainability:
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
@@ -242,9 +367,9 @@ Mirroring WoW's **Agent Decision Record (ADR)**, every thesis produced by the Di
 
 ---
 
-## 6. The Flagship Google AI & Cloud Showcase Stack
+## 8. Flagship Google Enterprise AI & Cloud Infrastructure
 
-ARF is engineered as an institutional showcase of Google’s complete enterprise AI, multi-modal, and cloud infrastructure:
+ARF is engineered as an institutional showcase of Google’s enterprise AI and cloud infrastructure:
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
@@ -259,115 +384,20 @@ ARF is engineered as an institutional showcase of Google’s complete enterprise
 ├────────────────────────────────────────────────────────────────────────────────────────┤
 │ 2. REAL-TIME GOOGLE SEARCH GROUNDING                                                   │
 │    • Native Google Search tool integration directly inside GenAI SDK pipelines.        │
-│    • Extracts grounding metadata, web search queries, and domain citations, anchoring │
-│      every analytical assertion in verifiable primary facts.                            │
+│    • Anchors every claim with clickable primary citations.                             │
 ├────────────────────────────────────────────────────────────────────────────────────────┤
-│ 3. VISUAL INFOGRAPHICS & SLIDES: NANO BANANA 2 / 2.1                                    │
-│    • Google's pro-grade high-speed image generation model with precision typography    │
-│      and multi-image consistency.                                                      │
-│    • Autonomously renders institutional Investment Decision Cards, supply chain        │
-│      dependency maps, and 16:9 Investment Committee slide visuals.                     │
+│ 3. MULTI-MODAL EXECUTIVE STUDIO                                                        │
+│    • Nano Banana 2: Renders institutional 16:9 infographic slides.                     │
+│    • Veo 2: Synthesizes 60-second executive video briefings for portfolio managers.    │
+│    • Journey TTS + Lyria: Produces 3-minute conversational audio podcasts              │
+│      (Alex the Growth Analyst vs Marcus the Risk Officer).                             │
 ├────────────────────────────────────────────────────────────────────────────────────────┤
-│ 4. CINEMATIC VIDEO EXECUTIVE BRIEFS: VEO 2                                             │
-│    • Google DeepMind's flagship video generation model delivering high-definition      │
-│      1080p video with temporal consistency and realistic physics.                     │
-│    • Synthesizes 60-second executive video briefings illustrating valuation multiple   │
-│      compression, supply-chain chokepoints, and data center hardware architectures.    │
-├────────────────────────────────────────────────────────────────────────────────────────┤
-│ 5. GENERATIVE MUSIC & AUDIO SOUNDSCAPES: LYRIA / MUSICFX                               │
-│    • Google DeepMind's premier music generation engine.                                │
-│    • Composes custom, adaptive tech-finance audio branding: crisp podcast intros,      │
-│      subtle ambient tension underscoring forensic risk cross-examinations.             │
-├────────────────────────────────────────────────────────────────────────────────────────┤
-│ 6. CONVERSATIONAL IC PODCAST: GOOGLE CLOUD JOURNEY TTS                                 │
-│    • Ultra-realistic dual-voice dialogue: en-US-Journey-F (Lead Tech Growth Analyst)   │
-│      vs. en-US-Journey-D (Forensic Risk Officer & Short Seller).                       │
-│    • Produces 3-minute daily executive audio debriefs (NotebookLM paradigm).           │
-├────────────────────────────────────────────────────────────────────────────────────────┤
-│ 7. SERVERLESS GCP ARCHITECTURE (GCP Project: ai-rf-497701, Region: asia-east1)         │
-│    • Cloud Run & Cloud Run Jobs: Instant scale, zero idle server cost.                 │
-│    • Cloud Scheduler: Automated 08:30 pre-market and post-market execution triggers.   │
-│    • Google Cloud Storage (GCS: arf-data-ai-rf): Versioned parquet data lake.          │
-│    • Secret Manager: Enterprise-grade zero-leak API credential isolation.              │
-├────────────────────────────────────────────────────────────────────────────────────────┤
-│ 8. NVIDIA GPU ACCELERATION ON GOOGLE CLOUD                                              │
-│    • Hardware Symbiosis: Modeling Jensen Huang's AI stack while executing compute on   │
-│      NVIDIA GPUs (L4 / H100 / Blackwell B200) hosted in Google Cloud (G2 / A3 VMs).    │
-│    • GPU-Accelerated Cloud Run & Batch: Serverless micro-bursts for 100,000-path        │
-│      Monte Carlo reverse-DCF sensitivity and GPU-parallel CYQ chip distribution math.   │
+│ 4. SERVERLESS HYBRID CLOUD INFRASTRUCTURE                                              │
+│    • GCP asia-east1 (ai-rf-497701): Cloud Run, Cloud Run Jobs, Cloud Storage data lake.│
+│    • Domestic China Lighthouse (82.156.75.194): Proxies AkShare/Sina feeds and runs   │
+│      daily 16:30 CST batch jobs for A-share CYQ calculations.                          │
 └────────────────────────────────────────────────────────────────────────────────────────┘
 ```
-
-### 6.1 The Google Cloud × NVIDIA GPU Strategic Synergy
-
-ARF models the AI value chain whose centerpiece is NVIDIA. By utilizing **NVIDIA GPUs hosted inside Google Cloud**, ARF creates a profound, high-leverage architectural showcase:
-
-1. **Ecosystem Recursion & Symbiosis:**
-   - ARF computes the AI Relevance Factor (ARF) for NVIDIA (NVDA) and its critical chokepoints (TSMC, ASML, Innolight, Vertiv).
-   - The platform’s deep quantitative modeling, Monte Carlo simulation kernels, and media synthesis pipelines execute directly on Google Cloud infrastructure accelerated by NVIDIA hardware (such as Google Cloud G2 instances with NVIDIA L4 GPUs, or A3 instances with NVIDIA H100s).
-   - This provides the ultimate demonstration of the **Google Cloud × NVIDIA enterprise alliance**.
-
-2. **High-Performance Quantitative Acceleration:**
-   - **Tensor-Accelerated Reverse-DCF Monte Carlo:** Rather than evaluating a single static DCF growth gap, the system simulates 100,000 stochastic revenue, WACC, and operating margin paths in milliseconds using GPU tensor arithmetic (PyTorch / CuPy).
-   - **Real-Time CYQ Chip Distribution (筹码分布):** Parallelized price-volume density calculations across millions of exchange ticks executed across the entire 73-stock universe simultaneously.
-   - **On-Demand Serverless GPU Economics:** Using Google Cloud Run’s GPU-enabled runtime (e.g. NVIDIA L4), GPU resources scale from zero to active execution exclusively during scheduled runs or on-demand user analysis, ensuring zero idle GPU hosting costs.
-
----
-
-## 7. The Multi-Modal Studio: Grounded Sources, Podcasts, Infographics & Video Briefs
-
-ARF turns dry quantitative data into an engaging multi-modal executive intelligence experience:
-
-### 7.1 Grounded Provenance & Source Citations
-Every assertion in an Opportunity Card or valuation debrief includes clickable citation pills linking directly to verified documents:
-- `[SEC 10-K §Item 7 - Segment Revenue]`
-- `[AkShare 2025Q3 扣非净利润披露]`
-- `[Taiwan MoEA Optical Transceiver Export Ledger]`
-- `[ARF Factor Snapshots: 2026-10-04]`
-
-### 7.2 The 2-Host "Investment Committee Podcast" (Deep Dive Audio Overview)
-Borrowing from NotebookLM, the platform compiles a **3-minute conversational audio debate** between two distinct digital investment colleagues:
-
-```
-Host 1: "Alex" (Lead Tech Growth Analyst — Google Cloud Journey Voice F)
-  "Good morning. Today our optical radar picked up Lumentum pulling back into Decile 4.
-   With 1.6T transceivers hitting volume production for GB200 racks, the market seems to be
-   underestimating their operating leverage..."
-
-Host 2: "Marcus" (Forensic Risk Officer & Short Seller — Google Cloud Journey Voice D)
-  "Hold on, Alex. Look at the reverse-DCF numbers. The market is still pricing in a 24% 
-   implied FCF CAGR. If hyperscalers moderate capex or ASIC interconnects take share, 
-   that multiple compresses fast. Did the team check their customer concentration in 10-K?"
-```
-
-- **Audio Production:** Lyria generates the subtle corporate tech ambient bed that underscores the debate, swelling during key catalyst disclosures.
-
-### 7.3 Visual Infographics via Nano Banana 2
-For every formulated thesis, ARF invokes Google Nano Banana 2 to render a high-resolution, institutional-grade infographic slide:
-- Clean typography displaying the target ticker, layer badge, ARF decile, and reverse-DCF implied growth gap.
-- Stylized visual schematic of the company's product in the AI value chain (e.g. 1.6T DSP optical engine, liquid cooling cold plate, CoWoS packaging substrate).
-- Branded risk vs. reward matrix suitable for immediate inclusion in an Investment Committee slide deck.
-
-### 7.4 60-Second Video Executive Briefs via Veo 2
-For high-conviction opportunities (Confidence Score $\ge 85\%$), ARF compiles a prompt sequence for Google DeepMind Veo 2:
-- Dynamic cinematic camera pans over a 3D visualization of the AI hardware rack (L1/L2/L3).
-- Overlaying animated valuation trajectories and key catalyst countdowns.
-- Tailored for CIO mobile review and executive Slack/Teams channels.
-
----
-
-## 8. The Google AI Showcase Experience
-
-To highlight Google's technological leadership to stakeholders and clients, ARF features a dedicated **Google AI Showcase Cockpit**:
-
-1. **Live Model Selector & Latency Benchmark:** Real-time side-by-side comparison between Gemini 3.8 Flash (rapid filtering) and Gemini 2.5 Pro (deep reasoning).
-2. **Interactive Grounding Inspector:** Visual inspection panel displaying the raw Google Search queries, grounding chunks, and web source attributions returned by the GenAI API.
-3. **Multi-Modal Generation Studio:** One-click generation of:
-   - The 5-step Investment Decision Record (Gemini 3.8 Flash).
-   - Institutional infographic slide (Nano Banana 2).
-   - 3-Minute Dual-Voice Audio Podcast (Lyria + Journey TTS).
-   - 60-Second Cinematic Video Brief preview (Veo 2).
-4. **Causal Audit Trail:** Complete JSON and visual inspection of the IDR causal chain stored in DuckDB and replicated to Google Cloud Storage.
 
 ---
 
@@ -375,45 +405,23 @@ To highlight Google's technological leadership to stakeholders and clients, ARF 
 
 ```
 2026 Q4                      2026 Q4                      2027 Q1                      2027 Q1
-Phase 1: State & IDR         Phase 2: G3 Sentinel         Phase 3: Supervisory Pulse   Phase 4: Multi-Modal Studio
+Phase 1: State & IDR         Phase 2: G3 Sentinel         Phase 3: Causal Value Chain  Phase 4: Feedback Loop & Studio
 ┌─────────────────────────┐  ┌─────────────────────────┐  ┌─────────────────────────┐  ┌─────────────────────────┐
-│ • Opportunity Alpha     │  │ • Outside-model python  │  │ • Daily LangGraph loop  │  │ • Grounded citations    │
-│   state machine schema  │  │   G3 circuit breaker    │  │ • 08:30 Market Cadence  │  │ • Lyria + Journey TTS   │
-│ • 5-step IDR database   │  │ • Mechanical Froth Gate │  │ • Proactive Entry Zone  │  │ • Nano Banana 2 Slides  │
-│   persistence in DuckDB │  │ • Hurdle rate verifier  │  │   alert triggers        │  │ • Veo 2 Video Briefs    │
-│ • Gemini 3.8 Flash Core │  │ • Strict G1-G4 gates    │  │ • CIO Human-in-the-Loop │  │ • Google AI Showcase UI │
+│ • Opportunity Alpha     │  │ • Outside-model python  │  │ • Leontief matrix (I-W) │  │ • Automated post-mortem │
+│   state machine schema  │  │   G3 circuit breaker    │  │ • Supply chain links DB │  │   error attribution     │
+│ • 5-step IDR database   │  │ • Mechanical Froth Gate │  │ • CapEx-to-revenue      │  │ • Dynamic w_ij tuning   │
+│   persistence in DuckDB │  │ • Hurdle rate verifier  │  │   flow-through engine   │  │ • Journey TTS + Lyria   │
+│ • Gemini 3.8 Flash Core │  │ • Strict G1-G4 gates    │  │ • Reverse-DCF g* sync   │  │ • Veo 2 + Nano Banana 2 │
 └─────────────────────────┘  └─────────────────────────┘  └─────────────────────────┘  └─────────────────────────┘
 ```
-
-### Phase 1: Opportunity Alpha State Machine & IDR Persistence (Active)
-- Formalize `OpportunityStage` and `GateVerdict` in `arf/agent/schemas.py`.
-- Define the 5-step `InvestmentDecisionRecord` (Trigger, Normative Basis, Deliberation, Gate Verdict, Action & Boundaries).
-- Build persistent tables and migration in `arf/db.py`.
-- Upgrade `arf/agent/thesis.py` to compile and store IDRs with Gemini 3.8 Flash.
-- Verify comprehensive test coverage (>90%).
-
-### Phase 2: Outside-Model G3 Risk Sentinel
-- Implement `arf/agent/governance.py` containing deterministic Python risk gates.
-- Strict Froth and Capital Return Hurdle circuit breakers executing outside the LLM reasoning loop.
-
-### Phase 3: Autonomous Supervisory Brain & Daily Market Cadence
-- Implement `arf/agent/supervisor/graph.py` using LangGraph.
-- 08:30 Pre-Market pulse and Intraday Anomaly Sentinel with Human-in-the-Loop (`interrupt()`).
-
-### Phase 4: Multi-Modal Studio & Google AI Showcase
-- Source-grounded citation pills in Streamlit UI.
-- Dual-voice Audio IC Podcast with Google Cloud Journey TTS and Lyria theme music.
-- Nano Banana 2 visual slide generator and Veo 2 video executive briefing generator.
-- Interactive Google AI Showcase page.
 
 ---
 
 ## 10. Architectural Summary
 
-By combining WoW’s proven methodology-compiler and supervisory patterns with the best of Google AI:
-1. **The Quantitative Engine (`arf/scoring.py`)** provides the unyielding mathematical anchor.
-2. **Gemini 3.8 Flash & Gemini 2.5 Pro** provide world-class reasoning and long-context filing comprehension.
-3. **The G3 Governance Kernel** ensures generative AI never overrules mechanical risk boundaries.
-4. **Nano Banana 2, Veo 2, Lyria, and Journey TTS** elevate quantitative equity research into a compelling, institutional-grade multi-modal experience.
-5. **The Human Portfolio Manager (`interrupt()`)** remains firmly in control of all capital allocation decisions.
-
+By unifying WoW’s supervisory governance with Google Enterprise AI and deterministic value-chain financial modeling:
+1. **The Deterministic Math Core (`arf/scoring.py`, `networkx`, DuckDB):** Prevents hallucinations, enforces accounting identities, and solves $g^*$ and Leontief flow-through deterministically.
+2. **Specialist Research Workers (Gemini 3.8 Flash & 2.5 Pro):** Ingest thousands of pages of unstructured filings to extract verified customer-supplier relationships.
+3. **The G3 Governance Kernel:** Ensures AI agents never bypass capital constraints or valuation froth rules.
+4. **The Closed-Loop Feedback Flywheel:** Continuously measures forecast error against actual earnings, automatically re-calibrating graph edges and parameter weights.
+5. **The Human Fund Manager (`interrupt()`):** Retains ultimate sovereign control over capital allocation.
