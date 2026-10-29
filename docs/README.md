@@ -11,8 +11,10 @@ This directory houses the authoritative architecture records, product requiremen
 ---
 
 ## 2. Product Specifications & Requirements
+* **[ARF / AI-CIO Master Development Plan](file:///Users/sheng/Developer/ARF/docs/ARF_AI_CIO_DEVELOPMENT_PLAN.md)**: Master engineering plan and 4-phase execution roadmap covering the value-chain engine, multi-agent governance, and the continuous improvement loop.
+* **[AI-CIO Value Chain Financial Modeling & Supply Chain Transmission](file:///Users/sheng/Developer/ARF/docs/AI_CIO_CONNECTING_THE_DOTS_FINANCIAL_MODELING.md)**: Deep dive on connecting the dots across companies, CapEx-to-revenue circuits, reverse-DCF $g^*$ harmonization, and 6 formal modeling paradigms (also available in [Chinese PDF](file:///Users/sheng/Developer/ARF/docs/AI_CIO_CONNECTING_THE_DOTS_FINANCIAL_MODELING_ZH.pdf)).
+* **[ARF Digital Investment Analyst Vision](file:///Users/sheng/Developer/ARF/docs/ARF_DIGITAL_INVESTMENT_ANALYST_VISION.md)**: Vision, multi-agent supervisory architecture, and OODA continuous learning loop for the AI-CIO (also available in [Chinese PDF](file:///Users/sheng/Developer/ARF/docs/ARF_DIGITAL_INVESTMENT_ANALYST_VISION_ZH.pdf)).
 * **[ARF PRD (Product Requirements Document)](file:///Users/sheng/Developer/ARF/docs/ARF_PRD.md)**: Complete specifications for Jensen Huang's 5-layer AI stack, universe definition (US and China legs), scoring formulas ($E_{score}$, $V_{score}$, and $ARF$), and calibration criteria.
-* **[ARF Digital Investment Analyst Vision](file:///Users/sheng/Developer/ARF/docs/ARF_DIGITAL_INVESTMENT_ANALYST_VISION.md)**: Vision and functional roadmap for the multi-agent AI equity research analyst and AI CIO cockpit.
 * **[ARF Investor Whitepaper](file:///Users/sheng/Developer/ARF/docs/ARF_Investor_Whitepaper.md)**: Conceptual and mathematical foundation of the AI Relevance Factor for institutional investors.
 
 ---
