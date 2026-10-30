@@ -395,3 +395,32 @@ def load_pool_changes(pool_id: str | None = None) -> pd.DataFrame:
         "WHERE pool_id = (SELECT MAX(pool_id) FROM pool_changes) "
         "ORDER BY direction, ticker"
     ).fetchdf()
+
+
+def load_forecasts(as_of: date | None = None) -> pd.DataFrame:
+    """Load the 4-layer predictive forecasts for a date, or the latest available."""
+    conn = _open_conn()
+    if as_of is not None:
+        return conn.execute(
+            "SELECT * FROM forecasts WHERE as_of_date = ? ORDER BY expected_beat_pct DESC NULLS LAST",
+            [as_of],
+        ).fetchdf()
+    return conn.execute(
+        "SELECT * FROM forecasts "
+        "WHERE as_of_date = (SELECT MAX(as_of_date) FROM forecasts) "
+        "ORDER BY expected_beat_pct DESC NULLS LAST"
+    ).fetchdf()
+
+
+def load_supply_chain_links(supplier_ticker: str | None = None) -> pd.DataFrame:
+    """Load verified supply chain linkages."""
+    conn = _open_conn()
+    if supplier_ticker:
+        return conn.execute(
+            "SELECT * FROM supply_chain_links WHERE supplier_ticker = ? ORDER BY revenue_share_pct DESC",
+            [supplier_ticker.strip().upper()],
+        ).fetchdf()
+    return conn.execute(
+        "SELECT * FROM supply_chain_links ORDER BY supplier_ticker, revenue_share_pct DESC"
+    ).fetchdf()
+

@@ -11,24 +11,29 @@ from arf.db import (
     list_pool_ids,
     query_candidates,
     query_fetch_outcomes,
+    query_forecasts,
     query_gemini_summaries,
     query_idrs,
     query_latest,
+    query_latest_forecasts,
     query_latest_run,
     query_opportunity_states,
     query_pool_membership,
     query_runs,
     query_snapshot,
+    query_supply_chain_links,
     query_theses,
     record_fetch_outcomes,
     start_run,
     update_candidate_status,
     update_opportunity_stage,
     upsert_candidate,
+    upsert_forecasts,
     upsert_gemini_summaries,
     upsert_idr,
     upsert_pool_membership,
     upsert_snapshot,
+    upsert_supply_chain_links,
     upsert_thesis,
 )
 
@@ -1012,5 +1017,102 @@ class TestOpportunityStates:
         assert len(df3) == 1
         assert df3.iloc[0]["ticker"] == "300308.SZ"
         assert df3.iloc[0]["valuation_entry_zone"] == "P/E < 25, CYQ support ¥115"
+
+
+class TestSupplyChainLinks:
+    def test_upsert_and_query_links(self, conn):
+        links = [
+            {
+                "supplier_ticker": "300308.SZ",
+                "customer_ticker": "NVDA",
+                "revenue_share_pct": 35.0,
+                "bom_component_pct": 4.5,
+                "relationship_type": "optical",
+                "verified_source": "10-K Customer Mention",
+                "notes": "800G optical transceivers for DGX systems",
+            },
+            {
+                "supplier_ticker": "TSM",
+                "customer_ticker": "NVDA",
+                "revenue_share_pct": 11.0,
+                "bom_component_pct": 22.0,
+                "relationship_type": "foundry",
+                "verified_source": "Annual Report",
+                "notes": "4N/3nm wafers and CoWoS packaging",
+            },
+        ]
+        upsert_supply_chain_links(conn, links)
+
+        # Query all
+        all_links = query_supply_chain_links(conn)
+        assert len(all_links) == 2
+
+        # Query by customer
+        nvda_suppliers = query_supply_chain_links(conn, customer_ticker="NVDA")
+        assert len(nvda_suppliers) == 2
+        assert set(nvda_suppliers["supplier_ticker"]) == {"300308.SZ", "TSM"}
+
+        # Query by supplier
+        tsm_customers = query_supply_chain_links(conn, supplier_ticker="TSM")
+        assert len(tsm_customers) == 1
+        assert tsm_customers.iloc[0]["customer_ticker"] == "NVDA"
+        assert tsm_customers.iloc[0]["bom_component_pct"] == 22.0
+
+
+class TestForecasts:
+    def test_upsert_and_query_forecasts(self, conn):
+        forecasts = [
+            {
+                "ticker": "NVDA",
+                "as_of_date": date(2026, 10, 28),
+                "horizon_days": 90,
+                "predicted_rev_growth": 0.45,
+                "consensus_rev_growth": 0.32,
+                "expected_beat_pct": 0.13,
+                "eps_surprise_prob": 0.82,
+                "fair_value_p10": 135.0,
+                "fair_value_p50": 165.0,
+                "fair_value_p90": 200.0,
+                "expected_return_p50": 0.22,
+                "regime_breakout_prob": 0.75,
+                "chip_concentration_ratio": 0.08,
+                "model_version": "v1.0",
+            },
+            {
+                "ticker": "300308.SZ",
+                "as_of_date": date(2026, 10, 28),
+                "horizon_days": 90,
+                "predicted_rev_growth": 0.65,
+                "consensus_rev_growth": 0.42,
+                "expected_beat_pct": 0.23,
+                "eps_surprise_prob": 0.88,
+                "fair_value_p10": 110.0,
+                "fair_value_p50": 145.0,
+                "fair_value_p90": 175.0,
+                "expected_return_p50": 0.35,
+                "regime_breakout_prob": 0.80,
+                "chip_concentration_ratio": 0.06,
+                "model_version": "v1.0",
+            },
+        ]
+        upsert_forecasts(conn, forecasts)
+
+        df = query_forecasts(conn, horizon_days=90)
+        assert len(df) == 2
+        # Ordered by expected_beat_pct desc: 300308.SZ (0.23) should be first
+        assert df.iloc[0]["ticker"] == "300308.SZ"
+        assert df.iloc[0]["expected_beat_pct"] == 0.23
+        assert df.iloc[1]["ticker"] == "NVDA"
+
+        # Query single ticker
+        nvda_df = query_forecasts(conn, ticker="NVDA")
+        assert len(nvda_df) == 1
+        assert nvda_df.iloc[0]["fair_value_p50"] == 165.0
+
+        # Query latest
+        latest_df = query_latest_forecasts(conn, horizon_days=90)
+        assert len(latest_df) == 2
+        assert latest_df.iloc[0]["ticker"] == "300308.SZ"
+
 
 

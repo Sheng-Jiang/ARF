@@ -35,7 +35,14 @@ Over the course of recent architectural reviews and research breakthroughs, the 
 │    • Cross-border dual value chain arbitrage (US vs. China vs. Europe chokepoints).   │
 │    • Micro-Leontief shock propagation via the inverse matrix (I - W)⁻¹.               │
 ├────────────────────────────────────────────────────────────────────────────────────────┤
-│ 3. Autonomous Dual-Layer Multi-Agent Governance (WoW Pedigree)                         │
+│ 3. 4-Layer Predictive Forecasting Engine (Moving from Thermometer to Barometer)       │
+│    Shifts the system from lagging nowcasts to forward-looking predictive alpha:       │
+│    • Layer 1 (1–2Q): Supply-chain revenue/EPS forecast (ĝ_ARF) via Leontief clamp.     │
+│    • Layer 2 (2–6W): Sell-side consensus revision velocity (ΔEPS) & herding model.    │
+│    • Layer 3 (6–12M): Forward FCF distribution & fair-value price fan (P10/P50/P90).  │
+│    • Layer 4 (5–20D): CYQ chip cost concentration & regime breakout probabilities.    │
+├────────────────────────────────────────────────────────────────────────────────────────┤
+│ 4. Autonomous Dual-Layer Multi-Agent Governance (WoW Pedigree)                         │
 │    • Supervisor Governor (LangGraph): Daily market cadence, portfolio drift, human     │
 │      interrupt() sign-offs.                                                           │
 │    • Specialist Sandboxed Workers (Gemini 3.8 Flash): Supply chain parsing, forensic   │
@@ -43,13 +50,13 @@ Over the course of recent architectural reviews and research breakthroughs, the 
 │    • G1–G4 Outside-Model Risk Gates: Code-level circuit breakers ("Guards Must Bite")  │
 │      preventing AI from recommending valuation froth or substandard capital returns.   │
 ├────────────────────────────────────────────────────────────────────────────────────────┤
-│ 4. Continuous Improvement Loop ("The Loop" OODA Flywheel)                             │
+│ 5. Continuous Improvement Loop ("The Loop" OODA Flywheel)                             │
 │    Every quarter, realized earnings are audited against model predictions.            │
 │    Errors are automatically decomposed into:                                          │
 │      (A) Graph Topology Errors (allocation shifts)                                    │
 │      (B) Parameter / BoM Share Errors                                                 │
 │      (C) Exogenous Macro Shocks                                                       │
-│    Driving automated graph edge recalibration and agent prompt tuning.                │
+│    Driving automated graph edge recalibration, Brier/RMSE scoring, and prompt tuning. │
 └────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -59,12 +66,13 @@ Over the course of recent architectural reviews and research breakthroughs, the 
 
 | Module / Layer | Current Status in Codebase | Engineering Gap to New Direction |
 | :--- | :--- | :--- |
-| **Data & Storage** | DuckDB `snapshot_revisions`, versioned Parquet data lake on GCS (`arf-data-ai-rf`), hybrid China proxy. | Missing persistent `supply_chain_links` table in DuckDB to store customer concentration weights ($w_{ij}$) and BoM coefficients ($\beta$). |
-| **Scoring Engine** | $E$-score, $V$-score, ARF deciles, local-currency reverse-DCF ($g^*$), Froth flag in `arf/scoring.py`. | Scoring treats each firm independently; missing cross-company consistency checks (e.g. Supplier $g^* > 2\times$ Customer $g^*$) and Leontief flow-through. |
-| **Value Chain** | `config/value_chain.yaml` + `arf/value_chain.py` tracks market-cap snapshots across 5 layers. | Value chain is currently a static hierarchy, not an active directed graph with mathematical shock propagation. |
+| **Data & Storage** | DuckDB `snapshot_revisions`, versioned Parquet data lake on GCS (`arf-data-ai-rf`), hybrid China proxy. | Missing persistent `supply_chain_links` table in DuckDB to store customer concentration weights ($w_{ij}$) and `forecasts` table to log multi-horizon predictions. |
+| **Scoring Engine** | $E$-score, $V$-score, ARF deciles, local-currency reverse-DCF ($g^*$), Froth flag in `arf/scoring.py`. | Scoring treats each firm independently; missing cross-company consistency checks (e.g. Supplier $g^* > 2\times$ Customer $g^*$) and forward-looking growth forecasts. |
+| **Value Chain & Forecasting** | `config/value_chain.yaml` + `arf/value_chain.py` tracks market-cap snapshots across 5 layers. | Value chain is currently a static hierarchy, not an active directed graph. Completely missing `arf/forecast.py` to forecast revenue surprises, revision velocity, and forward fair values. |
+| **Alpha Signals & CIO** | `ARFModel` in `ai-hedge-fund` trades static $(E - V)/100$ factor spreads; `arf/cio.py` replays mandate. | Alpha signals react after trailing fundamentals update; missing `ARFForecastModel` trading on forward expected surprise ($\hat{g}_{\text{ARF}} - g_{\text{Consensus}}$) and upside to $P_{50}$. |
 | **Agent & IDR** | Pydantic schemas in `arf/agent/schemas.py`, 5-step IDR persistence in `arf/db.py`, Gemini screener. | Missing dedicated outside-model `arf/agent/governance.py` (G3 gates), LangGraph supervisor graph, and Red-Team adversarial debater. |
 | **Webapp Cockpit** | 10 Streamlit pages (Bubble thermometer, Dual Value Chain, CIO Cockpit replaying `ai-hedge-fund`). | Cockpit lacks interactive value-chain shock simulator (e.g., CapEx slider) and Opportunity Alpha stage lifecycle management. |
-| **Verification & Loop** | Unit tests for scoring, database, and fetchers (>80% coverage in `tests/`). | Missing lead-lag consensus revision backtesting suite ($\text{IC}$ calculator) and automated post-mortem quarterly error attribution. |
+| **Verification & Loop** | Unit tests for scoring, database, and fetchers (>80% coverage in `tests/`). | Missing forecast calibration scorecard (Brier score, RMSE, lead-lag $\text{IC}$) and automated post-mortem quarterly error attribution. |
 
 ---
 
@@ -72,10 +80,10 @@ Over the course of recent architectural reviews and research breakthroughs, the 
 
 ```mermaid
 graph TD
-    subgraph W1["Workstream 1: Causal Value Chain & Leontief Engine"]
-        A1["1.1 supply_chain_links DB Schema"] --> A2["1.2 Gemini 10-K Customer Parser"]
-        A2 --> A3["1.3 networkx DAG & Leontief (I-W)⁻¹ Solver"]
-        A3 --> A4["1.4 Reverse-DCF g* Consistency Filter"]
+    subgraph W1["Workstream 1: Causal Value Chain & 4-Layer Forecasting Engine"]
+        A1["1.1 supply_chain_links & forecasts DB Schemas"] --> A2["1.2 Leontief (I-W)⁻¹ & Bottleneck Clamp"]
+        A2 --> A3["1.3 4-Layer Forecasting Engine (arf/forecast.py)"]
+        A3 --> A4["1.4 ARFForecastModel Signal Generator"]
     end
 
     subgraph W2["Workstream 2: Agent Governance & Supervisory Brain"]
@@ -97,6 +105,7 @@ graph TD
     end
 
     A3 --> B1
+    A4 --> C1
     B4 --> C1
     C3 --> D1
 
@@ -110,23 +119,31 @@ graph TD
 
 ## 4. Detailed Implementation Roadmap & Deliverables
 
-### Phase 1: Value Chain Causal Graph & Deterministic Transmission (Weeks 1–2)
-**Goal:** Transform the 5-layer stack from a static display list into an active calculation graph.
+### Phase 1: Causal Value Chain, Micro-Leontief & 4-Layer Forecasting Engine (Weeks 1–2)
+**Goal:** Transform the 5-layer stack from a static display list into an active calculation graph and forward-looking forecasting system.
 
-* **Task 1.1: DuckDB Schema Migration for Supply Chain Links**
+* **Task 1.1: DuckDB Schema Migration for `supply_chain_links` and `forecasts`**
   * Target: `arf/db.py`, `data/arf.db`
-  * Deliverable: Create table `supply_chain_links` with columns:
-    `supplier_ticker`, `customer_ticker`, `revenue_share_pct` ($w_{ij}$), `bom_component_pct` ($\beta$), `relationship_type`, `verified_source`, `last_updated`.
-* **Task 1.2: Supply Chain Traversal Agent**
-  * Target: `arf/agent/traversal.py`
-  * Deliverable: Gemini 3.8 Flash worker agent parsing 10-K Item 1 & Item 7 disclosures to extract customer concentration percentages and populate `supply_chain_links`.
-* **Task 1.3: Micro-Leontief $(I - W)^{-1}$ Solver**
+  * Deliverable: 
+    * `supply_chain_links`: `supplier_ticker`, `customer_ticker`, `revenue_share_pct` ($w_{ij}$), `bom_component_pct` ($\beta$), `relationship_type`, `verified_source`, `last_updated`.
+    * `forecasts`: `ticker`, `as_of_date`, `horizon_days`, `predicted_rev_growth` ($\hat{g}_{\text{ARF}}$), `consensus_rev_growth`, `expected_beat_pct`, `eps_surprise_prob`, `fair_value_p10`, `fair_value_p50`, `fair_value_p90`, `regime_breakout_prob`, `model_version`, `created_at`.
+* **Task 1.2: Supply Chain Traversal & Dependency Matrix Initialization**
+  * Target: `arf/agent/traversal.py`, `config/value_chain.yaml`
+  * Deliverable: Ingest customer concentration disclosures from 10-K / annual reports to establish baseline directed weights ($w_{ij}$) across the 73-stock universe.
+* **Task 1.3: Micro-Leontief $(I - W)^{-1}$ Solver with Bottleneck Capacity Clamps**
   * Target: `arf/value_chain.py`
-  * Deliverable: In-memory `networkx.DiGraph` representing the 5 layers. Compute the Leontief inverse to calculate cross-tier revenue shock transmission:
-    $$\Delta \text{Revenue}_{\text{All Nodes}} = (I - W)^{-1} \cdot \Delta \text{CapEx}_{\text{Hyperscalers}}$$
-* **Task 1.4: Reverse-DCF $g^*$ Harmonization Gate**
-  * Target: `arf/scoring.py`
-  * Deliverable: Compare supplier implied growth against customer implied growth. Automatically flag systemic divergence when $\text{Supplier } g^* > 2.0 \times \text{Customer } g^*$.
+  * Deliverable: In-memory `networkx.DiGraph` representing the 5 layers. Propagates downstream CapEx revisions upstream, constrained by physical manufacturing and packaging bottlenecks:
+    $$\Delta \text{Revenue}_{\text{Predicted}} = \min\left( (I - W)^{-1} \cdot \Delta \text{CapEx}_{\text{Hyperscalers}}, \; \text{Bottleneck Capacity} \right)$$
+* **Task 1.4: Deterministic 4-Layer Forecasting Engine (`arf/forecast.py`)**
+  * Target: `arf/forecast.py`
+  * Deliverable:
+    1. *Layer 1 (Fundamental Forecast):* Compute supply-chain revenue/EPS forecast $\hat{g}_{\text{ARF}}$ and expected beat margin.
+    2. *Layer 2 (Revision Velocity):* Compute consensus revision acceleration ($\Delta \text{EPS}_{14d/30d}$) & cross-node PEAD spillover.
+    3. *Layer 3 (Valuation Distribution):* Model operating leverage and multi-stage DCF forward fair-value distribution ($P_{10}$ Bear, $P_{50}$ Base, $P_{90}$ Bull).
+    4. *Layer 4 (Microstructure Regime):* CYQ chip concentration ratio and 20-day regime breakout probability.
+* **Task 1.5: `ARFForecastModel` Signal Generator for `ai-hedge-fund` / `arf/cio.py`**
+  * Target: `ai-hedge-fund/hedge_fund/signals/arf_forecast.py`, `arf/cio.py`
+  * Deliverable: Forward-looking `AlphaModel` generating signals based on expected earnings surprise ($\hat{g}_{\text{ARF}} - g_{\text{Consensus}}$) and expected upside to $P_{50}$, testable in `aihf backtest` and the CIO Cockpit.
 
 ---
 
@@ -194,9 +211,9 @@ graph TD
 
 | Milestone | Key Verification Metric | Acceptance Criteria |
 | :--- | :--- | :--- |
-| **Phase 1: Value Chain** | Arithmetic Precision & Conservation | $\sum \Delta \text{Revenue}_{\text{Tier-1}} \le \sum \Delta \text{CapEx}_{\text{Hyperscalers}}$; Zero matrix inversion errors. |
+| **Phase 1: Value Chain & Forecaster** | Arithmetic Precision, Conservation & Forecast Bounds | $\sum \Delta \text{Revenue}_{\text{Tier-1}} \le \sum \Delta \text{CapEx}_{\text{Hyperscalers}}$; Zero matrix inversion errors; 100% of generated forecasts produce bounded fair value distributions ($P_{10} \le P_{50} \le P_{90}$) and calibrated beat probabilities $\in [0, 1]$. |
 | **Phase 2: Governance** | G3 Gate Integrity ("Guards Must Bite") | 100% of froth-flagged tickers blocked; zero long promotions without explicit quantitative invalidation criteria. |
-| **Phase 3: The Loop** | Predictive Power & Attribution | $\text{IC} \ge 0.08$ on 45-day forward analyst consensus revisions; 100% of quarterly earnings forecast deviations classified into A/B/C buckets. |
+| **Phase 3: The Loop** | Predictive Power & Attribution | $\text{IC} \ge 0.08$ on 45-day forward analyst consensus revisions; 100% of quarterly earnings forecast deviations classified into A/B/C buckets; Brier score $< 0.25$ on consensus beat predictions. |
 | **Phase 4: Cockpit** | End-to-End PM Latency | Real-time Leontief shock recalculation $< 500\text{ ms}$; multi-modal debriefs generated on demand. |
 
 ---

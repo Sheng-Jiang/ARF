@@ -332,6 +332,48 @@ CREATE TABLE IF NOT EXISTS opportunity_states (
 )
 """
 
+_SCHEMA_SUPPLY_CHAIN_LINKS = """
+CREATE TABLE IF NOT EXISTS supply_chain_links (
+    supplier_ticker     TEXT        NOT NULL,
+    customer_ticker     TEXT        NOT NULL,
+    revenue_share_pct   DOUBLE,     -- w_ij: % of supplier's revenue derived from this customer
+    bom_component_pct   DOUBLE,     -- beta: % of customer's capex/cogs allocated to this component
+    relationship_type   TEXT,       -- direct_customer, foundry, equipment, optical, power, asic
+    verified_source     TEXT,       -- 10-K, annual_report, investor_day, estimation
+    notes               TEXT,
+    last_updated        TIMESTAMP   NOT NULL,
+    PRIMARY KEY (supplier_ticker, customer_ticker)
+)
+"""
+
+_SCHEMA_FORECASTS = """
+CREATE TABLE IF NOT EXISTS forecasts (
+    ticker                  TEXT        NOT NULL,
+    as_of_date              DATE        NOT NULL,
+    horizon_days            INTEGER     NOT NULL,   -- e.g. 30, 90, 365
+    -- Layer 1: Fundamental Forecast
+    predicted_rev_growth    DOUBLE,     -- ĝ_ARF (YoY / NTM)
+    consensus_rev_growth    DOUBLE,     -- wall street consensus proxy
+    expected_beat_pct       DOUBLE,     -- ĝ_ARF - consensus
+    eps_surprise_prob       DOUBLE,     -- 0.0 - 1.0 probability of beat
+    -- Layer 2: Revision Velocity
+    revision_velocity_14d   DOUBLE,     -- % delta in consensus EPS forecast over prior 14d
+    revision_velocity_30d   DOUBLE,     -- % delta in consensus EPS forecast over prior 30d
+    -- Layer 3: Forward Fair Value Fan (DCF)
+    fair_value_p10          DOUBLE,     -- bear case target price
+    fair_value_p50          DOUBLE,     -- base target price
+    fair_value_p90          DOUBLE,     -- bull case target price
+    expected_return_p50     DOUBLE,     -- (fair_value_p50 - price) / price
+    -- Layer 4: Microstructure Regime
+    regime_breakout_prob    DOUBLE,     -- 0.0 - 1.0 probability of breakout from CYQ chip cost band
+    chip_concentration_ratio DOUBLE,    -- (chip_90_cost_max - chip_90_cost_min) / chip_avg_cost
+    -- Metadata
+    model_version           TEXT        NOT NULL,
+    created_at              TIMESTAMP   NOT NULL,
+    PRIMARY KEY (ticker, as_of_date, horizon_days, model_version)
+)
+"""
+
 
 def init_db(path: Path = Path("data/arf.db")) -> duckdb.DuckDBPyConnection:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -353,6 +395,8 @@ def init_db(path: Path = Path("data/arf.db")) -> duckdb.DuckDBPyConnection:
     conn.execute(_SCHEMA_INVESTMENT_THESES)
     conn.execute(_SCHEMA_INVESTMENT_DECISION_RECORDS)
     conn.execute(_SCHEMA_OPPORTUNITY_STATE)
+    conn.execute(_SCHEMA_SUPPLY_CHAIN_LINKS)
+    conn.execute(_SCHEMA_FORECASTS)
     _add_missing_columns(conn)
     conn.execute(_VIEW_SNAPSHOTS)
     _mark_stale_runs_interrupted(conn)
@@ -1574,5 +1618,196 @@ def query_opportunity_states(
             [stage],
         ).fetchdf()
     return conn.execute("SELECT * FROM opportunity_states ORDER BY updated_at DESC").fetchdf()
+
+
+# ── Supply chain links ─────────────────────────────────────────────────────────
+
+def upsert_supply_chain_links(
+    conn: duckdb.DuckDBPyConnection,
+    links: list[dict],
+) -> None:
+    """Insert or update supply chain customer-supplier relationship edges."""
+    if not links:
+        return
+    ts = datetime.now(UTC).replace(tzinfo=None)
+    for link in links:
+        s_ticker = str(link["supplier_ticker"]).strip().upper()
+        c_ticker = str(link["customer_ticker"]).strip().upper()
+        rev_share = link.get("revenue_share_pct")
+        bom_share = link.get("bom_component_pct")
+        rel_type = link.get("relationship_type", "direct_customer")
+        source = link.get("verified_source", "")
+        notes = link.get("notes", "")
+        updated_at = link.get("last_updated") or ts
+
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO supply_chain_links (
+                supplier_ticker, customer_ticker, revenue_share_pct,
+                bom_component_pct, relationship_type, verified_source,
+                notes, last_updated
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                s_ticker,
+                c_ticker,
+                float(rev_share) if rev_share is not None and not pd.isna(rev_share) else None,
+                float(bom_share) if bom_share is not None and not pd.isna(bom_share) else None,
+                rel_type,
+                source,
+                notes,
+                updated_at,
+            ],
+        )
+    conn.commit()
+
+
+def query_supply_chain_links(
+    conn: duckdb.DuckDBPyConnection,
+    supplier_ticker: str | None = None,
+    customer_ticker: str | None = None,
+) -> pd.DataFrame:
+    """Query supply chain links, optionally filtered by supplier or customer."""
+    clauses = []
+    params: list[object] = []
+    if supplier_ticker is not None:
+        clauses.append("supplier_ticker = ?")
+        params.append(supplier_ticker.strip().upper())
+    if customer_ticker is not None:
+        clauses.append("customer_ticker = ?")
+        params.append(customer_ticker.strip().upper())
+
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    return conn.execute(
+        f"SELECT * FROM supply_chain_links {where} ORDER BY supplier_ticker, revenue_share_pct DESC",
+        params,
+    ).fetchdf()
+
+
+# ── Forecasts ─────────────────────────────────────────────────────────────────
+
+def upsert_forecasts(
+    conn: duckdb.DuckDBPyConnection,
+    forecasts: list[dict],
+) -> None:
+    """Insert or replace multi-horizon forecast rows."""
+    if not forecasts:
+        return
+    ts = datetime.now(UTC).replace(tzinfo=None)
+    for f in forecasts:
+        ticker = str(f["ticker"]).strip().upper()
+        as_of = f["as_of_date"]
+        if isinstance(as_of, str):
+            as_of = date.fromisoformat(as_of[:10])
+        horizon = int(f.get("horizon_days", 90))
+        model_ver = str(f.get("model_version", "v1.0"))
+        created = f.get("created_at") or ts
+
+        def _val(d: dict, key: str) -> float | None:
+            v = d.get(key)
+            if v is None or pd.isna(v):
+                return None
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return None
+
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO forecasts (
+                ticker, as_of_date, horizon_days,
+                predicted_rev_growth, consensus_rev_growth, expected_beat_pct,
+                eps_surprise_prob, revision_velocity_14d, revision_velocity_30d,
+                fair_value_p10, fair_value_p50, fair_value_p90,
+                expected_return_p50, regime_breakout_prob, chip_concentration_ratio,
+                model_version, created_at
+            ) VALUES (
+                ?, ?, ?,
+                ?, ?, ?,
+                ?, ?, ?,
+                ?, ?, ?,
+                ?, ?, ?,
+                ?, ?
+            )
+            """,
+            [
+                ticker,
+                as_of,
+                horizon,
+                _val(f, "predicted_rev_growth"),
+                _val(f, "consensus_rev_growth"),
+                _val(f, "expected_beat_pct"),
+                _val(f, "eps_surprise_prob"),
+                _val(f, "revision_velocity_14d"),
+                _val(f, "revision_velocity_30d"),
+                _val(f, "fair_value_p10"),
+                _val(f, "fair_value_p50"),
+                _val(f, "fair_value_p90"),
+                _val(f, "expected_return_p50"),
+                _val(f, "regime_breakout_prob"),
+                _val(f, "chip_concentration_ratio"),
+                model_ver,
+                created,
+            ],
+        )
+    conn.commit()
+
+
+def query_forecasts(
+    conn: duckdb.DuckDBPyConnection,
+    ticker: str | None = None,
+    as_of_date: date | str | None = None,
+    horizon_days: int | None = None,
+    model_version: str | None = None,
+) -> pd.DataFrame:
+    """Query stored forecasts by ticker, date, horizon, and model version."""
+    clauses = []
+    params: list[object] = []
+    if ticker is not None:
+        clauses.append("ticker = ?")
+        params.append(ticker.strip().upper())
+    if as_of_date is not None:
+        clauses.append("as_of_date = ?")
+        target_d = as_of_date if isinstance(as_of_date, date) else date.fromisoformat(str(as_of_date)[:10])
+        params.append(target_d)
+    if horizon_days is not None:
+        clauses.append("horizon_days = ?")
+        params.append(int(horizon_days))
+    if model_version is not None:
+        clauses.append("model_version = ?")
+        params.append(str(model_version))
+
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    return conn.execute(
+        f"SELECT * FROM forecasts {where} ORDER BY as_of_date DESC, expected_beat_pct DESC NULLS LAST",
+        params,
+    ).fetchdf()
+
+
+def query_latest_forecasts(
+    conn: duckdb.DuckDBPyConnection,
+    horizon_days: int = 90,
+    as_of_date: date | str | None = None,
+) -> pd.DataFrame:
+    """Return latest forecasts across tickers for a given horizon."""
+    params: list[object] = [int(horizon_days)]
+    date_filter = ""
+    if as_of_date is not None:
+        target_d = as_of_date if isinstance(as_of_date, date) else date.fromisoformat(str(as_of_date)[:10])
+        date_filter = "AND as_of_date <= ?"
+        params.append(target_d)
+
+    query = f"""
+    WITH ranked AS (
+        SELECT *,
+               ROW_NUMBER() OVER(PARTITION BY ticker ORDER BY as_of_date DESC, created_at DESC) as rk
+        FROM forecasts
+        WHERE horizon_days = ? {date_filter}
+    )
+    SELECT * EXCLUDE (rk) FROM ranked WHERE rk = 1
+    ORDER BY expected_beat_pct DESC NULLS LAST
+    """
+    return conn.execute(query, params).fetchdf()
+
 
 

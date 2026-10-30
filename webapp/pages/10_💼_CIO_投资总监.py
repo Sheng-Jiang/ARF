@@ -8,6 +8,7 @@ hardcoded sample — if the replay cannot run, the page says so.
 
 from __future__ import annotations
 
+import math
 import os
 from datetime import date
 
@@ -110,6 +111,7 @@ def _cached_replay(
     universe: tuple[str, ...],
     start: str,
     end: str,
+    forecasts_df: pd.DataFrame | None = None,
 ):
     return run_replay(
         snapshots_df=snapshots_df,
@@ -118,6 +120,7 @@ def _cached_replay(
         universe=list(universe),
         start=start,
         end=end,
+        forecasts_df=forecasts_df,
     )
 
 
@@ -160,6 +163,7 @@ if "SPY" in prices and universe and end_iso >= start_iso:
                 universe,
                 start_iso,
                 end_iso,
+                forecasts_df=data.load_forecasts(),
             )
             cockpit = build_cockpit(replay, snapshot_df=snapshot_df, spec_path=mandate_path)
     except Exception as exc:  # noqa: BLE001 — surface the real failure
@@ -224,8 +228,9 @@ if cockpit is not None:
 
 st.divider()
 
-tab_regime, tab_book, tab_rebalance, tab_scorecard, tab_control = st.tabs([
+tab_regime, tab_barometer, tab_book, tab_rebalance, tab_scorecard, tab_control = st.tabs([
     "🌐 宏观政体与 Pod 资本分配",
+    "🔮 预测晴雨表与前瞻 Alpha",
     "📚 投资组合底仓与价值链结构",
     "📋 调仓指令与风控熔断",
     "🏆 分析师与策略计分卡",
@@ -300,7 +305,155 @@ with tab_regime:
         st.plotly_chart(fig_donut, use_container_width=True)
         st.dataframe(pod_df, use_container_width=True, hide_index=True)
 
-# ── TAB 2: 投资组合持仓与价值链结构 ───────────────────────────────────────────
+# ── TAB 2: 预测晴雨表与前瞻 Alpha ──────────────────────────────────────────
+with tab_barometer:
+    st.subheader("🔮 4 层前瞻预测晴雨表与机会雷达 (Predictive Barometer)")
+    st.markdown(
+        """
+        > **从滞后温度计到前瞻晴雨表**：传统 ARF 温度计仅测量市场*已经定价了多少*（Trailing FCF 逆向 DCF）；
+        > 4 层前瞻晴雨表系统性预测**未来 1–4 个季度的超预期弹性 (Alpha)**，在财报披露前 6 周捕获一致预期修正动能。
+        """
+    )
+
+    fc_df = data.load_forecasts(as_of)
+    if fc_df.empty:
+        fc_df = data.load_forecasts(None)
+
+    # 1. CapEx 传导与供应链瓶颈敏感性沙盒 (Interactive Sandbox)
+    with st.expander("🛠️ 下游云厂商 CapEx 传导与物理产能瓶颈压力测试 (Interactive CapEx Shock Simulator)", expanded=False):
+        sim_col1, sim_col2, sim_col3 = st.columns([2, 2, 2])
+        with sim_col1:
+            capex_shock = st.slider(
+                "☁️ 下游云巨头 (MSFT/GOOGL/META) CapEx 变动冲击",
+                min_value=-30,
+                max_value=60,
+                value=0,
+                step=5,
+                format="%+d%%",
+                help="调整下游 Hyperscaler 算力资本开支假设，实时传导至中上游硬件与光模块供应商",
+            )
+        with sim_col2:
+            capacity_cap = st.slider(
+                "🏭 晶圆/先进封装 (CoWoS) 物理产能扩张上限",
+                min_value=20,
+                max_value=120,
+                value=80,
+                step=10,
+                format="%d%%",
+                help="Leontief 瓶颈夹钳：物理产能上限硬性截断名义需求拉动，防止虚假高增长",
+            )
+        with sim_col3:
+            st.metric(
+                "📡 传导效应状态",
+                f"{'正向拉动' if capex_shock > 0 else ('削减承压' if capex_shock < 0 else '基准中性')}",
+                f"冲击 {capex_shock:+d}% / 产能截断 {capacity_cap}%",
+            )
+
+    if not fc_df.empty:
+        display_df = fc_df.copy()
+        if capex_shock != 0 or capacity_cap < 100:
+            clamp_val = capacity_cap / 100.0
+            shock_factor = 1.0 + (capex_shock / 100.0)
+            sim_preds = []
+            sim_beats = []
+            sim_probs = []
+            for _, r in display_df.iterrows():
+                base_p = float(r.get("predicted_rev_growth") or 0.15)
+                cons_g = float(r.get("consensus_rev_growth") or 0.15)
+                sim_p = min(base_p * shock_factor, clamp_val)
+                sim_b = sim_p - cons_g
+                prob = 1.0 / (1.0 + math.exp(-max(-3.0, min(3.0, sim_b * 10.0))))
+                sim_preds.append(round(sim_p, 4))
+                sim_beats.append(round(sim_b, 4))
+                sim_probs.append(round(prob, 4))
+            display_df["predicted_rev_growth"] = sim_preds
+            display_df["expected_beat_pct"] = sim_beats
+            display_df["eps_surprise_prob"] = sim_probs
+
+        # 2. 前瞻晴雨表雷达散点图
+        snap_df = data.load_snapshot(as_of)
+        if snap_df.empty:
+            snap_df = data.load_snapshot_history()
+
+        merged_radar = display_df.copy()
+        if not snap_df.empty:
+            merged_radar = pd.merge(
+                display_df,
+                snap_df[["ticker", "name", "v_score", "arf", "market_cap_usd"]].drop_duplicates("ticker"),
+                on="ticker",
+                how="left",
+            )
+            merged_radar["v_score"] = pd.to_numeric(merged_radar["v_score"], errors="coerce").fillna(50.0)
+            merged_radar["expected_beat_pct"] = pd.to_numeric(merged_radar["expected_beat_pct"], errors="coerce").fillna(0.0)
+            merged_radar["eps_surprise_prob"] = pd.to_numeric(merged_radar["eps_surprise_prob"], errors="coerce").fillna(0.5)
+
+            st.markdown("#### 🎯 前瞻业绩超越预期 vs 滞后估值倍数 (Alpha Opportunity Radar)")
+            fig_radar = px.scatter(
+                merged_radar,
+                x="v_score",
+                y="expected_beat_pct",
+                size=merged_radar["market_cap_usd"].map(lambda v: max(1e9, float(v)) if pd.notna(v) else 1e9),
+                color="eps_surprise_prob",
+                hover_name="ticker",
+                hover_data=["predicted_rev_growth", "fair_value_p50", "expected_return_p50"],
+                color_continuous_scale=["#f87171", "#fbbf24", "#34d399"],
+                labels={
+                    "v_score": "滞后估值拉伸 (V-score 0-100)",
+                    "expected_beat_pct": "前瞻超越一致预期幅度 (ĝ_ARF - Consensus)",
+                    "eps_surprise_prob": "超预期胜率",
+                },
+            )
+            fig_radar.add_hline(y=0.0, line_dash="dash", line_color="rgba(148, 163, 184, 0.4)")
+            fig_radar.add_vline(x=50.0, line_dash="dash", line_color="rgba(148, 163, 184, 0.4)")
+            fig_radar.update_layout(
+                height=380,
+                margin=dict(l=20, r=20, t=20, b=20),
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="#cbd5e1"),
+            )
+            st.plotly_chart(fig_radar, use_container_width=True)
+
+        # 3. 4-Layer Multi-Horizon Metrics Table
+        st.markdown("#### 📑 4 层全景预测明细表 (Multi-Horizon Forecast Fan)")
+        table_cols = [
+            "ticker", "predicted_rev_growth", "consensus_rev_growth",
+            "expected_beat_pct", "eps_surprise_prob", "revision_velocity_14d",
+            "fair_value_p10", "fair_value_p50", "fair_value_p90",
+            "expected_return_p50", "regime_breakout_prob",
+        ]
+        available_cols = [c for c in table_cols if c in display_df.columns]
+        view_df = display_df[available_cols].copy()
+
+        for col in ["predicted_rev_growth", "consensus_rev_growth", "expected_beat_pct", "expected_return_p50", "revision_velocity_14d"]:
+            if col in view_df.columns:
+                view_df[col] = view_df[col].map(lambda v: f"{v:+.1%}" if pd.notna(v) else "—")
+        for col in ["eps_surprise_prob", "regime_breakout_prob"]:
+            if col in view_df.columns:
+                view_df[col] = view_df[col].map(lambda v: f"{v:.0%}" if pd.notna(v) else "—")
+        for col in ["fair_value_p10", "fair_value_p50", "fair_value_p90"]:
+            if col in view_df.columns:
+                view_df[col] = view_df[col].map(lambda v: f"${v:,.2f}" if pd.notna(v) else "—")
+
+        rename_dict = {
+            "ticker": "标的代码",
+            "predicted_rev_growth": "L1 预测营收增速 (ĝ)",
+            "consensus_rev_growth": "卖方一致增速",
+            "expected_beat_pct": "预期超额差 (Beat)",
+            "eps_surprise_prob": "L2 超预期胜率",
+            "revision_velocity_14d": "14天修正动能",
+            "fair_value_p10": "L3 悲观估值 (P10)",
+            "fair_value_p50": "基准估值 (P50)",
+            "fair_value_p90": "乐观估值 (P90)",
+            "expected_return_p50": "12月空间 (P50)",
+            "regime_breakout_prob": "L4 筹码突破率",
+        }
+        view_df = view_df.rename(columns=rename_dict)
+        st.dataframe(view_df, use_container_width=True, hide_index=True)
+    else:
+        st.info("当前快照日暂无前瞻预测晴雨表数据，请在【CIO 指挥中心】运行预测管线。")
+
+# ── TAB 3: 投资组合持仓与价值链结构 ───────────────────────────────────────────
 with tab_book:
     st.subheader("📚 基金活跃持仓与 5 层价值链分布 (Current Book)")
     if cockpit is None or cockpit.positions.empty:
@@ -508,6 +661,14 @@ with tab_control:
         if st.button("🚀 重新运行回放", use_container_width=True, disabled=halted):
             st.cache_data.clear()
             st.rerun()
+
+        if st.button("🔮 计算前瞻晴雨表", use_container_width=True, disabled=halted):
+            with st.spinner("正在计算 4 层前瞻预测晴雨表…"):
+                from arf.forecast import generate_forecasts_for_universe
+                conn = data.get_conn()
+                generate_forecasts_for_universe(as_of, conn, persist=True)
+                st.cache_data.clear()
+                st.rerun()
 
     st.divider()
     st.markdown("#### 🛡️ 风控冻结开关 (Session Kill-Switch)")
