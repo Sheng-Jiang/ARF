@@ -8,7 +8,6 @@ hardcoded sample — if the replay cannot run, the page says so.
 
 from __future__ import annotations
 
-import math
 import os
 from datetime import date
 
@@ -124,6 +123,22 @@ def _cached_replay(
     )
 
 
+def _price_symbol(ticker: object) -> str:
+    """Currency symbol of the *trading* currency for a forecast row.
+
+    Fair-value levels come back in the instrument's trading currency: USD for
+    US names and USD-traded ADRs (BABA/BIDU/GDS/VNET), CNY for A-shares, HKD
+    for HK names. The table pools both legs, so one hardcoded ``$`` misread
+    A-share targets by ~7x.
+    """
+    t = str(ticker).strip().upper()
+    if t.endswith((".SZ", ".SH")):
+        return "¥"
+    if t.endswith(".HK"):
+        return "HK$"
+    return "$"
+
+
 snapshot_df = data.load_snapshot(as_of)
 us_rows = snapshot_df[snapshot_df["leg"] == "US"] if "leg" in snapshot_df.columns else snapshot_df
 universe = tuple(sorted(us_rows["ticker"].dropna().unique()))
@@ -163,7 +178,7 @@ if "SPY" in prices and universe and end_iso >= start_iso:
                 universe,
                 start_iso,
                 end_iso,
-                forecasts_df=data.load_forecasts(),
+                forecasts_df=data.load_forecast_history(as_of),
             )
             cockpit = build_cockpit(replay, snapshot_df=snapshot_df, spec_path=mandate_path)
     except Exception as exc:  # noqa: BLE001 — surface the real failure
@@ -337,32 +352,57 @@ with tab_barometer:
                 "🏭 晶圆/先进封装 (CoWoS) 物理产能扩张上限",
                 min_value=20,
                 max_value=120,
-                value=80,
+                value=100,
                 step=10,
                 format="%d%%",
-                help="Leontief 瓶颈夹钳：物理产能上限硬性截断名义需求拉动，防止虚假高增长",
+                help="Leontief 瓶颈夹钳：物理产能上限硬性截断名义需求拉动，防止虚假高增长（100% = 不截断基准预测）",
             )
         with sim_col3:
+            if capex_shock > 0:
+                sim_state = "正向拉动"
+            elif capex_shock < 0:
+                sim_state = "削减承压"
+            elif capacity_cap < 100:
+                sim_state = "产能约束"
+            else:
+                sim_state = "基准中性"
             st.metric(
                 "📡 传导效应状态",
-                f"{'正向拉动' if capex_shock > 0 else ('削减承压' if capex_shock < 0 else '基准中性')}",
+                sim_state,
                 f"冲击 {capex_shock:+d}% / 产能截断 {capacity_cap}%",
             )
 
     if not fc_df.empty:
         display_df = fc_df.copy()
         if capex_shock != 0 or capacity_cap < 100:
+            from arf.forecast import calibrate_eps_surprise_probability
+
             clamp_val = capacity_cap / 100.0
             shock_factor = 1.0 + (capex_shock / 100.0)
+            # The capacity ceiling is a physical constraint on mapped
+            # suppliers, not on every AI name's revenue line.
+            links_df = data.load_supply_chain_links()
+            suppliers = (
+                set(links_df["supplier_ticker"].astype(str).str.upper())
+                if not links_df.empty
+                else set()
+            )
             sim_preds = []
             sim_beats = []
             sim_probs = []
             for _, r in display_df.iterrows():
-                base_p = float(r.get("predicted_rev_growth") or 0.15)
-                cons_g = float(r.get("consensus_rev_growth") or 0.15)
-                sim_p = min(base_p * shock_factor, clamp_val)
+                base_p = r.get("predicted_rev_growth")
+                base_p = float(base_p) if pd.notna(base_p) else 0.15
+                cons_g = r.get("consensus_rev_growth")
+                cons_g = float(cons_g) if pd.notna(cons_g) else 0.15
+                sim_p = base_p * shock_factor
+                if str(r.get("ticker", "")).strip().upper() in suppliers:
+                    sim_p = min(sim_p, clamp_val)
                 sim_b = sim_p - cons_g
-                prob = 1.0 / (1.0 + math.exp(-max(-3.0, min(3.0, sim_b * 10.0))))
+                v14 = r.get("revision_velocity_14d")
+                prob = calibrate_eps_surprise_probability(
+                    sim_b, float(v14) if pd.notna(v14) else None
+                )
                 sim_preds.append(round(sim_p, 4))
                 sim_beats.append(round(sim_b, 4))
                 sim_probs.append(round(prob, 4))
@@ -431,9 +471,17 @@ with tab_barometer:
         for col in ["eps_surprise_prob", "regime_breakout_prob"]:
             if col in view_df.columns:
                 view_df[col] = view_df[col].map(lambda v: f"{v:.0%}" if pd.notna(v) else "—")
+        symbols = (
+            view_df["ticker"].map(_price_symbol)
+            if "ticker" in view_df.columns
+            else pd.Series(["$"] * len(view_df), index=view_df.index)
+        )
         for col in ["fair_value_p10", "fair_value_p50", "fair_value_p90"]:
             if col in view_df.columns:
-                view_df[col] = view_df[col].map(lambda v: f"${v:,.2f}" if pd.notna(v) else "—")
+                view_df[col] = [
+                    f"{sym}{v:,.2f}" if pd.notna(v) else "—"
+                    for sym, v in zip(symbols, view_df[col], strict=True)
+                ]
 
         rename_dict = {
             "ticker": "标的代码",
@@ -449,6 +497,7 @@ with tab_barometer:
             "regime_breakout_prob": "L4 筹码突破率",
         }
         view_df = view_df.rename(columns=rename_dict)
+        st.caption("估值列以各标的的**交易本币**计价（A 股 ¥ / 港股 HK$ / 美股 $）。")
         st.dataframe(view_df, use_container_width=True, hide_index=True)
     else:
         st.info("当前快照日暂无前瞻预测晴雨表数据，请在【CIO 指挥中心】运行预测管线。")
@@ -662,13 +711,26 @@ with tab_control:
             st.cache_data.clear()
             st.rerun()
 
-        if st.button("🔮 计算前瞻晴雨表", use_container_width=True, disabled=halted):
+        # In GCS mode the DuckDB is a temp download; anything written to it is
+        # lost on the next cache refresh and never reaches other replicas, so
+        # the button is disabled rather than pretending the write persisted.
+        gcs_mode = data.DATA_SOURCE == "gcs"
+        if st.button(
+            "🔮 计算前瞻晴雨表",
+            use_container_width=True,
+            disabled=halted or gcs_mode,
+        ):
             with st.spinner("正在计算 4 层前瞻预测晴雨表…"):
                 from arf.forecast import generate_forecasts_for_universe
                 conn = data.get_conn()
                 generate_forecasts_for_universe(as_of, conn, persist=True)
                 st.cache_data.clear()
                 st.rerun()
+        if gcs_mode:
+            st.caption(
+                "GCS 只读模式：本页数据库为临时副本，写入不会回传。"
+                "前瞻晴雨表由 `arf.run` 管线生成并写入 GCS。"
+            )
 
     st.divider()
     st.markdown("#### 🛡️ 风控冻结开关 (Session Kill-Switch)")

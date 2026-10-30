@@ -153,3 +153,20 @@ class TestForecastAndSupplyChainLoading:
         assert not latest_fc.empty
         assert latest_fc.iloc[0]["ticker"] == "NVDA"
 
+    def test_forecast_history_is_point_in_time(self, wired):
+        """The replay needs every revision visible at the session date, not just the latest."""
+        wired.execute(_SCHEMA_FORECASTS)
+        rows = [
+            {"ticker": "NVDA", "as_of_date": "2026-05-01", "horizon_days": 90,
+             "predicted_rev_growth": 0.40, "model_version": "v1.0"},
+            {"ticker": "NVDA", "as_of_date": "2026-06-01", "horizon_days": 90,
+             "predicted_rev_growth": 0.55, "model_version": "v1.0"},
+        ]
+        upsert_forecasts(wired, rows)
+
+        history = webapp_data.load_forecast_history(date(2026, 5, 15))
+        assert len(history) == 1
+        assert str(history.iloc[0]["as_of_date"])[:10] == "2026-05-01"
+
+        assert len(webapp_data.load_forecast_history()) == 2
+

@@ -38,10 +38,24 @@ from arf.db import (
     upsert_supply_chain_links,
 )
 from arf.implied import DEFAULT_TERMINAL_GROWTH, present_value
+from arf.scoring import _local_market_cap
 
 log = logging.getLogger(__name__)
 
 FORECAST_MODEL_VERSION = "v1.0"
+
+# Physical bottleneck clamp applied to suppliers whose growth is pulled by
+# customer demand (CoWoS / advanced-packaging capacity expansion). Only names
+# that are mapped as suppliers get it — a capacity ceiling is not meaningful
+# for a software or hyperscaler revenue line.
+DEFAULT_BOTTLENECK_CLAMP = 0.80
+
+# A ten-year intrinsic value is not a twelve-month target price. The market
+# closes only part of the gap to intrinsic value in a year; applying the full
+# DCF ratio pinned every high-growth name at the 3x guardrail (35% growth
+# against a 10% WACC implies ~150x FCF, so any name with a ~2% FCF yield
+# cleared the ceiling and the fan carried no cross-sectional information).
+HORIZON_CONVERGENCE = 0.30
 
 # Canonical seed supply chain edges (supplier -> customer) with estimated revenue share %
 # and BoM % share. Can be enriched by the Supply Chain Traversal Agent.
@@ -198,6 +212,22 @@ class ForecastResult:
         return d
 
 
+def _num(value: object) -> float | None:
+    """Coerce a possibly-NULL/NaN scalar to ``float``, or ``None``.
+
+    ``value or default`` is unsafe on values read out of DuckDB: a NULL comes
+    back as ``float('nan')``, and ``bool(float('nan'))`` is ``True``, so the
+    NaN wins the ``or`` and silently skips the intended fallback.
+    """
+    if value is None:
+        return None
+    try:
+        out = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return None if math.isnan(out) else out
+
+
 def seed_default_supply_chain_links(conn: Any) -> None:
     """Seed the database with verified canonical supply chain links if empty."""
     existing = query_supply_chain_links(conn)
@@ -270,7 +300,7 @@ def compute_revision_velocity(
     WHERE ticker = ? AND report_date <= ? AND report_date >= ?
     ORDER BY report_date ASC
     """
-    earliest_cutoff = as_of - pd.Timedelta(days=lookback_30 + 15)
+    earliest_cutoff = as_of - pd.Timedelta(days=max(lookback_14, lookback_30) + 7)
     df = conn.execute(query, [clean_t, as_of, earliest_cutoff]).fetchdf()
     if df.empty or len(df) < 2:
         return None, None
@@ -288,6 +318,10 @@ def compute_revision_velocity(
             return float(valid_tgt.mean())
         return None
 
+    # Each comparison window is `lookback` days wide and centred on the
+    # horizon in its name, ending where the closer window begins. The windows
+    # must not overlap: one report landing in both would count as its own
+    # corroboration when the two velocities feed the surprise logits.
     now_sub = df[df["report_date"] >= (as_of_ts - pd.Timedelta(days=7))]
     d14_sub = df[
         (df["report_date"] >= (as_of_ts - pd.Timedelta(days=lookback_14 + 7)))
@@ -295,7 +329,7 @@ def compute_revision_velocity(
     ]
     d30_sub = df[
         (df["report_date"] >= (as_of_ts - pd.Timedelta(days=lookback_30 + 7)))
-        & (df["report_date"] < (as_of_ts - pd.Timedelta(days=lookback_14)))
+        & (df["report_date"] < (as_of_ts - pd.Timedelta(days=lookback_30 - 7)))
     ]
 
     val_now = _metric(now_sub) or _metric(df.tail(3))
@@ -341,7 +375,7 @@ def compute_fair_value_distribution(
     Returns:
         (fair_value_p10, fair_value_p50, fair_value_p90, expected_return_p50)
     """
-    if price <= 0 or market_cap <= 0:
+    if not (math.isfinite(price) and price > 0) or not (math.isfinite(market_cap) and market_cap > 0):
         return None, None, None, None
 
     term_g = terminal_growth or DEFAULT_TERMINAL_GROWTH.get(leg, 0.03)
@@ -355,22 +389,36 @@ def compute_fair_value_distribution(
     try:
         # Cap 10-year compound growth rate at 35% to prevent compounding explosion
         g_dcf_base = float(np.clip(predicted_growth, -0.30, 0.35))
+
+        def _target_intrinsic(pv: float) -> float:
+            """12-month target: the current price plus a fraction of the DCF gap.
+
+            ``pv / market_cap`` is the intrinsic-value multiple. Multiplying
+            the price by it directly assumes the market reprices to intrinsic
+            value within twelve months, which is why every high-growth name
+            used to pin at the guardrail. Only ``HORIZON_CONVERGENCE`` of the
+            gap is expected to close in a year.
+            """
+            intrinsic_multiple = pv / market_cap
+            return price * (1.0 + (intrinsic_multiple - 1.0) * HORIZON_CONVERGENCE)
+
         pv_base = present_value(effective_fcf, g_dcf_base, wacc, years=10, terminal_growth=term_g)
-        raw_price_p50 = price * (pv_base / market_cap)
+        raw_price_p50 = _target_intrinsic(pv_base)
 
         # Bear Case (P10): Lower growth (-15%), higher cost of capital (+150 bps)
         g_bear = float(np.clip(g_dcf_base - 0.15, -0.35, 0.25))
         wacc_bear = wacc + 0.015
         pv_bear = present_value(effective_fcf, g_bear, wacc_bear, years=10, terminal_growth=term_g)
-        raw_price_p10 = price * (pv_bear / market_cap)
+        raw_price_p10 = _target_intrinsic(pv_bear)
 
         # Bull Case (P90): Higher growth (+10%), lower risk premium (-75 bps)
         g_bull = float(np.clip(g_dcf_base + 0.10, -0.20, 0.45))
         wacc_bull = max(term_g + 0.02, wacc - 0.0075)
         pv_bull = present_value(effective_fcf, g_bull, wacc_bull, years=10, terminal_growth=term_g)
-        raw_price_p90 = price * (pv_bull / market_cap)
+        raw_price_p90 = _target_intrinsic(pv_bull)
 
-        # Institutional guardrails / bounded target price envelope [-75%, +250%]
+        # Safety rails only — with the horizon convergence above they should
+        # rarely bind: P50 ∈ [-65%, +200%], P10 ∈ [-75%, P50], P90 ∈ [P50, +300%].
         price_p50 = float(np.clip(raw_price_p50, price * 0.35, price * 3.00))
         price_p10 = float(np.clip(min(raw_price_p10, price_p50 * 0.85), price * 0.25, price_p50))
         price_p90 = float(np.clip(max(raw_price_p90, price_p50 * 1.15), price_p50, price * 4.00))
@@ -487,20 +535,23 @@ def generate_forecast_for_ticker(
             return None
 
     row = snap.iloc[0].to_dict()
-    price = float(row.get("price") or 0.0)
-    market_cap_usd = float(row.get("market_cap_usd") or 0.0)
-    fin_fx = row.get("financial_fx_usd") or row.get("fx_rate_usd") or 1.0
-    fin_fx_val = float(fin_fx) if not pd.isna(fin_fx) and float(fin_fx) > 0 else 1.0
-    market_cap_local = market_cap_usd * fin_fx_val
-    fcf = row.get("free_cash_flow")
-    fcf0 = float(fcf) if (fcf is not None and not pd.isna(fcf)) else None
+    price = _num(row.get("price")) or 0.0
+    # Market cap in the currency the financials (and therefore FCF) are
+    # reported in — not the trading currency. Reuses the reverse-DCF fallback
+    # chain (financial_fx_usd → fx_rate_usd → 1.0); a raw `or` would treat a
+    # NULL financial_fx_usd as NaN (truthy) and silently use 1.0, inflating
+    # the FCF yield ~7x for USD-traded/CNY-reporting names (BABA, BIDU, GDS,
+    # VNET) and ~32x for TSM.
+    market_cap_local = _local_market_cap(row) or 0.0
+    fcf0 = _num(row.get("free_cash_flow"))
     leg = str(row.get("leg") or "US")
     froth = bool(row.get("froth_flag") or False)
     wacc = 0.10 if leg == "US" else 0.12
 
     # Consensus growth benchmark
-    consensus_raw = row.get("eps_2yr_cagr")
-    consensus_g = float(consensus_raw) if (consensus_raw is not None and not pd.isna(consensus_raw)) else 0.15
+    consensus_g = _num(row.get("eps_2yr_cagr"))
+    if consensus_g is None:
+        consensus_g = 0.15
 
     # 2. Layer 1: Supply Chain Demand Pull
     links = query_supply_chain_links(conn, supplier_ticker=clean_t)
@@ -516,14 +567,23 @@ def generate_forecast_for_ticker(
         for _, c_row in c_df.iterrows():
             c_tick = str(c_row["ticker"]).strip().upper()
             if c_tick not in cust_growth_map:
-                cg = c_row.get("eps_2yr_cagr") or c_row.get("revenue_yoy_growth") or 0.20
-                cust_growth_map[c_tick] = float(cg) if not pd.isna(cg) else 0.20
+                cg = _num(c_row.get("eps_2yr_cagr"))
+                if cg is None:
+                    cg = _num(c_row.get("revenue_yoy_growth"))
+                cust_growth_map[c_tick] = cg if cg is not None else 0.20
 
+    organic_growth = _num(row.get("revenue_yoy_growth"))
+    if organic_growth is None:
+        organic_growth = 0.15
+    # Only suppliers that are actually mapped to a customer face a physical
+    # capacity ceiling; unmapped names keep their organic growth.
+    bottleneck_clamp = DEFAULT_BOTTLENECK_CLAMP if not links.empty else None
     pred_growth = compute_supply_chain_growth(
         clean_t,
         links,
         cust_growth_map,
-        organic_growth=float(row.get("revenue_yoy_growth") or 0.15),
+        organic_growth=organic_growth,
+        bottleneck_clamp=bottleneck_clamp,
     )
     expected_beat = pred_growth - consensus_g
 

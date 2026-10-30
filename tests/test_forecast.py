@@ -8,6 +8,7 @@ from arf.db import (
     query_forecasts,
     query_latest_forecasts,
     upsert_snapshot,
+    upsert_supply_chain_links,
 )
 from arf.forecast import (
     calibrate_eps_surprise_probability,
@@ -239,3 +240,109 @@ def test_generate_forecast_for_ticker_and_universe(conn):
     latest_fc = query_latest_forecasts(conn)
     assert not latest_fc.empty
     assert "NVDA" in latest_fc["ticker"].values
+
+
+def test_revision_windows_do_not_overlap(conn):
+    """A report inside one horizon must not count toward the other as well."""
+    as_of = date(2026, 5, 20)
+    reports = [
+        # 30 days before as_of — belongs to the 30d window only
+        {"report_date": "2026-04-20", "eps_forecast": 1.0},
+        # 18 days before as_of — belongs to the 14d window only
+        {"report_date": "2026-05-02", "eps_forecast": 2.0},
+        # current window
+        {"report_date": "2026-05-18", "eps_forecast": 4.0},
+    ]
+    for r in reports:
+        conn.execute(
+            """
+            INSERT INTO research_reports (ticker, as_of_date, report_date, institution, title, target_price, rating, eps_forecast)
+            VALUES ('NVDA', ?, ?, 'Morgan Stanley', 'Report', 100.0, 'Overweight', ?)
+            """,
+            [as_of, r["report_date"], r["eps_forecast"]],
+        )
+
+    v14, v30 = compute_revision_velocity("NVDA", conn, as_of)
+    # 14d: 4.0 vs 2.0 only (the -18d report); 30d: 4.0 vs 1.0 only (the -30d one).
+    assert pytest.approx(v14, rel=1e-6) == 1.0
+    assert pytest.approx(v30, rel=1e-6) == 3.0
+
+
+def _snapshot_row(ticker: str, **overrides) -> dict:
+    row = {
+        "ticker": ticker,
+        "name": ticker,
+        "leg": "US",
+        "layer": "L2",
+        "price": 100.0,
+        "market_cap_usd": 1.0e11,
+        "free_cash_flow": 2.0e9,
+        "eps_2yr_cagr": 0.30,
+        "revenue_yoy_growth": 0.30,
+        "revenue_ntm": 1.0e10,
+        "roe": 0.25,
+        "froth_flag": False,
+    }
+    row.update(overrides)
+    return row
+
+
+def test_null_financial_fx_falls_back_to_trading_rate(conn):
+    """NULL financial_fx_usd must not collapse to 1.0 for USD-traded ADRs."""
+    as_of = date(2026, 5, 20)
+    base = dict(
+        leg="China",
+        price=100.0,
+        market_cap_usd=1.0e11,
+        free_cash_flow=2.0e10,  # CNY
+        eps_2yr_cagr=0.30,
+        revenue_yoy_growth=0.30,
+    )
+    df = pd.DataFrame([
+        _snapshot_row("BABA", financial_fx_usd=7.1, fx_rate_usd=1.0, **base),
+        # Same economics, reporting FX missing: must fall back to fx_rate_usd.
+        _snapshot_row("BIDU", financial_fx_usd=None, fx_rate_usd=7.1, **base),
+    ])
+    upsert_snapshot(conn, df, as_of)
+
+    a = generate_forecast_for_ticker("BABA", as_of, conn)
+    b = generate_forecast_for_ticker("BIDU", as_of, conn)
+    assert a is not None and b is not None
+    assert a.fair_value_p50 == b.fair_value_p50
+    assert a.fair_value_p10 == b.fair_value_p10
+
+
+def test_customer_growth_skips_null_consensus_to_revenue_growth(conn):
+    """A NULL eps_2yr_cagr on the customer must fall through to revenue growth."""
+    as_of = date(2026, 5, 20)
+    df = pd.DataFrame([
+        _snapshot_row(
+            "300308.SZ", leg="China", price=100.0,
+            market_cap_usd=1.0e10, free_cash_flow=5.0e8,
+            eps_2yr_cagr=0.25, revenue_yoy_growth=0.10,
+        ),
+        # Customer with no consensus CAGR but strong reported revenue growth.
+        _snapshot_row("NVDA", eps_2yr_cagr=None, revenue_yoy_growth=0.60),
+    ])
+    upsert_snapshot(conn, df, as_of)
+    # Replace the canonical graph with a single 38% edge so the math is explicit.
+    upsert_supply_chain_links(conn, [
+        {"supplier_ticker": "300308.SZ", "customer_ticker": "NVDA", "revenue_share_pct": 38.0},
+    ])
+
+    fc = generate_forecast_for_ticker("300308.SZ", as_of, conn)
+    assert fc is not None
+    # 0.38 * 0.60 + 0.62 * 0.10 = 0.29 (not 0.38 * 0.20 + 0.62 * 0.10 = 0.138)
+    assert pytest.approx(fc.predicted_rev_growth, abs=1e-4) == 0.29
+
+
+def test_fair_value_fan_is_not_pinned_to_the_guardrail():
+    """High-growth names must still be ordered by their FCF yield."""
+    common = dict(price=100.0, market_cap=3.0e11, predicted_growth=0.55, wacc=0.10)
+    _, p50_low_yield, _, _ = compute_fair_value_distribution(fcf0=6.0e9, **common)
+    _, p50_high_yield, _, _ = compute_fair_value_distribution(fcf0=1.5e10, **common)
+
+    assert p50_low_yield is not None and p50_high_yield is not None
+    assert p50_low_yield < 300.0  # not clipped to the 3x ceiling
+    assert p50_high_yield < 300.0
+    assert p50_high_yield > p50_low_yield  # still carries cross-sectional signal
