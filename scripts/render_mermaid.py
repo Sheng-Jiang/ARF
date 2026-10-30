@@ -6,7 +6,7 @@ import requests
 
 
 def main():
-    md_path = "ARF_Investor_Whitepaper.md"
+    md_path = "docs/ARF_Investor_Whitepaper.md" if os.path.exists("docs/ARF_Investor_Whitepaper.md") else "ARF_Investor_Whitepaper.md"
     if not os.path.exists(md_path):
         print(f"Error: {md_path} not found")
         return

@@ -595,6 +595,15 @@ def _run_value_chain_pipeline(conn, df: pd.DataFrame, as_of: date) -> None:
     console.print(f"Persisted {len(rows)} 双价值链 layer/leg rows for {as_of}")
 
 
+def _run_forecast_pipeline(conn, as_of: date) -> None:
+    """Compute and persist 4-layer predictive forecasts for the universe."""
+    from arf.forecast import generate_forecasts_for_universe
+
+    console.print("Computing 4-layer predictive forecasts (Barometer engine)…")
+    fc_df = generate_forecasts_for_universe(as_of, conn, persist=True)
+    console.print(f"Persisted {len(fc_df)} forward forecasts for {as_of}")
+
+
 def run_pipeline(
     as_of: date,
     data_dir: Path = Path("data"),
@@ -680,6 +689,12 @@ def run_pipeline(
             _run_value_chain_pipeline(conn, df, as_of)
         except Exception:
             log.exception("Value-chain snapshot failed - continuing main pipeline")
+
+        # 4-Layer Predictive Forecasting Engine (The Barometer)
+        try:
+            _run_forecast_pipeline(conn, as_of)
+        except Exception:
+            log.exception("Predictive forecast pipeline failed - continuing main pipeline")
 
         _maybe_generate_gemini_summaries(conn, df, as_of)
 

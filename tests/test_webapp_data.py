@@ -4,7 +4,15 @@ from datetime import date
 import duckdb
 import pytest
 
-from arf.db import _SCHEMA_POOL_CHANGES, _SCHEMA_POOL_MEMBERSHIP, upsert_pool_membership
+from arf.db import (
+    _SCHEMA_FORECASTS,
+    _SCHEMA_POOL_CHANGES,
+    _SCHEMA_POOL_MEMBERSHIP,
+    _SCHEMA_SUPPLY_CHAIN_LINKS,
+    upsert_forecasts,
+    upsert_pool_membership,
+    upsert_supply_chain_links,
+)
 from webapp import data as webapp_data
 
 UNIVERSE_YAML = """\
@@ -105,3 +113,60 @@ class TestPoolConfigFallback:
         monkeypatch.setattr(webapp_data, "UNIVERSE_PATH", tmp_path / "nope.yaml")
         assert webapp_data.list_pool_ids() == []
         assert webapp_data.load_pool_membership().empty
+
+
+class TestForecastAndSupplyChainLoading:
+    def test_load_forecasts_and_supply_chain(self, wired):
+        wired.execute(_SCHEMA_FORECASTS)
+        wired.execute(_SCHEMA_SUPPLY_CHAIN_LINKS)
+
+        upsert_supply_chain_links(wired, [
+            {"supplier_ticker": "300308.SZ", "customer_ticker": "NVDA", "revenue_share_pct": 35.0}
+        ])
+        links = webapp_data.load_supply_chain_links()
+        assert not links.empty
+        assert links.iloc[0]["supplier_ticker"] == "300308.SZ"
+
+        # Supplier filter
+        filtered_links = webapp_data.load_supply_chain_links("300308.SZ")
+        assert len(filtered_links) == 1
+
+        upsert_forecasts(wired, [
+            {
+                "ticker": "NVDA",
+                "as_of_date": "2026-06-01",
+                "horizon_days": 90,
+                "predicted_rev_growth": 0.50,
+                "consensus_rev_growth": 0.35,
+                "expected_beat_pct": 0.15,
+                "eps_surprise_prob": 0.85,
+                "regime_breakout_prob": 0.80,
+                "model_version": "v1.0",
+            }
+        ])
+        fc = webapp_data.load_forecasts(date(2026, 6, 1))
+        assert not fc.empty
+        assert fc.iloc[0]["ticker"] == "NVDA"
+        assert fc.iloc[0]["expected_beat_pct"] == 0.15
+
+        latest_fc = webapp_data.load_forecasts()
+        assert not latest_fc.empty
+        assert latest_fc.iloc[0]["ticker"] == "NVDA"
+
+    def test_forecast_history_is_point_in_time(self, wired):
+        """The replay needs every revision visible at the session date, not just the latest."""
+        wired.execute(_SCHEMA_FORECASTS)
+        rows = [
+            {"ticker": "NVDA", "as_of_date": "2026-05-01", "horizon_days": 90,
+             "predicted_rev_growth": 0.40, "model_version": "v1.0"},
+            {"ticker": "NVDA", "as_of_date": "2026-06-01", "horizon_days": 90,
+             "predicted_rev_growth": 0.55, "model_version": "v1.0"},
+        ]
+        upsert_forecasts(wired, rows)
+
+        history = webapp_data.load_forecast_history(date(2026, 5, 15))
+        assert len(history) == 1
+        assert str(history.iloc[0]["as_of_date"])[:10] == "2026-05-01"
+
+        assert len(webapp_data.load_forecast_history()) == 2
+

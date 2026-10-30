@@ -171,6 +171,7 @@ def run_replay(
     universe: list[str] | tuple[str, ...],
     start: str,
     end: str,
+    forecasts_df: pd.DataFrame | None = None,
 ) -> FundBacktestResult:
     """Replay the mandate over *universe* using preloaded ARF inputs."""
 
@@ -183,6 +184,8 @@ def run_replay(
             params = dict(model_spec.params)
             if model_spec.name == "arf":
                 params["snapshots_df"] = snapshots_df
+            elif model_spec.name == "arf_forecast" and forecasts_df is not None:
+                params["forecasts_df"] = forecasts_df
             staff.append(cls(**params))
         models[strategy.name] = staff
 
