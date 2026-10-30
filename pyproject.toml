@@ -44,9 +44,11 @@ webapp = [
     "streamlit-echarts>=0.4.0",
     "socksio>=1.0",
     # AI CIO cockpit: the ARF alpha model, replay engine and scorecard.
-    # Pinned to an annotated tag in our fork (arf-prod-2026-10-23 ->
-    # 501e432), so the commit stays reachable without an upstream PR.
-    "aihf @ git+https://github.com/Sheng-Jiang/ai-hedge-fund.git@arf-prod-2026-10-23",
+    # Pinned to an annotated tag in our fork (arf-prod-2026-10-30 -> 0b0f366),
+    # which adds ARFForecastModel; the previous tag (arf-prod-2026-10-23 ->
+    # 501e432) predates it, so a clean install rejected config/arf-mandate.yaml
+    # with "unknown analyst 'arf_forecast'".
+    "aihf @ git+https://github.com/Sheng-Jiang/ai-hedge-fund.git@arf-prod-2026-10-30",
 ]
 cloud = [
     "google-cloud-storage>=2.16",
