@@ -372,6 +372,82 @@ with tab_barometer:
                 f"冲击 {capex_shock:+d}% / 产能截断 {capacity_cap}%",
             )
 
+    # ── AI-CIO Autonomous Decision Packet & Thesis Watchdog ───────────────────
+    st.markdown("#### 📬 AI-CIO 自主决策简报与持仓哨兵 (Autonomous Decision Packet & Thesis Watchdog)")
+
+    held_list = None
+    if cockpit is not None and not cockpit.positions.empty and "代码" in cockpit.positions.columns:
+        held_list = cockpit.positions["代码"].dropna().astype(str).tolist()
+
+    cust_shocks = (
+        {"MSFT": capex_shock / 100.0, "GOOGL": capex_shock / 100.0, "META": capex_shock / 100.0}
+        if capex_shock != 0
+        else None
+    )
+
+    try:
+        from arf.agent.cio_loop import build_cio_decision_packet
+        from arf.forecast import _num
+
+        packet = build_cio_decision_packet(
+            conn=data.get_conn(),
+            as_of=as_of,
+            held_tickers=held_list,
+            customer_shocks=cust_shocks,
+            max_proposals=8,
+        )
+
+        # 1. Display Watchdog Alerts
+        if packet.watchdog_alerts:
+            st.markdown(f"**⚠️ 哨兵触发告警 ({len(packet.watchdog_alerts)} 项)**")
+            for alert in packet.watchdog_alerts:
+                alert_text = (
+                    f"**[{alert.severity}] {alert.ticker} ({alert.name})** — `{alert.alert_type}`: "
+                    f"{alert.triggered_rule} (当前值: `{alert.current_value}`) ➔ **建议: {alert.recommended_action}**"
+                )
+                if alert.severity == "CRITICAL":
+                    st.error(alert_text)
+                elif alert.severity == "WARNING":
+                    st.warning(alert_text)
+                else:
+                    st.info(alert_text)
+        else:
+            st.success("✅ 持仓哨兵监测中：未触发定量证伪规则 (Kill Conditions) 或估值泡沫熔断。")
+
+        # 2. Display Proposals Table
+        if packet.proposals:
+            st.markdown(f"**🎯 自主交易决策建议 ({len(packet.proposals)} 项提案)**")
+            prop_rows = []
+            for p in packet.proposals:
+                kills_str = "; ".join(f"{kc.metric} {kc.operator} {kc.threshold}" for kc in p.kill_conditions[:2])
+                b_val = _num(p.expected_beat_pct)
+                r_val = _num(p.expected_return_p50)
+                prop_rows.append({
+                    "标的代码": p.ticker,
+                    "公司": p.name,
+                    "区域/层级": f"{p.leg} / {p.layer}",
+                    "执行动作": p.action,
+                    "置信度": f"{p.conviction:+.2f}",
+                    "预期超额差 (Beat)": f"{b_val:+.1%}" if b_val is not None else "—",
+                    "12M P50 空间": f"{r_val:+.1%}" if r_val is not None else "—",
+                    "G1–G4 门禁裁决": p.gate_verdict,
+                    "证伪条件 (Kill Conditions)": kills_str,
+                    "决策论证": p.rationale,
+                })
+            st.dataframe(pd.DataFrame(prop_rows), use_container_width=True, hide_index=True)
+
+        # 3. Full Markdown Brief Expander
+        with st.expander("📄 查看 / 导出完整 AI-CIO 机构简报 (Markdown Decision Packet)", expanded=False):
+            st.markdown(packet.markdown_brief)
+            st.download_button(
+                label="📥 下载 Markdown 决策简报",
+                data=packet.markdown_brief,
+                file_name=f"{packet.packet_id}.md",
+                mime="text/markdown",
+            )
+    except Exception as exc:
+        st.warning(f"自主 CIO 决策简报引擎运行提示: {exc}")
+
     if not fc_df.empty:
         display_df = fc_df.copy()
         if capex_shock != 0 or capacity_cap < 100:

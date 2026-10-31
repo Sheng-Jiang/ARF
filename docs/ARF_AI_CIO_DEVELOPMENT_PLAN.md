@@ -1,10 +1,10 @@
 # ARF / AI-CIO Master Development Plan & Execution Roadmap
 ## From Passive Equity Screener to Autonomous Value-Chain Investment Partner
 
-**Document ID:** `PLAN-2026-Q4-001`  
-**Date:** 2026-10-29  
-**Status:** Approved Master Engineering Plan  
-**Target Repositories:** `ARF` / `AI-CIO` (`arf/`, `webapp/`, `data/`, `config/`, `tests/`)  
+**Document ID:** `PLAN-2026-Q4-002`  
+**Date:** 2026-10-31  
+**Status:** Active Master Engineering Plan (Phase 1 Completed & Merged in PR #17; Phase 2 In Progress)  
+**Target Repositories:** `ARF` / `AI-CIO` (`arf/`, `webapp/`, `data/`, `config/`, `tests/`) & `ai-hedge-fund` (`hedge_fund/signals/`)  
 **Cross-References:** 
 - [`docs/ARF_PRD.md`](file:///Users/sheng/Developer/ARF/docs/ARF_PRD.md)
 - [`docs/ADR-001 代码优先本体准则`](file:///Users/sheng/Developer/ARF/docs/ADR-001-Next-Gen-Modeling-and-Lightweight-Ontology-for-Agents.md)
@@ -66,13 +66,13 @@ Over the course of recent architectural reviews and research breakthroughs, the 
 
 | Module / Layer | Current Status in Codebase | Engineering Gap to New Direction |
 | :--- | :--- | :--- |
-| **Data & Storage** | DuckDB `snapshot_revisions`, versioned Parquet data lake on GCS (`arf-data-ai-rf`), hybrid China proxy. | Missing persistent `supply_chain_links` table in DuckDB to store customer concentration weights ($w_{ij}$) and `forecasts` table to log multi-horizon predictions. |
-| **Scoring Engine** | $E$-score, $V$-score, ARF deciles, local-currency reverse-DCF ($g^*$), Froth flag in `arf/scoring.py`. | Scoring treats each firm independently; missing cross-company consistency checks (e.g. Supplier $g^* > 2\times$ Customer $g^*$) and forward-looking growth forecasts. |
-| **Value Chain & Forecasting** | `config/value_chain.yaml` + `arf/value_chain.py` tracks market-cap snapshots across 5 layers. | Value chain is currently a static hierarchy, not an active directed graph. Completely missing `arf/forecast.py` to forecast revenue surprises, revision velocity, and forward fair values. |
-| **Alpha Signals & CIO** | `ARFModel` in `ai-hedge-fund` trades static $(E - V)/100$ factor spreads; `arf/cio.py` replays mandate. | Alpha signals react after trailing fundamentals update; missing `ARFForecastModel` trading on forward expected surprise ($\hat{g}_{\text{ARF}} - g_{\text{Consensus}}$) and upside to $P_{50}$. |
-| **Agent & IDR** | Pydantic schemas in `arf/agent/schemas.py`, 5-step IDR persistence in `arf/db.py`, Gemini screener. | Missing dedicated outside-model `arf/agent/governance.py` (G3 gates), LangGraph supervisor graph, and Red-Team adversarial debater. |
-| **Webapp Cockpit** | 10 Streamlit pages (Bubble thermometer, Dual Value Chain, CIO Cockpit replaying `ai-hedge-fund`). | Cockpit lacks interactive value-chain shock simulator (e.g., CapEx slider) and Opportunity Alpha stage lifecycle management. |
-| **Verification & Loop** | Unit tests for scoring, database, and fetchers (>80% coverage in `tests/`). | Missing forecast calibration scorecard (Brier score, RMSE, lead-lag $\text{IC}$) and automated post-mortem quarterly error attribution. |
+| **Data & Storage** | ✅ **Completed (PR #17)**: DuckDB `snapshot_revisions`, `supply_chain_links`, and `forecasts` tables with point-in-time history. | Need persistent storage/tracking for machine-executable `KillCondition` predicates and `CIODecisionPacket` audit logs. |
+| **Scoring Engine** | $E$-score, $V$-score, ARF deciles, local-currency reverse-DCF ($g^*$), Froth flag in `arf/scoring.py`. | Missing cross-company reverse-DCF consistency gate (e.g. flagging when Supplier $g^* > 2\times$ Customer $g^*$). |
+| **Value Chain & Forecasting** | ✅ **Completed (PR #17)**: `arf/forecast.py` implements 4-layer Barometer (`HORIZON_CONVERGENCE=0.30`, `DEFAULT_BOTTLENECK_CLAMP=0.80`, disjoint 14d/30d revision windows, `_local_market_cap` FX alignment). | Need programmatic event-driven shock propagation (`simulate_supply_chain_shock`) so the CIO agent can run stress tests without a human dragging UI sliders. |
+| **Alpha Signals & CIO** | ✅ **Completed (PR #17)**: `ARFForecastModel` in `ai-hedge-fund` (`arf-prod-2026-10-30`) blended with `ARFModel` in `arf/cio.py` using point-in-time `load_forecast_history`. | `arf/cio.py` portfolio replay and `arf/agent/thesis.py` qualitative IDRs are still disconnected; active positions are not monitored against thesis invalidation rules. |
+| **Agent & Autonomous CIO Loop** | Pydantic schemas in `arf/agent/schemas.py`, 5-step IDR persistence in `arf/db.py`, Gemini screener. | **Primary Phase 2 Focus**: Build `arf/agent/cio_loop.py` implementing the 5-Stage Autonomous CIO Workflow: Anomaly Delta Triage, Causal Shock Propagation, G1–G4 Gatekeeper, Executable Thesis Watchdog (`KillCondition`), and Push-First `CIODecisionPacket`. |
+| **Webapp Cockpit & CLI** | 10 Streamlit pages including the new `🔮 预测晴雨表与前瞻 Alpha` tab in `webapp/pages/10_💼_CIO_投资总监.py`. | Expose the Autonomous CIO Decision Packet & Thesis Watchdog alerts both as a headless CLI/Markdown brief and inside the CIO Cockpit Inbox. |
+| **Verification & Loop** | 301 unit tests passing in `ARF` + 8 signal tests in `ai-hedge-fund`. | Add unit tests for `cio_loop.py` (`tests/test_cio_loop.py`) covering executable kill conditions, shock propagation, G1–G4 gates, and decision packet generation. |
 
 ---
 
@@ -119,53 +119,76 @@ graph TD
 
 ## 4. Detailed Implementation Roadmap & Deliverables
 
-### Phase 1: Causal Value Chain, Micro-Leontief & 4-Layer Forecasting Engine (Weeks 1–2)
+### Phase 1: Causal Value Chain, Micro-Leontief & 4-Layer Forecasting Engine (✅ Completed — PR #17)
 **Goal:** Transform the 5-layer stack from a static display list into an active calculation graph and forward-looking forecasting system.
 
-* **Task 1.1: DuckDB Schema Migration for `supply_chain_links` and `forecasts`**
+* **Task 1.1: DuckDB Schema Migration for `supply_chain_links` and `forecasts` (✅ Done)**
   * Target: `arf/db.py`, `data/arf.db`
   * Deliverable: 
     * `supply_chain_links`: `supplier_ticker`, `customer_ticker`, `revenue_share_pct` ($w_{ij}$), `bom_component_pct` ($\beta$), `relationship_type`, `verified_source`, `last_updated`.
     * `forecasts`: `ticker`, `as_of_date`, `horizon_days`, `predicted_rev_growth` ($\hat{g}_{\text{ARF}}$), `consensus_rev_growth`, `expected_beat_pct`, `eps_surprise_prob`, `fair_value_p10`, `fair_value_p50`, `fair_value_p90`, `regime_breakout_prob`, `model_version`, `created_at`.
-* **Task 1.2: Supply Chain Traversal & Dependency Matrix Initialization**
-  * Target: `arf/agent/traversal.py`, `config/value_chain.yaml`
-  * Deliverable: Ingest customer concentration disclosures from 10-K / annual reports to establish baseline directed weights ($w_{ij}$) across the 73-stock universe.
-* **Task 1.3: Micro-Leontief $(I - W)^{-1}$ Solver with Bottleneck Capacity Clamps**
-  * Target: `arf/value_chain.py`
-  * Deliverable: In-memory `networkx.DiGraph` representing the 5 layers. Propagates downstream CapEx revisions upstream, constrained by physical manufacturing and packaging bottlenecks:
-    $$\Delta \text{Revenue}_{\text{Predicted}} = \min\left( (I - W)^{-1} \cdot \Delta \text{CapEx}_{\text{Hyperscalers}}, \; \text{Bottleneck Capacity} \right)$$
-* **Task 1.4: Deterministic 4-Layer Forecasting Engine (`arf/forecast.py`)**
+* **Task 1.2: Canonical Supply Chain Dependency Seeding (✅ Done)**
+  * Target: `arf/forecast.py` (`CANONICAL_SUPPLY_CHAIN_LINKS`, `seed_default_supply_chain_links`)
+  * Deliverable: Baseline directed weights ($w_{ij}$) across optical interconnect, foundry/packaging, lithography, cloud hyperscalers, and thermal/power infrastructure.
+* **Task 1.3: Deterministic 4-Layer Forecasting Engine (✅ Done)**
   * Target: `arf/forecast.py`
   * Deliverable:
-    1. *Layer 1 (Fundamental Forecast):* Compute supply-chain revenue/EPS forecast $\hat{g}_{\text{ARF}}$ and expected beat margin.
-    2. *Layer 2 (Revision Velocity):* Compute consensus revision acceleration ($\Delta \text{EPS}_{14d/30d}$) & cross-node PEAD spillover.
-    3. *Layer 3 (Valuation Distribution):* Model operating leverage and multi-stage DCF forward fair-value distribution ($P_{10}$ Bear, $P_{50}$ Base, $P_{90}$ Bull).
+    1. *Layer 1 (Fundamental Forecast):* Supply-chain revenue/EPS forecast $\hat{g}_{\text{ARF}}$, expected beat margin, and `DEFAULT_BOTTLENECK_CLAMP = 0.80`.
+    2. *Layer 2 (Revision Velocity):* Disjoint 14d `[-21, -7)` and 30d `[-37, -23)` consensus revision velocity & calibrated EPS surprise probability.
+    3. *Layer 3 (Valuation Distribution):* Reporting-currency aligned (`_local_market_cap`) multi-stage DCF forward fair-value distribution ($P_{10}$ Bear, $P_{50}$ Base, $P_{90}$ Bull) with `HORIZON_CONVERGENCE = 0.30`.
     4. *Layer 4 (Microstructure Regime):* CYQ chip concentration ratio and 20-day regime breakout probability.
-* **Task 1.5: `ARFForecastModel` Signal Generator for `ai-hedge-fund` / `arf/cio.py`**
-  * Target: `ai-hedge-fund/hedge_fund/signals/arf_forecast.py`, `arf/cio.py`
-  * Deliverable: Forward-looking `AlphaModel` generating signals based on expected earnings surprise ($\hat{g}_{\text{ARF}} - g_{\text{Consensus}}$) and expected upside to $P_{50}$, testable in `aihf backtest` and the CIO Cockpit.
+* **Task 1.4: `ARFForecastModel` Signal Generator & Point-in-Time Replay (✅ Done)**
+  * Target: `ai-hedge-fund/hedge_fund/signals/arf_forecast.py`, `arf/cio.py`, `webapp/data.py` (`load_forecast_history`)
+  * Deliverable: Forward-looking `AlphaModel` blended into `config/arf-mandate.yaml` and deployed to Cloud Run (`arf-webapp` & `arf-pipeline`).
 
 ---
 
-### Phase 2: Outside-Model G3 Governance & Supervisory LangGraph (Weeks 3–4)
-**Goal:** Implement outside-model capital guardrails and the autonomous supervisory pulse.
+### Phase 2: Autonomous 5-Stage CIO Workflow, Executable Thesis Watchdog & Decision Packets (Weeks 3–4 — Active)
+**Goal:** Liberate the CIO from a passive, UI-bound dashboard into an **event-driven, push-first autonomous workflow** that bridges quantitative forecasts, portfolio holdings, G1–G4 governance gates, and machine-executable thesis invalidation.
 
-* **Task 2.1: Deterministic G1–G4 Risk Module**
-  * Target: `arf/agent/governance.py`
-  * Deliverable: Python predicates enforcing:
-    1. *Bubble / Froth Gate:* Blocks long recommendations on froth-flagged names.
-    2. *Hurdle Rate Gate:* Enforces $\text{ROE} \ge \text{WACC}$ ($10\%$ US, $12\%$ China).
-    3. *Invalidation Rigor Gate:* Disqualifies theses lacking quantitative stop-loss / invalidation criteria.
-* **Task 2.2: Adversarial Red-Team Short-Seller Subagent**
-  * Target: `arf/agent/redteam.py`
-  * Deliverable: Parallel agent that challenges bull theses by searching for ASIC substitution, customer concentration, and margin compression risks.
-* **Task 2.3: LangGraph Supervisory StateGraph**
-  * Target: `arf/agent/supervisor/graph.py`
-  * Deliverable: Autonomous workflow orchestrator:
-    `scan_market_anomalies` $\rightarrow$ `evaluate_drift` $\rightarrow$ `dispatch_specialists` $\rightarrow$ `synthesize_thesis` $\rightarrow$ `mechanical_risk_gate (G3)` $\rightarrow$ `human_pm_interrupt()`.
-* **Task 2.4: Opportunity Alpha State Machine Engine**
-  * Target: `arf/agent/schemas.py`, `arf/db.py`
-  * Deliverable: Formal state transitions: `discovered` $\rightarrow$ `quant_qualified` $\rightarrow$ `deliberating` $\rightarrow$ `thesis_formulated` $\rightarrow$ `committee_gate` $\rightarrow$ `active_watch` $\rightarrow$ `harvested` / `invalidated`.
+```mermaid
+flowchart LR
+    S1["1. Anomaly & Delta Triage\n(scan_material_deltas)"] --> S2["2. Causal Shock Propagation\n(simulate_supply_chain_shock)"]
+    S2 --> S3["3. G1–G4 Risk & g* Gatekeeper\n(evaluate_cio_gates)"]
+    S3 --> S4["4. Active Thesis Watchdog\n(evaluate_thesis_watchdog)"]
+    S4 --> S5["5. CIO Decision Packet\n(build_cio_decision_packet)"]
+
+    style S1 fill:#e0f2fe,stroke:#0284c7,stroke-width:2px,color:#0f172a
+    style S2 fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#0f172a
+    style S3 fill:#fce7f3,stroke:#db2777,stroke-width:2px,color:#0f172a
+    style S4 fill:#f3e8ff,stroke:#9333ea,stroke-width:2px,color:#0f172a
+    style S5 fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#0f172a
+```
+
+* **Task 2.1: Structured Schemas for Executable Thesis Watchdog & CIO Decision Packets**
+  * Target: `arf/agent/schemas.py`
+  * Deliverable: Extend Pydantic schemas with:
+    1. `KillCondition`: Machine-executable invalidation rule (`metric`, `operator` in `["<", "<=", ">", ">=", "=="]`, `threshold`, `description`) plus a deterministic `evaluate(metrics: dict) -> tuple[bool, str]` method.
+    2. `WatchdogAlert`: Structured alert emitted when a held or watched position breaches a `KillCondition`, hits its $P_{90}$ harvest target, or enters a Froth Flag regime (`ticker`, `alert_type`, `severity`, `triggered_rule`, `current_value`, `recommended_action`).
+    3. `ProposalTicket`: Actionable IC trade/research proposal (`ticker`, `name`, `leg`, `layer`, `action` in `["INITIATE_LONG", "ADD_LONG", "TRIM_HARVEST", "EXIT_INVALIDATED", "SHORT_FROTH", "HOLD_MONITOR"]`, `conviction`, `expected_beat_pct`, `eps_surprise_prob`, `expected_return_p50`, `regime_breakout_prob`, `gate_verdict`, `gate_details`, `rationale`, `kill_conditions`).
+    4. `CIODecisionPacket`: The complete daily/event-driven CIO briefing (`packet_id`, `as_of_date`, `regime_summary`, `shock_scenario`, `watchdog_alerts`, `proposals`, `markdown_brief`) that can be rendered in CLI, pushed to messaging channels, or displayed in the CIO Cockpit.
+* **Task 2.2: Deterministic G1–G4 + Cross-Node $g^*$ Consistency Gatekeeper**
+  * Target: `arf/agent/cio_loop.py` (`evaluate_cio_gates`)
+  * Deliverable: Pure-Python outside-model risk gates enforcing:
+    1. *G1 (Data Integrity):* Price and market cap must be finite and positive.
+    2. *G2 (WACC Hurdle Gate):* Blocks long initiation if `roe < wacc` ($10\%$ US, $12\%$ China) when valuation stretch $V \ge 60$.
+    3. *G3 (Froth Circuit Breaker):* Hard block on long initiation/addition if `froth_flag is True` (automatically flips recommendation to `SHORT_FROTH` or `EXIT_INVALIDATED`).
+    4. *G4 (Supply-Chain Implied Growth $g^*$ Consistency Gate):* Compares supplier reverse-DCF `implied_growth` ($g^*$) against its mapped customers' average `implied_growth`. Flags `BLOCKED_VALUATION_STRETCH` if $\text{Supplier } g^* > 2.0 \times \text{Customer } g^*$ and $\text{Supplier } g^* > 0.25$.
+* **Task 2.3: Programmatic Supply-Chain Shock Simulator & Anomaly Delta Triage**
+  * Target: `arf/agent/cio_loop.py` (`simulate_supply_chain_shock`, `scan_material_deltas`)
+  * Deliverable:
+    * `simulate_supply_chain_shock(conn, as_of, customer_shocks: dict[str, float], bottleneck_clamp: float | None = 0.80)`: Propagates arbitrary customer CapEx/revenue growth shocks (e.g., `{"MSFT": 0.15, "META": 0.20}` or `{"AAPL": -0.15}`) through `supply_chain_links`, recomputes supplier `predicted_rev_growth`, `expected_beat_pct`, `eps_surprise_prob`, and `expected_return_p50`, and returns the delta DataFrame.
+    * `scan_material_deltas(conn, as_of)`: Identifies high-conviction forward opportunities (`expected_beat_pct >= 0.08`, `expected_return_p50 >= 0.15`, `regime_breakout_prob >= 0.60`) and froth/deterioration hazards across both US and China legs.
+* **Task 2.4: Active Thesis Watchdog & Automated Kill-Condition Compiler**
+  * Target: `arf/agent/cio_loop.py` (`default_kill_conditions_for_row`, `evaluate_thesis_watchdog`)
+  * Deliverable:
+    * Automatically attaches default quantitative `KillCondition` predicates to every active position or IDR (e.g., `froth_flag == True`, `roe < wacc * 0.5`, `expected_beat_pct < -0.10`, `chip_profit_ratio < 0.20`), and evaluates all held/monitored tickers against latest snapshot + forecast metrics.
+    * Also checks for **Harvest Triggers** when price approaches or exceeds `fair_value_p90` (`expected_return_p50 <= -0.05` after rally).
+* **Task 2.5: Headless CLI Entrypoint & CIO Cockpit Inbox Integration**
+  * Target: `arf/agent/cio_loop.py` (`python -m arf.agent.cio_loop --as-of YYYY-MM-DD [--shock TICKER:DELTA ...]`), `webapp/pages/10_💼_CIO_投资总监.py`
+  * Deliverable:
+    * CLI tool that generates and prints the Markdown `CIODecisionPacket` on demand or in scheduled jobs.
+    * Integration into `webapp/pages/10_💼_CIO_投资总监.py` so the PM can view the pushed **📬 CIO 决策简报与持仓哨兵 (Autonomous CIO Decision Packet & Thesis Watchdog)**, run conversational/preset shock scenarios, and inspect G1–G4 gate verdicts and kill conditions.
 
 ---
 
