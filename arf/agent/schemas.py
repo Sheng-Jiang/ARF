@@ -1,9 +1,10 @@
 """Data schemas for ARF Autonomous Investment Agent."""
 from __future__ import annotations
 
+import math
 from datetime import UTC, date, datetime
 from enum import StrEnum
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -36,6 +37,52 @@ class DecisionAction(StrEnum):
     AVOID_FROTH = "AVOID_FROTH"
     HARVEST = "HARVEST"
     INVALIDATE = "INVALIDATE"
+
+
+class KillCondition(BaseModel):
+    """Machine-executable thesis invalidation predicate."""
+    metric: str
+    operator: Literal["<", "<=", ">", ">=", "=="]
+    threshold: float | bool
+    description: str = ""
+
+    def evaluate(self, metrics: dict[str, Any]) -> tuple[bool, str]:
+        """Safely evaluate this kill condition against a metrics dictionary.
+
+        Returns:
+            (triggered: bool, detail: str)
+        """
+        val = metrics.get(self.metric)
+        if val is None:
+            return False, "metric missing"
+        if isinstance(val, float) and math.isnan(val):
+            return False, "metric missing"
+
+        try:
+            if self.operator == "==":
+                if isinstance(self.threshold, bool):
+                    triggered = bool(val) == bool(self.threshold)
+                else:
+                    triggered = float(val) == float(self.threshold)
+            elif self.operator == "<":
+                triggered = float(val) < float(self.threshold)
+            elif self.operator == "<=":
+                triggered = float(val) <= float(self.threshold)
+            elif self.operator == ">":
+                triggered = float(val) > float(self.threshold)
+            elif self.operator == ">=":
+                triggered = float(val) >= float(self.threshold)
+            else:
+                return False, f"unsupported operator {self.operator}"
+        except (ValueError, TypeError) as exc:
+            return False, f"evaluation error: {exc}"
+
+        desc_suffix = f" ({self.description})" if self.description else ""
+        if triggered:
+            detail = f"{self.metric}={val} breached {self.operator} {self.threshold}{desc_suffix}"
+        else:
+            detail = f"{self.metric}={val} holds (not {self.operator} {self.threshold})"
+        return triggered, detail
 
 
 class CandidateCompany(BaseModel):
@@ -122,6 +169,7 @@ class InvestmentDecisionRecord(BaseModel):
     confidence_score: float = Field(default=50.0, ge=0.0, le=100.0)
     catalysts: list[str] = Field(default_factory=list)
     citations: list[dict[str, str]] = Field(default_factory=list)
+    kill_conditions: list[KillCondition] = Field(default_factory=list)
     
     # Governance & Model Provenance
     human_pm_decision: str | None = None
@@ -155,5 +203,58 @@ class OpportunityCard(BaseModel):
     confidence_score: float = Field(default=50.0, ge=0.0, le=100.0)
     catalysts: list[str] = Field(default_factory=list)
     citations: list[dict[str, str]] = Field(default_factory=list)
+    kill_conditions: list[KillCondition] = Field(default_factory=list)
     model: str = "gemini-3.8-flash"
     idr_id: str | None = None
+
+
+class WatchdogAlert(BaseModel):
+    """Structured alert emitted by the Executable Thesis Watchdog."""
+    ticker: str
+    name: str = ""
+    alert_type: Literal[
+        "THESIS_INVALIDATED",
+        "FROTH_CIRCUIT_BREAKER",
+        "HARVEST_TARGET_REACHED",
+        "G_STAR_DIVERGENCE",
+    ]
+    severity: Literal["CRITICAL", "WARNING", "INFO"] = "WARNING"
+    triggered_rule: str
+    current_value: str
+    recommended_action: DecisionAction
+
+
+class ProposalTicket(BaseModel):
+    """Actionable trade or research proposal for portfolio construction."""
+    ticker: str
+    name: str = ""
+    leg: str = "US"
+    layer: str = "L2"
+    action: Literal[
+        "INITIATE_LONG",
+        "ADD_LONG",
+        "TRIM_HARVEST",
+        "EXIT_INVALIDATED",
+        "SHORT_FROTH",
+        "HOLD_MONITOR",
+    ]
+    conviction: float = Field(default=0.0, ge=-1.0, le=1.0)
+    expected_beat_pct: float | None = None
+    eps_surprise_prob: float | None = None
+    expected_return_p50: float | None = None
+    regime_breakout_prob: float | None = None
+    gate_verdict: GateVerdict = GateVerdict.PASSED
+    gate_details: str = ""
+    rationale: str = ""
+    kill_conditions: list[KillCondition] = Field(default_factory=list)
+
+
+class CIODecisionPacket(BaseModel):
+    """Push-first daily or event-driven decision packet from the Autonomous CIO."""
+    packet_id: str
+    as_of_date: str
+    regime_summary: str
+    shock_scenario: dict[str, float] = Field(default_factory=dict)
+    watchdog_alerts: list[WatchdogAlert] = Field(default_factory=list)
+    proposals: list[ProposalTicket] = Field(default_factory=list)
+    markdown_brief: str = ""
