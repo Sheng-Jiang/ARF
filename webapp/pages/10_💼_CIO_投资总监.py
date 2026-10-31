@@ -379,22 +379,53 @@ with tab_barometer:
     if cockpit is not None and not cockpit.positions.empty and "代码" in cockpit.positions.columns:
         held_list = cockpit.positions["代码"].dropna().astype(str).tolist()
 
-    cust_shocks = (
-        {"MSFT": capex_shock / 100.0, "GOOGL": capex_shock / 100.0, "META": capex_shock / 100.0}
-        if capex_shock != 0
-        else None
-    )
-
     try:
+        from datetime import date as _date
+
         from arf.agent.cio_loop import build_cio_decision_packet
         from arf.forecast import _num
 
-        packet = build_cio_decision_packet(
-            conn=data.get_conn(),
-            as_of=as_of,
-            held_tickers=held_list,
-            customer_shocks=cust_shocks,
-            max_proposals=8,
+        # Convert multiplicative CapEx slider (% change) into additive customer growth deltas
+        cust_shocks = None
+        if capex_shock != 0:
+            rel_shock = capex_shock / 100.0
+            fc_base_map: dict[str, float] = {}
+            if not fc_df.empty and "ticker" in fc_df.columns:
+                for _, fr in fc_df.iterrows():
+                    tk = str(fr.get("ticker", "")).strip().upper()
+                    bg = _num(fr.get("consensus_rev_growth"))
+                    if bg is None:
+                        bg = _num(fr.get("predicted_rev_growth"))
+                    if tk and bg is not None:
+                        fc_base_map[tk] = bg
+            cust_shocks = {
+                c: round(fc_base_map.get(c, 0.20) * rel_shock, 4)
+                for c in ("MSFT", "GOOGL", "META")
+            }
+
+        clamp_param = (capacity_cap / 100.0) if capacity_cap < 100 else 0.80
+
+        @st.cache_data(ttl=300, show_spinner=False)
+        def _cached_decision_packet(
+            as_of_iso: str,
+            held_tuple: tuple[str, ...] | None,
+            shocks_tuple: tuple[tuple[str, float], ...] | None,
+            clamp_val: float,
+        ):
+            return build_cio_decision_packet(
+                conn=data.get_conn(),
+                as_of=_date.fromisoformat(as_of_iso),
+                held_tickers=list(held_tuple) if held_tuple is not None else None,
+                customer_shocks=dict(shocks_tuple) if shocks_tuple is not None else None,
+                max_proposals=8,
+                bottleneck_clamp=clamp_val,
+            )
+
+        packet = _cached_decision_packet(
+            as_of_iso=as_of.isoformat() if hasattr(as_of, "isoformat") else str(as_of)[:10],
+            held_tuple=tuple(sorted(held_list)) if held_list is not None else None,
+            shocks_tuple=tuple(sorted(cust_shocks.items())) if cust_shocks is not None else None,
+            clamp_val=clamp_param,
         )
 
         # 1. Display Watchdog Alerts

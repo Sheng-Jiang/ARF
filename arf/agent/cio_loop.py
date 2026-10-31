@@ -31,6 +31,7 @@ from arf.agent.schemas import (
 )
 from arf.db import (
     init_db,
+    query_latest_forecasts,
     query_supply_chain_links,
 )
 from arf.forecast import (
@@ -46,6 +47,87 @@ from arf.scoring import _local_market_cap
 
 log = logging.getLogger(__name__)
 
+_ACTIVE_THESIS_STAGES = ("thesis_formulated", "committee_pending", "active_watch")
+
+
+def _num_or(val: Any, default: float) -> float:
+    """Coerce val via _num(), returning default only when None/NaN (preserving 0.0)."""
+    n = _num(val)
+    return n if n is not None else default
+
+
+def _load_latest_snapshots(conn: Any, as_of: date) -> pd.DataFrame:
+    """Load latest snapshot rows on or before as_of."""
+    snap_df = conn.execute(
+        """
+        SELECT ticker, name, leg, layer, price, market_cap_usd, free_cash_flow,
+               eps_2yr_cagr, revenue_yoy_growth, roe, froth_flag, decile, ps_ratio,
+               financial_fx_usd, fx_rate_usd, implied_growth, v_score, e_score, arf
+        FROM snapshots
+        WHERE as_of_date = (SELECT MAX(as_of_date) FROM snapshots WHERE as_of_date <= ?)
+        """,
+        [as_of],
+    ).fetchdf()
+
+    if snap_df.empty:
+        snap_df = (
+            conn.execute(
+                """
+                SELECT ticker, name, leg, layer, price, market_cap_usd, free_cash_flow,
+                       eps_2yr_cagr, revenue_yoy_growth, roe, froth_flag, decile, ps_ratio,
+                       financial_fx_usd, fx_rate_usd, implied_growth, v_score, e_score, arf
+                FROM snapshots
+                WHERE as_of_date <= ?
+                ORDER BY as_of_date DESC
+                """,
+                [as_of],
+            )
+            .fetchdf()
+            .drop_duplicates("ticker")
+        )
+    return snap_df
+
+
+def _ensure_and_load_forecasts(
+    conn: Any,
+    as_of: date,
+    horizon_days: int = 90,
+) -> pd.DataFrame:
+    """Load deduplicated latest forecasts for horizon_days, generating on-demand if missing."""
+    fc_df = query_latest_forecasts(conn, horizon_days=horizon_days, as_of_date=as_of)
+    if not fc_df.empty:
+        return fc_df
+
+    try:
+        generated = generate_forecasts_for_universe(
+            as_of, conn, horizon_days=horizon_days, persist=True
+        )
+    except Exception:
+        generated = generate_forecasts_for_universe(
+            as_of, conn, horizon_days=horizon_days, persist=False
+        )
+
+    reloaded = query_latest_forecasts(conn, horizon_days=horizon_days, as_of_date=as_of)
+    return reloaded if not reloaded.empty else generated
+
+
+def _load_latest_technicals(conn: Any, as_of: date) -> pd.DataFrame:
+    """Load latest technical_metrics rows on or before as_of."""
+    try:
+        return conn.execute(
+            """
+            SELECT ticker, technical_score, chip_profit_ratio, chip_avg_cost,
+                   ma_bullish_alignment, rsi
+            FROM technical_metrics
+            WHERE as_of_date = (
+                SELECT MAX(as_of_date) FROM technical_metrics WHERE as_of_date <= ?
+            )
+            """,
+            [as_of],
+        ).fetchdf()
+    except Exception:
+        return pd.DataFrame()
+
 
 # ── Stage 3: Deterministic G1–G4 Outside-Model Risk Gates ────────────────────
 
@@ -58,7 +140,7 @@ def evaluate_cio_gates(
     Gates:
         G1 (Data Integrity): price and market_cap_usd must be finite and > 0.
         G3 (Froth Circuit Breaker): froth_flag is True.
-        G2 (WACC Hurdle Gate): ROE < WACC (10% US, 12% China) with stretched V-score >= 60.
+        G2 (WACC Hurdle Gate): ROE < WACC (10% US, 12% China) with stretched V-score >= 60, or ROE < 0.
         G4 (Supply-Chain Implied Growth Consistency Gate): Supplier g* > 0.25 and > 2x Customer avg g*.
 
     Returns:
@@ -151,60 +233,64 @@ def default_kill_conditions_for_row(row: dict[str, Any]) -> list[KillCondition]:
 
 # ── Stage 1: Anomaly & Delta Triage ──────────────────────────────────────────
 
-def scan_material_deltas(conn: Any, as_of: date) -> dict[str, list[dict[str, Any]]]:
+def scan_material_deltas(
+    conn: Any,
+    as_of: date,
+    snap_df: pd.DataFrame | None = None,
+    fc_df: pd.DataFrame | None = None,
+) -> dict[str, list[dict[str, Any]]]:
     """Scan forward forecasts and snapshots to identify high-conviction catalysts and hazards."""
-    # Ensure forecasts exist
-    fc_count = conn.execute(
-        "SELECT count(*) FROM forecasts WHERE as_of_date <= ?", [as_of]
-    ).fetchone()[0]
-    if fc_count == 0:
-        generate_forecasts_for_universe(as_of, conn, persist=False)
-
-    df = conn.execute(
-        """
-        WITH latest_snap AS (
-            SELECT * FROM snapshots
-            WHERE as_of_date = (SELECT MAX(as_of_date) FROM snapshots WHERE as_of_date <= ?)
-        ),
-        latest_fc AS (
-            SELECT * FROM forecasts
-            WHERE as_of_date = (SELECT MAX(as_of_date) FROM forecasts WHERE as_of_date <= ?)
-        )
-        SELECT s.ticker, s.name, s.leg, s.layer, s.price, s.roe, s.v_score, s.froth_flag,
-               f.predicted_rev_growth, f.expected_beat_pct, f.eps_surprise_prob,
-               f.fair_value_p50, f.expected_return_p50, f.regime_breakout_prob
-        FROM latest_snap s
-        LEFT JOIN latest_fc f ON s.ticker = f.ticker
-        """,
-        [as_of, as_of],
-    ).fetchdf()
-
-    if df.empty:
+    if snap_df is None:
+        snap_df = _load_latest_snapshots(conn, as_of)
+    if snap_df.empty:
         return {"high_conviction_longs": [], "froth_hazards": [], "breakouts": []}
 
-    longs = []
-    froth = []
-    breakouts = []
+    if fc_df is None:
+        fc_df = _ensure_and_load_forecasts(conn, as_of, horizon_days=90)
 
-    for _, r in df.iterrows():
-        d = r.to_dict()
+    fc_map = (
+        {str(r["ticker"]).strip().upper(): r.to_dict() for _, r in fc_df.iterrows()}
+        if not fc_df.empty
+        else {}
+    )
+
+    longs: list[dict[str, Any]] = []
+    froth: list[dict[str, Any]] = []
+    breakouts: list[dict[str, Any]] = []
+
+    for _, r in snap_df.iterrows():
+        s_dict = r.to_dict()
+        t = str(s_dict.get("ticker", "")).strip().upper()
+        if not t:
+            continue
+        f_dict = fc_map.get(t, {})
+        d = {**s_dict, **f_dict, "ticker": t}
+
         beat = _num(d.get("expected_beat_pct"))
         ret_p50 = _num(d.get("expected_return_p50"))
-        prob = _num(d.get("eps_surprise_prob")) or 0.5
-        breakout = _num(d.get("regime_breakout_prob")) or 0.5
+        breakout = _num_or(d.get("regime_breakout_prob"), 0.5)
+
+        has_positive_upside = ret_p50 is None or ret_p50 >= 0.0
+        is_bullish = has_positive_upside and (
+            (beat is not None and beat >= 0.05) or (ret_p50 is not None and ret_p50 >= 0.12)
+        )
 
         if bool(d.get("froth_flag")):
             froth.append(d)
-        elif (beat is not None and beat >= 0.08) or (ret_p50 is not None and ret_p50 >= 0.15 and prob >= 0.60):
+        elif is_bullish:
             longs.append(d)
 
         if breakout >= 0.65:
             breakouts.append(d)
 
     return {
-        "high_conviction_longs": sorted(longs, key=lambda x: _num(x.get("expected_return_p50")) or -999, reverse=True),
+        "high_conviction_longs": sorted(
+            longs, key=lambda x: _num_or(x.get("expected_return_p50"), -999.0), reverse=True
+        ),
         "froth_hazards": froth,
-        "breakouts": sorted(breakouts, key=lambda x: _num(x.get("regime_breakout_prob")) or 0, reverse=True),
+        "breakouts": sorted(
+            breakouts, key=lambda x: _num_or(x.get("regime_breakout_prob"), 0.0), reverse=True
+        ),
     }
 
 
@@ -215,6 +301,9 @@ def simulate_supply_chain_shock(
     as_of: date,
     customer_shocks: dict[str, float],
     bottleneck_clamp: float | None = 0.80,
+    snap_df: pd.DataFrame | None = None,
+    fc_df: pd.DataFrame | None = None,
+    links_df: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """Propagate customer CapEx/growth shocks across supply chain edges.
 
@@ -223,6 +312,9 @@ def simulate_supply_chain_shock(
         as_of: Snapshot date.
         customer_shocks: Mapping of customer ticker -> additive delta (e.g. {"MSFT": 0.20, "AAPL": -0.15}).
         bottleneck_clamp: Maximum annual revenue growth ceiling for mapped suppliers.
+        snap_df: Optional pre-loaded snapshot DataFrame.
+        fc_df: Optional pre-loaded forecast DataFrame.
+        links_df: Optional pre-loaded supply chain links DataFrame.
 
     Returns:
         DataFrame sorted by abs(growth_delta) descending with columns:
@@ -234,56 +326,24 @@ def simulate_supply_chain_shock(
         "growth_delta", "expected_beat_pct", "eps_surprise_prob", "fair_value_p50",
         "expected_return_p50",
     ]
-    seed_default_supply_chain_links(conn)
-    links_df = query_supply_chain_links(conn)
+    if links_df is None:
+        seed_default_supply_chain_links(conn)
+        links_df = query_supply_chain_links(conn)
 
-    # 1. Fetch latest snapshots
-    snap_df = conn.execute(
-        """
-        SELECT ticker, name, leg, layer, price, market_cap_usd, free_cash_flow,
-               eps_2yr_cagr, revenue_yoy_growth, roe, froth_flag,
-               financial_fx_usd, fx_rate_usd, implied_growth, v_score, e_score
-        FROM snapshots
-        WHERE as_of_date = (SELECT MAX(as_of_date) FROM snapshots WHERE as_of_date <= ?)
-        """,
-        [as_of],
-    ).fetchdf()
-
-    if snap_df.empty:
-        snap_df = conn.execute(
-            """
-            SELECT ticker, name, leg, layer, price, market_cap_usd, free_cash_flow,
-                   eps_2yr_cagr, revenue_yoy_growth, roe, froth_flag,
-                   financial_fx_usd, fx_rate_usd, implied_growth, v_score, e_score
-            FROM snapshots
-            WHERE as_of_date <= ?
-            ORDER BY as_of_date DESC
-            """,
-            [as_of],
-        ).fetchdf().drop_duplicates("ticker")
+    if snap_df is None:
+        snap_df = _load_latest_snapshots(conn, as_of)
 
     if snap_df.empty:
         return pd.DataFrame(columns=empty_cols)
 
-    # Ensure forecasts exist
-    fc_count = conn.execute(
-        "SELECT count(*) FROM forecasts WHERE as_of_date <= ?", [as_of]
-    ).fetchone()[0]
-    if fc_count == 0:
-        generate_forecasts_for_universe(as_of, conn, persist=False)
+    if fc_df is None:
+        fc_df = _ensure_and_load_forecasts(conn, as_of, horizon_days=90)
 
-    fc_df = conn.execute(
-        """
-        SELECT ticker, predicted_rev_growth, consensus_rev_growth, revision_velocity_14d
-        FROM forecasts
-        WHERE as_of_date = (SELECT MAX(as_of_date) FROM forecasts WHERE as_of_date <= ?)
-        """,
-        [as_of],
-    ).fetchdf()
-    fc_map = {
-        str(r["ticker"]).strip().upper(): r.to_dict()
-        for _, r in fc_df.iterrows()
-    } if not fc_df.empty else {}
+    fc_map = (
+        {str(r["ticker"]).strip().upper(): r.to_dict() for _, r in fc_df.iterrows()}
+        if not fc_df.empty
+        else {}
+    )
 
     # Build customer growth map
     norm_shocks = {
@@ -321,22 +381,18 @@ def simulate_supply_chain_shock(
     if not links_df.empty:
         for _ in range(2):
             for cust in list(all_customers):
-                if cust in norm_shocks:
-                    continue
                 cust_links = links_df[links_df["supplier_ticker"].astype(str).str.upper() == cust]
                 if cust_links.empty:
                     continue
                 s_row = snap_lookup.get(cust, {})
-                org = _num(s_row.get("revenue_yoy_growth"))
-                if org is None:
-                    org = 0.15
+                org = _num_or(s_row.get("revenue_yoy_growth"), 0.15)
                 b_pred = compute_supply_chain_growth(
                     cust, cust_links, base_cust_growth_map, organic_growth=org, bottleneck_clamp=bottleneck_clamp
                 )
                 s_pred = compute_supply_chain_growth(
                     cust, cust_links, shocked_cust_growth_map, organic_growth=org, bottleneck_clamp=bottleneck_clamp
                 )
-                delta = s_pred - b_pred
+                delta = (s_pred - b_pred) + norm_shocks.get(cust, 0.0)
                 if abs(delta) > 1e-6:
                     shocked_cust_growth_map[cust] = base_cust_growth_map[cust] + delta
 
@@ -350,13 +406,13 @@ def simulate_supply_chain_shock(
         name = str(row_dict.get("name") or "")
         leg = str(row_dict.get("leg") or "US")
         layer = str(row_dict.get("layer") or "L2")
-        price = _num(row_dict.get("price")) or 0.0
-        market_cap_local = _local_market_cap(row_dict) or 0.0
+        price = _num_or(row_dict.get("price"), 0.0)
+        market_cap_local = _num_or(_local_market_cap(row_dict), 0.0)
         fcf0 = _num(row_dict.get("free_cash_flow"))
         wacc = 0.10 if leg == "US" else 0.12
 
-        organic = _num(row_dict.get("revenue_yoy_growth")) or 0.15
-        consensus_g = _num(row_dict.get("eps_2yr_cagr")) or 0.15
+        organic = _num_or(row_dict.get("revenue_yoy_growth"), 0.15)
+        consensus_g = _num_or(row_dict.get("eps_2yr_cagr"), 0.15)
 
         sub_links = (
             links_df[links_df["supplier_ticker"].astype(str).str.upper() == t]
@@ -379,8 +435,12 @@ def simulate_supply_chain_shock(
                 organic_growth=organic,
                 bottleneck_clamp=bottleneck_clamp,
             )
+            if t in norm_shocks:
+                shocked_pred = shocked_pred + norm_shocks[t]
+                if bottleneck_clamp is not None:
+                    shocked_pred = min(shocked_pred, bottleneck_clamp)
         else:
-            base_pred = _num(fc_map.get(t, {}).get("predicted_rev_growth")) or organic
+            base_pred = _num_or(fc_map.get(t, {}).get("predicted_rev_growth"), organic)
             shocked_pred = base_pred + norm_shocks.get(t, 0.0)
 
         growth_delta = shocked_pred - base_pred
@@ -418,7 +478,11 @@ def simulate_supply_chain_shock(
     result_df = pd.DataFrame(rows)
     if not result_df.empty:
         result_df["abs_delta"] = result_df["growth_delta"].abs()
-        result_df = result_df.sort_values("abs_delta", ascending=False).drop(columns=["abs_delta"]).reset_index(drop=True)
+        result_df = (
+            result_df.sort_values("abs_delta", ascending=False)
+            .drop(columns=["abs_delta"])
+            .reset_index(drop=True)
+        )
     return result_df
 
 
@@ -428,29 +492,18 @@ def evaluate_thesis_watchdog(
     conn: Any,
     as_of: date,
     held_tickers: list[str] | None = None,
+    snap_df: pd.DataFrame | None = None,
+    fc_df: pd.DataFrame | None = None,
+    links_df: pd.DataFrame | None = None,
+    tech_df: pd.DataFrame | None = None,
 ) -> list[WatchdogAlert]:
     """Audit positions against machine-executable kill conditions and circuit breakers."""
-    # Ensure supply chain links and forecasts exist
-    seed_default_supply_chain_links(conn)
-    links_df = query_supply_chain_links(conn)
+    if links_df is None:
+        seed_default_supply_chain_links(conn)
+        links_df = query_supply_chain_links(conn)
 
-    fc_count = conn.execute(
-        "SELECT count(*) FROM forecasts WHERE as_of_date <= ?", [as_of]
-    ).fetchone()[0]
-    if fc_count == 0:
-        generate_forecasts_for_universe(as_of, conn, persist=False)
-
-    # Load latest snapshots
-    snap_df = conn.execute(
-        """
-        SELECT ticker, name, leg, layer, price, market_cap_usd, free_cash_flow,
-               eps_2yr_cagr, revenue_yoy_growth, roe, froth_flag, decile, ps_ratio,
-               financial_fx_usd, fx_rate_usd, implied_growth, v_score, e_score
-        FROM snapshots
-        WHERE as_of_date = (SELECT MAX(as_of_date) FROM snapshots WHERE as_of_date <= ?)
-        """,
-        [as_of],
-    ).fetchdf()
+    if snap_df is None:
+        snap_df = _load_latest_snapshots(conn, as_of)
 
     if snap_df.empty:
         return []
@@ -460,50 +513,43 @@ def evaluate_thesis_watchdog(
         for _, r in snap_df.iterrows()
     }
 
-    # Load latest forecasts
-    fc_df = conn.execute(
-        """
-        SELECT ticker, predicted_rev_growth, expected_beat_pct, eps_surprise_prob,
-               fair_value_p10, fair_value_p50, fair_value_p90, expected_return_p50,
-               regime_breakout_prob
-        FROM forecasts
-        WHERE as_of_date = (SELECT MAX(as_of_date) FROM forecasts WHERE as_of_date <= ?)
-        """,
-        [as_of],
-    ).fetchdf()
-    fc_map = {
-        str(r["ticker"]).strip().upper(): r.to_dict()
-        for _, r in fc_df.iterrows()
-    } if not fc_df.empty else {}
+    if fc_df is None:
+        fc_df = _ensure_and_load_forecasts(conn, as_of, horizon_days=90)
+    fc_map = (
+        {str(r["ticker"]).strip().upper(): r.to_dict() for _, r in fc_df.iterrows()}
+        if not fc_df.empty
+        else {}
+    )
 
-    # Load latest technical metrics
-    tech_df = conn.execute(
-        """
-        SELECT ticker, technical_score, chip_profit_ratio, chip_avg_cost, ma_bullish_alignment, rsi
-        FROM technical_metrics
-        WHERE as_of_date = (SELECT MAX(as_of_date) FROM technical_metrics WHERE as_of_date <= ?)
-        """,
-        [as_of],
-    ).fetchdf()
-    tech_map = {
-        str(r["ticker"]).strip().upper(): r.to_dict()
-        for _, r in tech_df.iterrows()
-    } if not tech_df.empty else {}
+    if tech_df is None:
+        tech_df = _load_latest_technicals(conn, as_of)
+    tech_map = (
+        {str(r["ticker"]).strip().upper(): r.to_dict() for _, r in tech_df.iterrows()}
+        if not tech_df.empty
+        else {}
+    )
+
+    norm_held = {str(h).strip().upper() for h in (held_tickers or []) if str(h).strip()}
 
     # Determine candidate tickers
-    if held_tickers is not None and len(held_tickers) > 0:
-        target_tickers = [str(t).strip().upper() for t in held_tickers]
+    if norm_held:
+        target_tickers = sorted(norm_held)
     else:
-        # Check active IDRs/opportunity states or tickers with froth_flag
+        # Check active IDRs/opportunity states only (exclude invalidated/harvested)
         active_db_tickers: set[str] = set()
+        stage_placeholders = ", ".join(f"'{s}'" for s in _ACTIVE_THESIS_STAGES)
         try:
-            opp_df = conn.execute("SELECT DISTINCT ticker FROM opportunity_states").fetchdf()
-            active_db_tickers.update(opp_df["ticker"].astype(str).str.upper())
+            opp_df = conn.execute(
+                f"SELECT DISTINCT ticker FROM opportunity_states WHERE current_stage IN ({stage_placeholders})"
+            ).fetchdf()
+            active_db_tickers.update(opp_df["ticker"].astype(str).str.strip().str.upper())
         except Exception:
             pass
         try:
-            idr_df = conn.execute("SELECT DISTINCT ticker FROM investment_decision_records").fetchdf()
-            active_db_tickers.update(idr_df["ticker"].astype(str).str.upper())
+            idr_df = conn.execute(
+                f"SELECT DISTINCT ticker FROM investment_decision_records WHERE stage IN ({stage_placeholders})"
+            ).fetchdf()
+            active_db_tickers.update(idr_df["ticker"].astype(str).str.strip().str.upper())
         except Exception:
             pass
 
@@ -515,7 +561,7 @@ def evaluate_thesis_watchdog(
             for t, r in snap_map.items():
                 if bool(r.get("froth_flag")):
                     active_db_tickers.add(t)
-            target_tickers = list(active_db_tickers)
+            target_tickers = sorted(active_db_tickers)
 
     alerts: list[WatchdogAlert] = []
 
@@ -530,7 +576,7 @@ def evaluate_thesis_watchdog(
         # Combine all metrics
         metrics: dict[str, Any] = {**snap_row, **f_row, **m_row}
         name = str(metrics.get("name") or "")
-        is_held = held_tickers is not None and t in held_tickers
+        is_held = t in norm_held
 
         # 1. G3 Froth Circuit Breaker Alert
         is_froth = bool(metrics.get("froth_flag"))
@@ -644,36 +690,15 @@ def build_cio_decision_packet(
     held_tickers: list[str] | None = None,
     customer_shocks: dict[str, float] | None = None,
     max_proposals: int = 8,
+    bottleneck_clamp: float | None = 0.80,
 ) -> CIODecisionPacket:
     """Build the autonomous 5-stage CIO Decision Packet end-to-end."""
     packet_id = f"CIO-PKT-{as_of.isoformat()}-{uuid.uuid4().hex[:6].upper()}"
 
-    # Stage 1: Ensure forecasts and supply chain links exist
+    # Load supply chain links, snapshots, forecasts, and technicals once
     seed_default_supply_chain_links(conn)
     links_df = query_supply_chain_links(conn)
-
-    fc_count = conn.execute(
-        "SELECT count(*) FROM forecasts WHERE as_of_date <= ?", [as_of]
-    ).fetchone()[0]
-    if fc_count == 0:
-        generate_forecasts_for_universe(as_of, conn, persist=False)
-
-    # Stage 2: Causal shock simulation if customer_shocks provided
-    shock_df = pd.DataFrame()
-    if customer_shocks:
-        shock_df = simulate_supply_chain_shock(conn, as_of, customer_shocks)
-
-    # Fetch snapshots
-    snap_df = conn.execute(
-        """
-        SELECT ticker, name, leg, layer, price, market_cap_usd, free_cash_flow,
-               eps_2yr_cagr, revenue_yoy_growth, roe, froth_flag, decile, ps_ratio,
-               financial_fx_usd, fx_rate_usd, implied_growth, v_score, e_score, arf
-        FROM snapshots
-        WHERE as_of_date = (SELECT MAX(as_of_date) FROM snapshots WHERE as_of_date <= ?)
-        """,
-        [as_of],
-    ).fetchdf()
+    snap_df = _load_latest_snapshots(conn, as_of)
 
     if snap_df.empty:
         return CIODecisionPacket(
@@ -686,47 +711,78 @@ def build_cio_decision_packet(
             markdown_brief="# 💼 AI-CIO Decision Packet\n\nNo snapshot data available.",
         )
 
+    fc_df = _ensure_and_load_forecasts(conn, as_of, horizon_days=90)
+    tech_df = _load_latest_technicals(conn, as_of)
+
     snap_map = {
         str(r["ticker"]).strip().upper(): r.to_dict()
         for _, r in snap_df.iterrows()
     }
+    fc_map = (
+        {str(r["ticker"]).strip().upper(): r.to_dict() for _, r in fc_df.iterrows()}
+        if not fc_df.empty
+        else {}
+    )
+    tech_map = (
+        {str(r["ticker"]).strip().upper(): r.to_dict() for _, r in tech_df.iterrows()}
+        if not tech_df.empty
+        else {}
+    )
 
-    # Fetch forecasts
-    fc_df = conn.execute(
-        """
-        SELECT ticker, predicted_rev_growth, consensus_rev_growth, expected_beat_pct,
-               eps_surprise_prob, fair_value_p10, fair_value_p50, fair_value_p90,
-               expected_return_p50, regime_breakout_prob
-        FROM forecasts
-        WHERE as_of_date = (SELECT MAX(as_of_date) FROM forecasts WHERE as_of_date <= ?)
-        """,
-        [as_of],
-    ).fetchdf()
-    fc_map = {
-        str(r["ticker"]).strip().upper(): r.to_dict()
-        for _, r in fc_df.iterrows()
-    } if not fc_df.empty else {}
-
-    # If shocked, update fc_map with shocked values
-    if not shock_df.empty:
-        for _, s_row in shock_df.iterrows():
-            stk = str(s_row["ticker"]).strip().upper()
-            if stk in fc_map:
+    # Stage 2: Causal shock simulation if customer_shocks provided
+    shock_df = pd.DataFrame()
+    if customer_shocks:
+        shock_df = simulate_supply_chain_shock(
+            conn,
+            as_of,
+            customer_shocks,
+            bottleneck_clamp=bottleneck_clamp,
+            snap_df=snap_df,
+            fc_df=fc_df,
+            links_df=links_df,
+        )
+        if not shock_df.empty:
+            for _, s_row in shock_df.iterrows():
+                stk = str(s_row["ticker"]).strip().upper()
+                if stk not in fc_map:
+                    fc_map[stk] = {"ticker": stk}
                 fc_map[stk]["predicted_rev_growth"] = s_row["shocked_pred_growth"]
                 fc_map[stk]["expected_beat_pct"] = s_row["expected_beat_pct"]
                 fc_map[stk]["eps_surprise_prob"] = s_row["eps_surprise_prob"]
                 fc_map[stk]["fair_value_p50"] = s_row["fair_value_p50"]
                 fc_map[stk]["expected_return_p50"] = s_row["expected_return_p50"]
+            fc_df = pd.DataFrame(list(fc_map.values()))
 
-    # Stage 4: Run Active Thesis Watchdog
-    watchdog_alerts = evaluate_thesis_watchdog(conn, as_of, held_tickers=held_tickers)
+    # Stage 1: Anomaly & Delta Triage (driven by post-shock forecast state)
+    triage = scan_material_deltas(conn, as_of, snap_df=snap_df, fc_df=fc_df)
+    bullish_tickers = {str(d["ticker"]).strip().upper() for d in triage["high_conviction_longs"]}
+    froth_tickers = {str(d["ticker"]).strip().upper() for d in triage["froth_hazards"]}
+
+    # Stage 4: Run Active Thesis Watchdog (reusing pre-loaded DataFrames)
+    watchdog_alerts = evaluate_thesis_watchdog(
+        conn,
+        as_of,
+        held_tickers=held_tickers,
+        snap_df=snap_df,
+        fc_df=fc_df,
+        links_df=links_df,
+        tech_df=tech_df,
+    )
+
+    invalidated_alerts_by_ticker: dict[str, list[WatchdogAlert]] = {}
+    for alert in watchdog_alerts:
+        if alert.alert_type == "THESIS_INVALIDATED":
+            invalidated_alerts_by_ticker.setdefault(alert.ticker.strip().upper(), []).append(alert)
 
     # Stage 3 & 5: Evaluate G1-G4 gates & build Proposals
     proposals: list[ProposalTicket] = []
-    norm_held = set(str(t).strip().upper() for t in (held_tickers or []))
+    norm_held = {str(t).strip().upper() for t in (held_tickers or []) if str(t).strip()}
 
     for t, snap_row in snap_map.items():
         f_row = fc_map.get(t, {})
+        m_row = tech_map.get(t, {})
+        combined_metrics: dict[str, Any] = {**snap_row, **f_row, **m_row}
+
         # Find customer implied growths
         cust_implied_growths: list[float] = []
         if not links_df.empty:
@@ -744,7 +800,19 @@ def build_cio_decision_packet(
         surprise_prob = _num(f_row.get("eps_surprise_prob"))
         breakout_prob = _num(f_row.get("regime_breakout_prob"))
         is_held = t in norm_held
-        is_froth = bool(snap_row.get("froth_flag"))
+        is_froth = t in froth_tickers or bool(snap_row.get("froth_flag"))
+
+        kill_conds = default_kill_conditions_for_row(snap_row)
+        breached_reasons: list[str] = [
+            a.triggered_rule for a in invalidated_alerts_by_ticker.get(t, [])
+        ]
+        if not breached_reasons:
+            for cond in kill_conds:
+                if cond.metric == "froth_flag":
+                    continue
+                trig, detail = cond.evaluate(combined_metrics)
+                if trig:
+                    breached_reasons.append(detail)
 
         if is_froth:
             action = "EXIT_INVALIDATED" if is_held else "SHORT_FROTH"
@@ -773,7 +841,29 @@ def build_cio_decision_packet(
                     gate_verdict=gate_verdict,
                     gate_details=gate_details,
                     rationale=rationale,
-                    kill_conditions=default_kill_conditions_for_row(snap_row),
+                    kill_conditions=kill_conds,
+                )
+            )
+        elif is_held and breached_reasons:
+            action = "EXIT_INVALIDATED"
+            conviction = -0.80
+            rationale = f"Held position breached kill condition(s): {'; '.join(breached_reasons)}"
+            proposals.append(
+                ProposalTicket(
+                    ticker=t,
+                    name=str(snap_row.get("name") or ""),
+                    leg=str(snap_row.get("leg") or "US"),
+                    layer=str(snap_row.get("layer") or "L2"),
+                    action=action,
+                    conviction=conviction,
+                    expected_beat_pct=exp_beat,
+                    eps_surprise_prob=surprise_prob,
+                    expected_return_p50=exp_ret,
+                    regime_breakout_prob=breakout_prob,
+                    gate_verdict=gate_verdict,
+                    gate_details=gate_details,
+                    rationale=rationale,
+                    kill_conditions=kill_conds,
                 )
             )
         elif is_held and exp_ret is not None and exp_ret <= -0.15:
@@ -797,50 +887,44 @@ def build_cio_decision_packet(
                     gate_verdict=gate_verdict,
                     gate_details=gate_details,
                     rationale=rationale,
-                    kill_conditions=default_kill_conditions_for_row(snap_row),
+                    kill_conditions=kill_conds,
                 )
             )
-        elif gate_verdict == GateVerdict.PASSED:
-            # Bullish criteria: require non-negative 12M P50 expected return
-            has_positive_upside = exp_ret is None or exp_ret >= 0.0
-            is_bullish = has_positive_upside and (
-                (exp_beat is not None and exp_beat >= 0.05) or (exp_ret is not None and exp_ret >= 0.12)
-            )
-            if is_bullish:
-                action = "ADD_LONG" if is_held else "INITIATE_LONG"
-                base_conv = 0.50
-                if exp_beat is not None:
-                    base_conv += exp_beat * 1.5
-                if exp_ret is not None and exp_ret > 0:
-                    base_conv += min(0.30, exp_ret * 0.5)
-                conviction = round(float(np.clip(base_conv, 0.20, 0.95)), 2)
+        elif gate_verdict == GateVerdict.PASSED and not breached_reasons and t in bullish_tickers:
+            action = "ADD_LONG" if is_held else "INITIATE_LONG"
+            base_conv = 0.50
+            if exp_beat is not None:
+                base_conv += exp_beat * 1.5
+            if exp_ret is not None and exp_ret > 0:
+                base_conv += min(0.30, exp_ret * 0.5)
+            conviction = round(float(np.clip(base_conv, 0.20, 0.95)), 2)
 
-                beat_str = f"{exp_beat:+.1%}" if exp_beat is not None else "N/A"
-                ret_str = f"{exp_ret:+.1%}" if exp_ret is not None else "N/A"
-                win_str = f"{surprise_prob:.0%}" if surprise_prob is not None else "N/A"
-                rationale = (
-                    f"Passed G1-G4 gates. Supply-chain beat: {beat_str}, "
-                    f"12M P50 return: {ret_str}, "
-                    f"beat win rate: {win_str}"
+            beat_str = f"{exp_beat:+.1%}" if exp_beat is not None else "N/A"
+            ret_str = f"{exp_ret:+.1%}" if exp_ret is not None else "N/A"
+            win_str = f"{surprise_prob:.0%}" if surprise_prob is not None else "N/A"
+            rationale = (
+                f"Passed G1-G4 gates. Supply-chain beat: {beat_str}, "
+                f"12M P50 return: {ret_str}, "
+                f"beat win rate: {win_str}"
+            )
+            proposals.append(
+                ProposalTicket(
+                    ticker=t,
+                    name=str(snap_row.get("name") or ""),
+                    leg=str(snap_row.get("leg") or "US"),
+                    layer=str(snap_row.get("layer") or "L2"),
+                    action=action,
+                    conviction=conviction,
+                    expected_beat_pct=exp_beat,
+                    eps_surprise_prob=surprise_prob,
+                    expected_return_p50=exp_ret,
+                    regime_breakout_prob=breakout_prob,
+                    gate_verdict=gate_verdict,
+                    gate_details=gate_details,
+                    rationale=rationale,
+                    kill_conditions=kill_conds,
                 )
-                proposals.append(
-                    ProposalTicket(
-                        ticker=t,
-                        name=str(snap_row.get("name") or ""),
-                        leg=str(snap_row.get("leg") or "US"),
-                        layer=str(snap_row.get("layer") or "L2"),
-                        action=action,
-                        conviction=conviction,
-                        expected_beat_pct=exp_beat,
-                        eps_surprise_prob=surprise_prob,
-                        expected_return_p50=exp_ret,
-                        regime_breakout_prob=breakout_prob,
-                        gate_verdict=gate_verdict,
-                        gate_details=gate_details,
-                        rationale=rationale,
-                        kill_conditions=default_kill_conditions_for_row(snap_row),
-                    )
-                )
+            )
 
     # Rank proposals
     action_priority = {
@@ -855,7 +939,7 @@ def build_cio_decision_packet(
         key=lambda p: (
             action_priority.get(p.action, 5),
             -abs(p.conviction),
-            -(p.expected_return_p50 or -999),
+            -_num_or(p.expected_return_p50, -999.0),
         )
     )
     proposals = proposals[:max_proposals]
@@ -1018,11 +1102,12 @@ def main() -> None:
         latest = conn.execute("SELECT MAX(as_of_date) FROM snapshots").fetchone()[0]
         as_of = latest if latest is not None else date.today()
 
-    # Parse shocks
+    # Parse shocks (support both TICKER:DELTA and TICKER=DELTA)
     shocks: dict[str, float] = {}
     for s in args.shock:
-        if ":" in s:
-            k, v = s.split(":", 1)
+        sep = ":" if ":" in s else ("=" if "=" in s else None)
+        if sep:
+            k, v = s.split(sep, 1)
             try:
                 shocks[k.strip().upper()] = float(v)
             except ValueError:

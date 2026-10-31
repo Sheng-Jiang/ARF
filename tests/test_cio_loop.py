@@ -431,3 +431,154 @@ def test_build_cio_decision_packet_end_to_end(cio_test_db):
     assert "2. 下游需求冲击传导模拟" in brief
     assert "3. 活跃持仓哨兵与触发告警" in brief
     assert "4. 推荐执行交易提案与风控门禁" in brief
+
+
+def test_on_demand_forecast_fallback_persists_and_returns_proposals(cio_test_db):
+    """Regression #1: Empty forecasts table triggers on-demand forecast generation and populates proposals."""
+    as_of = date(2026, 6, 1)
+    cio_test_db.execute("DELETE FROM forecasts")
+    assert cio_test_db.execute("SELECT count(*) FROM forecasts").fetchone()[0] == 0
+
+    packet = build_cio_decision_packet(conn=cio_test_db, as_of=as_of, held_tickers=["NVDA"])
+    assert cio_test_db.execute("SELECT count(*) FROM forecasts").fetchone()[0] > 0
+    assert len(packet.proposals) > 0
+    nvda_props = [p for p in packet.proposals if p.ticker == "NVDA"]
+    assert len(nvda_props) == 1
+    assert nvda_props[0].expected_beat_pct is not None
+
+
+def test_kill_condition_breach_prevents_add_long_and_emits_exit(cio_test_db):
+    """Regression #2: Held ticker breaching roe < 0.05 gets EXIT_INVALIDATED, never ADD_LONG."""
+    as_of = date(2026, 6, 1)
+    # Set GOOGL ROE to 0.03 (< 0.05 kill threshold) while V-score=40 (<60 so G2 passes)
+    cio_test_db.execute(
+        "UPDATE snapshot_revisions SET roe = 0.03, v_score = 40.0 WHERE ticker = 'GOOGL'"
+    )
+
+    packet = build_cio_decision_packet(
+        conn=cio_test_db,
+        as_of=as_of,
+        held_tickers=["GOOGL"],
+    )
+    goog_alerts = [
+        a for a in packet.watchdog_alerts
+        if a.ticker == "GOOGL" and a.alert_type == "THESIS_INVALIDATED"
+    ]
+    assert len(goog_alerts) == 1
+    assert goog_alerts[0].recommended_action == DecisionAction.INVALIDATE
+
+    goog_props = [p for p in packet.proposals if p.ticker == "GOOGL"]
+    assert len(goog_props) == 1
+    assert goog_props[0].action == "EXIT_INVALIDATED"
+    assert goog_props[0].conviction < 0
+
+
+def test_zero_growth_not_swallowed_by_falsy_or(cio_test_db):
+    """Regression #4: Legitimate 0.0 eps_2yr_cagr / revenue_yoy_growth is preserved as 0.0, not 0.15."""
+    as_of = date(2026, 6, 1)
+    cio_test_db.execute(
+        "UPDATE snapshot_revisions SET eps_2yr_cagr = 0.0, revenue_yoy_growth = 0.0 WHERE ticker = 'GOOGL'"
+    )
+    cio_test_db.execute(
+        "UPDATE forecasts SET predicted_rev_growth = 0.08, consensus_rev_growth = 0.0 WHERE ticker = 'GOOGL'"
+    )
+
+    shock_df = simulate_supply_chain_shock(
+        conn=cio_test_db,
+        as_of=as_of,
+        customer_shocks={},
+    )
+    goog_row = shock_df[shock_df["ticker"] == "GOOGL"].iloc[0]
+    # expected_beat_pct should be 0.08 - 0.0 = 0.08 (not 0.08 - 0.15 = -0.07)
+    assert goog_row["expected_beat_pct"] == pytest.approx(0.08, abs=1e-4)
+
+
+def test_forecast_dedupe_selects_90d_horizon(cio_test_db):
+    """Regression #5: Multiple forecast horizons for the same date select the 90-day horizon."""
+    as_of = date(2026, 6, 1)
+    # Insert a 30-day forecast row for NVDA with a bogus expected_beat_pct = -0.33
+    upsert_forecasts(
+        cio_test_db,
+        [
+            {
+                "ticker": "NVDA",
+                "as_of_date": as_of.isoformat(),
+                "horizon_days": 30,
+                "predicted_rev_growth": 0.02,
+                "consensus_rev_growth": 0.35,
+                "expected_beat_pct": -0.33,
+                "eps_surprise_prob": 0.10,
+                "revision_velocity_14d": 0.04,
+                "revision_velocity_30d": 0.06,
+                "fair_value_p10": 80.0,
+                "fair_value_p50": 90.0,
+                "fair_value_p90": 100.0,
+                "expected_return_p50": -0.25,
+                "regime_breakout_prob": 0.30,
+                "chip_concentration_ratio": 0.08,
+                "model_version": "v1.0",
+            }
+        ],
+    )
+
+    packet = build_cio_decision_packet(conn=cio_test_db, as_of=as_of, held_tickers=["NVDA"])
+    nvda_prop = [p for p in packet.proposals if p.ticker == "NVDA"][0]
+    assert nvda_prop.expected_beat_pct == pytest.approx(0.10, abs=1e-4)
+    assert nvda_prop.action == "ADD_LONG"
+
+
+def test_watchdog_lowercase_held_and_active_stage_filter(cio_test_db):
+    """Regression #6 & #7: Lowercase held_tickers and stage filtering on IDRs."""
+    as_of = date(2026, 6, 1)
+
+    # #6: Pass lowercase 'froth_co' -> should be treated as held -> DecisionAction.INVALIDATE
+    alerts = evaluate_thesis_watchdog(conn=cio_test_db, as_of=as_of, held_tickers=["froth_co"])
+    froth_alert = [a for a in alerts if a.ticker == "FROTH_CO" and a.alert_type == "FROTH_CIRCUIT_BREAKER"][0]
+    assert froth_alert.recommended_action == DecisionAction.INVALIDATE
+
+    # #7: Insert an invalidated IDR for HARVEST_CO and an active_watch IDR for NVDA
+    cio_test_db.execute(
+        """
+        INSERT INTO investment_decision_records (
+            idr_id, ticker, name, as_of_date, stage, created_at
+        ) VALUES
+        ('IDR-OLD', 'HARVEST_CO', 'Harvest Energy', '2026-05-01', 'invalidated', CURRENT_TIMESTAMP),
+        ('IDR-ACT', 'NVDA', 'NVIDIA', '2026-06-01', 'active_watch', CURRENT_TIMESTAMP)
+        """
+    )
+    default_alerts = evaluate_thesis_watchdog(conn=cio_test_db, as_of=as_of, held_tickers=None)
+    alerted_tickers = {a.ticker for a in default_alerts}
+    # HARVEST_CO's IDR is 'invalidated' and it is not froth_flag, so it should not be re-alerted
+    assert "HARVEST_CO" not in alerted_tickers
+
+
+def test_shock_on_dual_role_customer_supplier_updates_own_row(cio_test_db):
+    """Regression #8: Shocking NVDA when NVDA is also a supplier to GOOGL updates NVDA's own row."""
+    as_of = date(2026, 6, 1)
+    upsert_supply_chain_links(
+        cio_test_db,
+        [
+            {
+                "supplier_ticker": "NVDA",
+                "customer_ticker": "GOOGL",
+                "revenue_share_pct": 30.0,
+                "bom_component_pct": 15.0,
+                "relationship_type": "direct_customer",
+                "verified_source": "test",
+            }
+        ],
+    )
+
+    shock_df = simulate_supply_chain_shock(
+        conn=cio_test_db,
+        as_of=as_of,
+        customer_shocks={"NVDA": 0.20},
+        bottleneck_clamp=None,
+    )
+    nvda_row = shock_df[shock_df["ticker"] == "NVDA"].iloc[0]
+    assert nvda_row["growth_delta"] == pytest.approx(0.20, abs=1e-4)
+    assert nvda_row["shocked_pred_growth"] > nvda_row["base_pred_growth"]
+
+    inno_row = shock_df[shock_df["ticker"] == "300308.SZ"].iloc[0]
+    assert inno_row["growth_delta"] > 0
+
