@@ -228,6 +228,42 @@ def _num(value: object) -> float | None:
     return None if math.isnan(out) else out
 
 
+HYPERSCALER_CUSTOMERS: tuple[str, ...] = ("MSFT", "GOOGL", "META")
+
+
+def capex_to_customer_shocks(
+    fc_df: pd.DataFrame | None,
+    capex_change_pct: float,
+    customers: tuple[str, ...] = HYPERSCALER_CUSTOMERS,
+    default_base_growth: float = 0.20,
+) -> dict[str, float]:
+    """Convert a multiplicative CapEx change into additive customer growth shocks.
+
+    Each customer's base growth (consensus first, then the ARF forecast) is
+    scaled by the CapEx change. A single shared helper keeps every simulator
+    — the CIO cockpit and the IDC research desk — producing the same delta for
+    the same user input.
+    """
+    if not capex_change_pct:
+        return {}
+
+    rel_shock = capex_change_pct / 100.0
+    base: dict[str, float] = {}
+    if fc_df is not None and not fc_df.empty and "ticker" in fc_df.columns:
+        for _, fr in fc_df.iterrows():
+            tk = str(fr.get("ticker", "")).strip().upper()
+            bg = _num(fr.get("consensus_rev_growth"))
+            if bg is None:
+                bg = _num(fr.get("predicted_rev_growth"))
+            if tk and bg is not None:
+                base[tk] = bg
+
+    return {
+        c: round(base.get(c, default_base_growth) * rel_shock, 4)
+        for c in customers
+    }
+
+
 def seed_default_supply_chain_links(conn: Any) -> None:
     """Seed the database with verified canonical supply chain links if empty."""
     existing = query_supply_chain_links(conn)

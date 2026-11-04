@@ -162,3 +162,68 @@ def test_generate_analyst_vendor_profile(sample_snapshot_df, sample_forecast_df)
     # Test unknown ticker
     unknown = generate_analyst_vendor_profile("UNKNOWN_TICKER", sample_snapshot_df)
     assert "not found" in unknown
+
+
+def test_marketscape_drops_unscored_rows(sample_snapshot_df):
+    """A vendor without a computed ARF must not receive invented scores."""
+    df = sample_snapshot_df.copy()
+    df.loc[df["ticker"] == "MSFT", ["e_score", "v_score", "arf"]] = None
+
+    ms_df = compute_idc_marketscape(df)
+
+    assert "MSFT" not in set(ms_df["ticker"])
+    assert len(ms_df) == 3
+    # Every surviving row carries its real score, never a 50.0 substitute.
+    assert (ms_df["e_score"] != 50.0).all()
+
+
+def test_marketscape_preserves_zero_forecast(sample_snapshot_df):
+    """A genuine 0% forecast must not fall through to trailing growth."""
+    fc_df = pd.DataFrame([
+        {"ticker": "NVDA", "predicted_rev_growth": 0.0, "expected_beat_pct": 0.0},
+    ])
+    ms_df = compute_idc_marketscape(sample_snapshot_df, fc_df)
+    nvda = ms_df[ms_df["ticker"] == "NVDA"].iloc[0]
+    assert nvda["predicted_growth"] == 0.0
+
+
+def test_generators_handle_empty_snapshot():
+    """CLI/automation callers get a readable result instead of a KeyError."""
+    empty = pd.DataFrame()
+    briefing = generate_idc_executive_briefing(date(2026, 6, 1), empty)
+    assert "尚无已完成评分" in briefing
+
+    from arf.idc import generate_analyst_vendor_profile
+
+    profile = generate_analyst_vendor_profile("NVDA", empty)
+    assert "not found" in profile
+
+
+def test_vendor_profile_renders_null_metrics_as_na(sample_snapshot_df, sample_forecast_df):
+    """NULL metrics round-trip through a float column as NaN; never print 'nan'."""
+    df = sample_snapshot_df.copy()
+    df.loc[df["ticker"] == "NVDA", ["roe", "ps_ratio"]] = None
+    df["implied_growth"] = None
+
+    from arf.idc import generate_analyst_vendor_profile
+
+    profile = generate_analyst_vendor_profile("NVDA", df, sample_forecast_df)
+
+    assert "nan%" not in profile
+    assert "nanx" not in profile
+    assert "N/A" in profile
+
+
+def test_spending_tracker_excludes_manual_rows_without_scores(sample_snapshot_df):
+    """Pre-IPO / manual rows (no market cap, no score) must not enter the totals."""
+    rows = sample_snapshot_df.to_dict("records")
+    rows.append({
+        "ticker": "OPENAI", "as_of_date": date(2026, 6, 1), "leg": "US",
+        "layer": "L4", "name": "OpenAI", "market_cap_usd": None,
+        "e_score": None, "ev_sales": None, "ps_ratio": None, "froth_flag": None,
+    })
+    df = pd.DataFrame(rows)
+
+    tracker = compute_ai_spending_tracker(df)
+
+    assert tracker["covered_count"] == len(sample_snapshot_df)

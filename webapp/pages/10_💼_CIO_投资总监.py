@@ -383,25 +383,11 @@ with tab_barometer:
         from datetime import date as _date
 
         from arf.agent.cio_loop import build_cio_decision_packet
-        from arf.forecast import _num
+        from arf.forecast import _num, capex_to_customer_shocks
 
-        # Convert multiplicative CapEx slider (% change) into additive customer growth deltas
-        cust_shocks = None
-        if capex_shock != 0:
-            rel_shock = capex_shock / 100.0
-            fc_base_map: dict[str, float] = {}
-            if not fc_df.empty and "ticker" in fc_df.columns:
-                for _, fr in fc_df.iterrows():
-                    tk = str(fr.get("ticker", "")).strip().upper()
-                    bg = _num(fr.get("consensus_rev_growth"))
-                    if bg is None:
-                        bg = _num(fr.get("predicted_rev_growth"))
-                    if tk and bg is not None:
-                        fc_base_map[tk] = bg
-            cust_shocks = {
-                c: round(fc_base_map.get(c, 0.20) * rel_shock, 4)
-                for c in ("MSFT", "GOOGL", "META")
-            }
+        # Convert multiplicative CapEx slider (% change) into additive customer
+        # growth deltas. Shared with the IDC sandbox so both pages agree.
+        cust_shocks = capex_to_customer_shocks(fc_df, capex_shock) or None
 
         clamp_param = (capacity_cap / 100.0) if capacity_cap < 100 else 0.80
 

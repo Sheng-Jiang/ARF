@@ -8,7 +8,10 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
+from arf.forecast import capex_to_customer_shocks
 from arf.idc import (
+    CAPABILITY_LEADER_THRESHOLD,
+    STRATEGY_LEADER_THRESHOLD,
     compute_ai_spending_tracker,
     compute_idc_marketscape,
     generate_analyst_vendor_profile,
@@ -26,6 +29,26 @@ st.set_page_config(
 )
 inject_mobile_css()
 
+
+def _pct(value: object, decimals: int = 1, signed: bool = False) -> str:
+    """Percentage for display, treating both NULL and NaN as missing."""
+    if value is None or pd.isna(value):
+        return "N/A"
+    return f"{float(value):+.{decimals}%}" if signed else f"{float(value):.{decimals}%}"
+
+
+def _num(value: object, decimals: int = 1) -> str:
+    if value is None or pd.isna(value):
+        return "N/A"
+    return f"{float(value):.{decimals}f}"
+
+
+def _usd_b(value: object, decimals: int = 1) -> str:
+    if value is None or pd.isna(value):
+        return "N/A"
+    return f"${float(value):.{decimals}f}B"
+
+
 # ── Analyst Desk Header ──────────────────────────────────────────────────────
 st.title("🌐 IDC Quanta™ AI 分析师研报工作台 (Research Desk)")
 st.caption(
@@ -37,17 +60,31 @@ as_of = render_sidebar()
 if as_of is None:
     st.stop()
 
+# A partially written snapshot has rows but NULL scores. Never present it as a
+# finished analysis (the axes would have to be invented); roll back to the
+# newest fully-scored snapshot and say so.
+complete_date = data.latest_complete_snapshot_date(as_of)
+if complete_date is None:
+    st.warning(f"截至 {as_of} 尚无已完成评分的快照，请先运行数据管道评分。")
+    st.stop()
+if complete_date != as_of:
+    st.warning(
+        f"{as_of} 的快照尚未完成评分；已自动切换到最近一次完整评分的快照 **{complete_date}**。"
+    )
+    as_of = complete_date
+
 # ── Load Snapshot, Forecast, and Supply Chain Links ──────────────────────────
 snap_df = data.load_snapshot(as_of)
 if snap_df.empty:
     st.warning(f"未找到 {as_of} 的快照数据，请在侧边栏选择有效日期。")
     st.stop()
 
+# Forecasts are point-in-time: only use rows for this exact date. Falling back
+# to the newest date would stamp the briefing with a past as-of while reading
+# growth/revision data from the future.
 fc_df = pd.DataFrame()
 with contextlib.suppress(Exception):
     fc_df = data.load_forecasts(as_of)
-    if fc_df.empty:
-        fc_df = data.load_forecasts(None)
 
 links_df = pd.DataFrame()
 with contextlib.suppress(Exception):
@@ -57,13 +94,22 @@ with contextlib.suppress(Exception):
 ms_df = compute_idc_marketscape(snap_df, fc_df)
 spending = compute_ai_spending_tracker(snap_df)
 
+if ms_df.empty:
+    st.warning("该快照没有可用的评分数据，无法生成 MarketScape 分析。")
+    st.stop()
+
+if fc_df.empty:
+    st.caption("ℹ️ 该快照日期无前瞻预测数据：Strategies 轴暂以营收增速替代，超预期与修正动能显示为 N/A。")
+
+scored_count = int(ms_df["ticker"].nunique())
+
 # ── Top-Level KPI Ribbon ─────────────────────────────────────────────────────
 m_col1, m_col2, m_col3, m_col4 = st.columns(4)
 with m_col1:
     st.metric(
         "🏛️ AI 核心纳管市值",
         f"${spending.get('total_universe_mcap_t', 0.0)}T",
-        f"73 家核心标的 ({as_of})",
+        f"{scored_count} 家已评分标的 ({as_of})",
     )
 with m_col2:
     st.metric(
@@ -154,37 +200,43 @@ with tab_marketscape:
 
     if search_query.strip():
         q = search_query.strip().upper()
+        # regex=False: a ticker/name search must not treat "(" as a pattern
+        # (str.contains would otherwise raise re.error and kill the page).
         plot_df = plot_df[
-            plot_df["ticker"].str.upper().str.contains(q)
-            | plot_df["name"].str.upper().str.contains(q)
+            plot_df["ticker"].str.upper().str.contains(q, regex=False)
+            | plot_df["name"].str.upper().str.contains(q, regex=False)
         ]
 
     # Create Plotly MarketScape Quadrant
     if not plot_df.empty:
         fig = go.Figure()
 
-        # Add shaded quadrant backgrounds
+        # Add shaded quadrant backgrounds. The cuts come from the same
+        # constants that drive marketscape_category, so the picture can never
+        # disagree with the table or the generated reports.
+        x_cut = STRATEGY_LEADER_THRESHOLD
+        y_cut = CAPABILITY_LEADER_THRESHOLD
         fig.add_shape(
             type="rect",
-            x0=55, x1=100, y0=52, y1=100,
+            x0=x_cut, x1=100, y0=y_cut, y1=100,
             fillcolor="rgba(34, 197, 94, 0.08)",
             line=dict(color="rgba(34, 197, 94, 0.3)", width=1, dash="dot"),
         )
         fig.add_shape(
             type="rect",
-            x0=55, x1=100, y0=10, y1=52,
+            x0=x_cut, x1=100, y0=10, y1=y_cut,
             fillcolor="rgba(249, 115, 22, 0.08)",
             line=dict(color="rgba(249, 115, 22, 0.3)", width=1, dash="dot"),
         )
         fig.add_shape(
             type="rect",
-            x0=10, x1=55, y0=52, y1=100,
+            x0=10, x1=x_cut, y0=y_cut, y1=100,
             fillcolor="rgba(59, 130, 246, 0.08)",
             line=dict(color="rgba(59, 130, 246, 0.3)", width=1, dash="dot"),
         )
         fig.add_shape(
             type="rect",
-            x0=10, x1=55, y0=10, y1=52,
+            x0=10, x1=x_cut, y0=10, y1=y_cut,
             fillcolor="rgba(148, 163, 184, 0.05)",
             line=dict(color="rgba(148, 163, 184, 0.3)", width=1, dash="dot"),
         )
@@ -220,8 +272,8 @@ with tab_marketscape:
             f"阵营: <b>{r['marketscape_category']}</b><br>"
             f"交付质量 (Capabilities): <b>{r['capabilities_score']:.1f}</b><br>"
             f"战略动能 (Strategies): <b>{r['strategies_score']:.1f}</b><br>"
-            f"市值: ${r['market_cap_b']:.1f}B | 实质AI收入: ${r['ai_revenue_est_b']:.1f}B<br>"
-            f"ARF得分: {r['arf']:.1f} | 预测增速: {r['predicted_growth']:+.1%}<br>"
+            f"市值: {_usd_b(r['market_cap_b'])} | 实质AI收入: {_usd_b(r['ai_revenue_est_b'])}<br>"
+            f"ARF得分: {_num(r['arf'])} | 预测增速: {_pct(r['predicted_growth'], signed=True)}<br>"
             f"泡沫熔断状态: {'🔴 触碰熔断' if r['froth_flag'] else '🟢 正常'}"
             for _, r in plot_df.iterrows()
         ]
@@ -288,6 +340,8 @@ with tab_marketscape:
         "预测增速", "ARF", "泡沫熔断",
     ]
     formatted_df["预测增速"] = formatted_df["预测增速"].apply(lambda x: f"{x:+.1%}" if pd.notna(x) else "—")
+    formatted_df["市值 ($B)"] = formatted_df["市值 ($B)"].apply(_num)
+    formatted_df["实质AI收入 ($B)"] = formatted_df["实质AI收入 ($B)"].apply(lambda x: _num(x, 2))
     formatted_df["泡沫熔断"] = formatted_df["泡沫熔断"].apply(lambda x: "🔴 熔断" if x else "🟢 正常")
     st.dataframe(formatted_df, use_container_width=True, hide_index=True)
 
@@ -331,11 +385,13 @@ with tab_deepdive:
     with card_c3:
         st.metric("ARF 泡沫估值指数", f"{v_primary['arf']:.1f}", "D1 泡沫阈值 ≥ 90")
     with card_c4:
-        impg = v_primary.get("implied_growth")
-        st.metric("逆向 DCF 隐含增速", f"{impg:.1%}" if impg is not None else "N/A", "市场定价所需永续增速")
+        st.metric("逆向 DCF 隐含增速", _pct(v_primary.get("implied_growth")), "市场定价所需永续增速")
     with card_c5:
-        p_beat = v_primary.get("expected_beat_pct")
-        st.metric("12M 预期超一致差", f"{p_beat:+.1%}" if p_beat is not None else "N/A", "ARF模型前瞻弹性")
+        st.metric(
+            "12M 预期超一致差",
+            _pct(v_primary.get("expected_beat_pct"), signed=True),
+            "ARF模型前瞻弹性",
+        )
 
     # Side-by-Side Peer Comparison Table
     st.markdown("#### ⚖️ 双雄深度指标对标 (Head-to-Head Benchmark)")
@@ -344,12 +400,12 @@ with tab_deepdive:
         {"指标维度": "Capabilities (交付与财务质量)", chosen_ticker: f"{v_primary['capabilities_score']:.1f}", peer_ticker: f"{v_peer['capabilities_score']:.1f}"},
         {"指标维度": "Strategies (未来战略与增速)", chosen_ticker: f"{v_primary['strategies_score']:.1f}", peer_ticker: f"{v_peer['strategies_score']:.1f}"},
         {"指标维度": "资本总市值 (USD)", chosen_ticker: f"${v_primary['market_cap_b']:.1f}B", peer_ticker: f"${v_peer['market_cap_b']:.1f}B"},
-        {"指标维度": "实质 AI 年化收入估算", chosen_ticker: f"${v_primary['ai_revenue_est_b']:.2f}B", peer_ticker: f"${v_peer['ai_revenue_est_b']:.2f}B"},
+        {"指标维度": "实质 AI 年化收入估算", chosen_ticker: _usd_b(v_primary.get("ai_revenue_est_b"), 2), peer_ticker: _usd_b(v_peer.get("ai_revenue_est_b"), 2)},
         {"指标维度": "AI 暴露纯度 (E_score)", chosen_ticker: f"{v_primary.get('e_score', 0):.0f}", peer_ticker: f"{v_peer.get('e_score', 0):.0f}"},
         {"指标维度": "估值张力指数 (V_score)", chosen_ticker: f"{v_primary.get('v_score', 0):.0f}", peer_ticker: f"{v_peer.get('v_score', 0):.0f}"},
-        {"指标维度": "ROE 净资产收益率", chosen_ticker: f"{v_primary.get('roe', 0):.1%}" if v_primary.get('roe') is not None else "N/A", peer_ticker: f"{v_peer.get('roe', 0):.1%}" if v_peer.get('roe') is not None else "N/A"},
-        {"指标维度": "市销率 (P/S Ratio)", chosen_ticker: f"{v_primary.get('ps_ratio', 0):.1f}x" if v_primary.get('ps_ratio') is not None else "N/A", peer_ticker: f"{v_peer.get('ps_ratio', 0):.1f}x" if v_peer.get('ps_ratio') is not None else "N/A"},
-        {"指标维度": "前瞻 12M 预测增速 (ARF ĝ)", chosen_ticker: f"{v_primary.get('predicted_growth', 0):+.1%}" if v_primary.get('predicted_growth') is not None else "N/A", peer_ticker: f"{v_peer.get('predicted_growth', 0):+.1%}" if v_peer.get('predicted_growth') is not None else "N/A"},
+        {"指标维度": "ROE 净资产收益率", chosen_ticker: _pct(v_primary.get("roe")), peer_ticker: _pct(v_peer.get("roe"))},
+        {"指标维度": "市销率 (P/S Ratio)", chosen_ticker: f"{_num(v_primary.get('ps_ratio'))}x", peer_ticker: f"{_num(v_peer.get('ps_ratio'))}x"},
+        {"指标维度": "前瞻 12M 预测增速 (ARF ĝ)", chosen_ticker: _pct(v_primary.get("predicted_growth"), signed=True), peer_ticker: _pct(v_peer.get("predicted_growth"), signed=True)},
         {"指标维度": "泡沫熔断状态 (Froth Circuit)", chosen_ticker: "🔴 触碰熔断" if v_primary['froth_flag'] else "🟢 正常", peer_ticker: "🔴 触碰熔断" if v_peer['froth_flag'] else "🟢 正常"},
     ]
     st.dataframe(pd.DataFrame(peer_metrics_table), use_container_width=True, hide_index=True)
@@ -442,16 +498,20 @@ with tab_sandbox:
     try:
         from arf.agent.cio_loop import simulate_supply_chain_shock
 
-        sim_shocks = {
-            c: round(0.20 * (capex_input / 100.0), 4)
-            for c in ("MSFT", "GOOGL", "META")
-        } if capex_input != 0 else {}
+        # Same helper as the CIO cockpit, so one CapEx input yields one answer.
+        sim_shocks = capex_to_customer_shocks(fc_df, capex_input)
 
         sim_df = simulate_supply_chain_shock(
-            conn=data._open_conn(),
+            conn=data.get_conn(),
             as_of=as_of,
             customer_shocks=sim_shocks,
             bottleneck_clamp=clamp_input / 100.0,
+            # Pass the frames already in memory. Leaving them None makes the
+            # simulator re-query and, when a date has no forecasts, generate
+            # and persist them — a DB write caused by merely viewing the tab.
+            snap_df=snap_df,
+            fc_df=fc_df,
+            links_df=links_df,
         )
 
         if not sim_df.empty:

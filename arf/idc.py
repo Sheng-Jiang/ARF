@@ -23,9 +23,44 @@ from arf.forecast import _num
 
 log = logging.getLogger(__name__)
 
-# IDC MarketScape Quadrant Thresholds (on a 0-100 standardized scale)
-_STRATEGY_LEADER_THRESHOLD = 55.0
-_CAPABILITY_LEADER_THRESHOLD = 52.0
+# IDC MarketScape Quadrant Thresholds (on a 0-100 standardized scale).
+# Public so the chart's quadrant boxes and the data/report classification
+# cannot drift apart.
+STRATEGY_LEADER_THRESHOLD = 55.0
+CAPABILITY_LEADER_THRESHOLD = 52.0
+
+_MARKETSCAPE_COLUMNS = [
+    "ticker", "name", "leg", "layer", "price",
+    "capabilities_score", "strategies_score", "marketscape_category",
+    "market_cap_b", "ai_revenue_est_b", "arf", "e_score", "v_score",
+    "roe", "gross_margin", "ps_ratio", "ev_sales", "implied_growth",
+    "predicted_growth", "expected_beat_pct", "revision_velocity_14d",
+    "froth_flag",
+]
+
+
+def _fmt_pct(value: object, decimals: int = 1, signed: bool = False) -> str:
+    """Format a fraction as a percentage, rendering NULL/NaN as ``N/A``.
+
+    ``value is not None`` is not enough here: ``_num`` returns ``None`` but
+    once the value round-trips through a float DataFrame column it comes back
+    as ``NaN``, which no ``is not None`` guard catches.
+    """
+    if value is None or pd.isna(value):
+        return "N/A"
+    try:
+        return f"{float(value):+.{decimals}%}" if signed else f"{float(value):.{decimals}%}"
+    except (TypeError, ValueError):
+        return "N/A"
+
+
+def _fmt_num(value: object, decimals: int = 1) -> str:
+    if value is None or pd.isna(value):
+        return "N/A"
+    try:
+        return f"{float(value):.{decimals}f}"
+    except (TypeError, ValueError):
+        return "N/A"
 
 
 def compute_idc_marketscape(
@@ -46,20 +81,44 @@ def compute_idc_marketscape(
          marketscape_category, market_cap_b, ai_revenue_est_b, arf, froth_flag]
     """
     if snap_df.empty:
-        return pd.DataFrame()
+        return pd.DataFrame(columns=_MARKETSCAPE_COLUMNS)
 
     fc_map: dict[str, dict[str, Any]] = {}
     if fc_df is not None and not fc_df.empty:
         for _, r in fc_df.iterrows():
             tk = str(r.get("ticker", "")).strip().upper()
-            if tk:
-                fc_map[tk] = r.to_dict()
+            if not tk:
+                continue
+            rec = r.to_dict()
+            prev = fc_map.get(tk)
+            # load_forecasts() orders by expected_beat_pct DESC, so "last row
+            # wins" would silently keep the *lowest*-beat revision whenever a
+            # ticker has more than one forecast row. Prefer the newest row;
+            # ties keep the first (highest-beat) row.
+            key = (str(rec.get("as_of_date") or ""), str(rec.get("created_at") or ""))
+            if prev is None or key > (
+                str(prev.get("as_of_date") or ""),
+                str(prev.get("created_at") or ""),
+            ):
+                fc_map[tk] = rec
 
     rows = []
+    unscored = 0
     for _, r in snap_df.iterrows():
         d = r.to_dict()
         tk = str(d.get("ticker", "")).strip().upper()
         if not tk:
+            continue
+
+        # ARF inputs. A vendor without a computed E/V/ARF has not been scored
+        # (partial snapshot write, or a display-only Pre-IPO row) and cannot be
+        # positioned on the MarketScape honestly. Substituting a mid-point
+        # would fabricate a ranking, so drop the row instead.
+        e_score = _num(d.get("e_score"))
+        v_score = _num(d.get("v_score"))
+        arf = _num(d.get("arf"))
+        if e_score is None or v_score is None or arf is None:
+            unscored += 1
             continue
 
         name = str(d.get("name") or tk)
@@ -68,47 +127,54 @@ def compute_idc_marketscape(
         mcap_usd = _num(d.get("market_cap_usd")) or 0.0
         mcap_b = mcap_usd / 1e9
 
-        # Raw metrics
+        # Raw metrics — left as None when the source did not provide them.
         roe = _num(d.get("roe"))
         gross_margin = _num(d.get("gross_margin"))
         rev_growth = _num(d.get("revenue_yoy_growth"))
-        e_score = _num(d.get("e_score")) or 50.0
-        v_score = _num(d.get("v_score")) or 50.0
-        arf = _num(d.get("arf")) or 50.0
         froth = bool(d.get("froth_flag"))
 
         f_data = fc_map.get(tk, {})
-        pred_growth = _num(f_data.get("predicted_rev_growth")) or rev_growth or 0.15
-        beat_pct = _num(f_data.get("expected_beat_pct")) or 0.0
-        rev_vel = _num(f_data.get("revision_velocity_14d")) or 0.0
+        pred_growth = _num(f_data.get("predicted_rev_growth"))
+        if pred_growth is None:
+            pred_growth = rev_growth if rev_growth is not None else 0.15
+        beat_pct = _num(f_data.get("expected_beat_pct"))
+        rev_vel = _num(f_data.get("revision_velocity_14d"))
+        # Missing consensus inputs are scored neutrally, never as a measured 0.
+        beat_for_score = beat_pct if beat_pct is not None else 0.0
+        vel_for_score = rev_vel if rev_vel is not None else 0.0
 
-        # Estimated AI Revenue (Market Cap / EV_Sales adjusted by pure play)
-        ev_s = _num(d.get("ev_sales")) or _num(d.get("ps_ratio")) or 10.0
-        rev_ttm_b = (mcap_b / ev_s) if ev_s > 0 else 0.0
-        pure_play_pct = (e_score / 100.0)
-        ai_rev_b = rev_ttm_b * pure_play_pct
+        # Estimated AI revenue = (market cap / EV-Sales) × AI exposure.
+        # No multiple means no estimate; do not pretend 10x.
+        ev_s = _num(d.get("ev_sales"))
+        if ev_s is None:
+            ev_s = _num(d.get("ps_ratio"))
+        if ev_s is not None and ev_s > 0:
+            rev_ttm_b: float | None = mcap_b / ev_s
+            ai_rev_b: float | None = rev_ttm_b * (e_score / 100.0)
+        else:
+            rev_ttm_b = None
+            ai_rev_b = None
 
         # ── 1. Capabilities Score (Y-Axis: Current Financial & Operational Strength)
-        # Components: ROE (40%), Gross Margin (20%), Pure Play (20%), Valuation Quality (20%)
+        # Components: ROE (40%), Gross Margin (25%), E-score (20%), Valuation Quality (15%)
         # Normalization: ROE 0% to 50% -> 30 to 90 pts
-        roe_safe = roe if roe is not None else 0.12
-        roe_comp = np.clip((roe_safe / 0.40) * 50.0 + 35.0, 10.0, 95.0)
-
-        gm_safe = gross_margin if gross_margin is not None else 0.45
-        gm_comp = np.clip(gm_safe * 100.0, 20.0, 95.0)
-
-        # High valuation stretch without ROE backing penalizes capabilities
-        val_sanity = np.clip(100.0 - (v_score * 0.6), 15.0, 90.0)
-
+        cap_parts: list[tuple[float, float]] = [
+            (0.20, float(e_score)),
+            (0.15, float(np.clip(100.0 - (v_score * 0.6), 15.0, 90.0))),
+        ]
+        if roe is not None:
+            cap_parts.append((0.40, float(np.clip((roe / 0.40) * 50.0 + 35.0, 10.0, 95.0))))
+        if gross_margin is not None:
+            cap_parts.append((0.25, float(np.clip(gross_margin * 100.0, 20.0, 95.0))))
         cap_score = round(
-            float(0.40 * roe_comp + 0.25 * gm_comp + 0.20 * e_score + 0.15 * val_sanity),
+            sum(w * c for w, c in cap_parts) / sum(w for w, _ in cap_parts),
             1,
         )
 
         # ── 2. Strategies Score (X-Axis: Forward AI Growth & Positioning)
-        # Components: E_score (35%), Forward Growth (35%), Consensus Beat & Revision (30%)
+        # Components: E_score (35%), Forward Growth (40%), Consensus Beat & Revision (25%)
         fwd_growth_comp = np.clip((pred_growth / 0.50) * 60.0 + 30.0, 15.0, 98.0)
-        beat_comp = np.clip(50.0 + beat_pct * 150.0 + rev_vel * 200.0, 20.0, 95.0)
+        beat_comp = np.clip(50.0 + beat_for_score * 150.0 + vel_for_score * 200.0, 20.0, 95.0)
 
         strat_score = round(
             float(0.35 * e_score + 0.40 * fwd_growth_comp + 0.25 * beat_comp),
@@ -116,11 +182,11 @@ def compute_idc_marketscape(
         )
 
         # ── 3. Categorization into IDC MarketScape Quadrants
-        if strat_score >= _STRATEGY_LEADER_THRESHOLD and cap_score >= _CAPABILITY_LEADER_THRESHOLD:
+        if strat_score >= STRATEGY_LEADER_THRESHOLD and cap_score >= CAPABILITY_LEADER_THRESHOLD:
             category = "Leaders"
-        elif cap_score >= _CAPABILITY_LEADER_THRESHOLD:
+        elif cap_score >= CAPABILITY_LEADER_THRESHOLD:
             category = "Major Players"
-        elif strat_score >= _STRATEGY_LEADER_THRESHOLD:
+        elif strat_score >= STRATEGY_LEADER_THRESHOLD:
             category = "Contenders"
         else:
             category = "Participants"
@@ -135,7 +201,7 @@ def compute_idc_marketscape(
             "strategies_score": strat_score,
             "marketscape_category": category,
             "market_cap_b": round(mcap_b, 1),
-            "ai_revenue_est_b": round(ai_rev_b, 2),
+            "ai_revenue_est_b": None if ai_rev_b is None else round(ai_rev_b, 2),
             "arf": round(arf, 1),
             "e_score": e_score,
             "v_score": v_score,
@@ -145,11 +211,17 @@ def compute_idc_marketscape(
             "ev_sales": ev_s,
             "implied_growth": _num(d.get("implied_growth")),
             "predicted_growth": round(pred_growth, 3),
-            "expected_beat_pct": round(beat_pct, 3),
-            "revision_velocity_14d": round(rev_vel, 3),
+            "expected_beat_pct": None if beat_pct is None else round(beat_pct, 3),
+            "revision_velocity_14d": None if rev_vel is None else round(rev_vel, 3),
             "froth_flag": froth,
         })
 
+    if unscored:
+        log.info("MarketScape: skipped %d unscored vendor(s) with no ARF", unscored)
+    if not rows:
+        # Typed empty frame: callers index by column, and a column-less frame
+        # is what turned "no scored vendors" into a KeyError downstream.
+        return pd.DataFrame(columns=_MARKETSCAPE_COLUMNS)
     df = pd.DataFrame(rows)
     return df.sort_values(["capabilities_score", "strategies_score"], ascending=False).reset_index(drop=True)
 
@@ -173,11 +245,22 @@ def compute_ai_spending_tracker(snap_df: pd.DataFrame) -> dict[str, Any]:
 
     df = snap_df.copy()
     df["mcap_usd"] = df["market_cap_usd"].apply(lambda x: _num(x) or 0.0)
-    df["ev_s"] = df["ev_sales"].fillna(df["ps_ratio"]).apply(lambda x: _num(x) or 10.0)
-    df["e_score_val"] = df["e_score"].apply(lambda x: _num(x) or 50.0)
-    
+    df["ev_s"] = df["ev_sales"].fillna(df["ps_ratio"]).apply(_num)
+    df["e_score_val"] = df["e_score"].apply(_num)
+
+    # Only a vendor with a market cap, a valuation multiple and a computed
+    # exposure score has an estimable AI revenue. Pre-IPO / manual rows carry
+    # market cap 0 and NULL scores; including them would add $0 of market cap
+    # but inflate vendor_count and dilute the bubble multiple with invented
+    # revenue. Restrict the tracker to the scored universe.
+    df = df[
+        (df["mcap_usd"] > 0)
+        & df["ev_s"].apply(lambda x: x is not None and x > 0)
+        & df["e_score_val"].notna()
+    ].copy()
+
     # Revenue estimate = (Market Cap / EV_Sales) * (E_score / 100)
-    df["est_rev_ttm_usd"] = np.where(df["ev_s"] > 0, df["mcap_usd"] / df["ev_s"], 0.0)
+    df["est_rev_ttm_usd"] = df["mcap_usd"] / df["ev_s"]
     df["est_ai_rev_usd"] = df["est_rev_ttm_usd"] * (df["e_score_val"] / 100.0)
 
     total_mcap_usd = float(df["mcap_usd"].sum())
@@ -227,6 +310,7 @@ def compute_ai_spending_tracker(snap_df: pd.DataFrame) -> dict[str, Any]:
         "total_universe_mcap_t": round(total_mcap_usd / 1e12, 2),
         "total_ai_revenue_b": round(total_ai_rev_usd / 1e9, 1),
         "overall_bubble_multiple": overall_bubble_multiple,
+        "covered_count": len(df),
         "layers": layer_stats,
         "legs": leg_stats,
     }
@@ -241,11 +325,20 @@ def generate_idc_executive_briefing(
     ms_df = compute_idc_marketscape(snap_df, fc_df)
     spending = compute_ai_spending_tracker(snap_df)
 
+    doc_id = f"IDC-MR-{as_of.strftime('%Y%m')}-{as_of.strftime('%d')}"
+    if ms_df.empty:
+        return (
+            "# 🌐 IDC MarketScape & Worldwide AI Spending Guide\n"
+            f"**Document ID:** `{doc_id}`\n\n"
+            "> 该快照尚无已完成评分的厂商，无法生成 MarketScape 简报。"
+            "请选择已完成评分的快照日期后重试。"
+        )
+
     leaders = ms_df[ms_df["marketscape_category"] == "Leaders"].head(5)
     contenders = ms_df[ms_df["marketscape_category"] == "Contenders"].head(4)
     froth_list = ms_df[ms_df["froth_flag"] == True]["ticker"].tolist()  # noqa: E712
+    covered_count = int(spending.get("covered_count", len(ms_df)))
 
-    doc_id = f"IDC-MR-{as_of.strftime('%Y%m')}-{as_of.strftime('%d')}"
     timestamp = datetime.now(UTC).strftime("%B %d, %Y")
 
     lines = [
@@ -256,8 +349,8 @@ def generate_idc_executive_briefing(
         "---",
         "",
         "## 1. IDC Opinion (执行摘要与核心论点)",
-        f"> **市场整体定调**：截至 {as_of.isoformat()}，全球核心 73 家 AI 标的的总市值为 **${spending.get('total_universe_mcap_t', 0.0)} 万亿美元**，"
-        f"对应本研究测算的经纯度折算后的年化实质 AI 收入为 **${spending.get('total_ai_revenue_b', 0.0)} 亿美元**，"
+        f"> **市场整体定调**：截至 {as_of.isoformat()}，全球核心 {covered_count} 家已评分 AI 标的的总市值为 **${spending.get('total_universe_mcap_t', 0.0)} 万亿美元**，"
+        f"对应本研究测算的经纯度折算后的年化实质 AI 收入为 **${spending.get('total_ai_revenue_b', 0.0)} 十亿美元**，"
         f"全行业整体「叙事市值 / 实质收入」估值倍数达到 **{spending.get('overall_bubble_multiple', 0.0)}x**。",
         "",
         "- **价值向中上游物理瓶颈汇聚**：以 CoWoS 封装、800G/1.6T 光模块、数据中心高压电力为代表的物理瓶颈层级享有最高的利润转化率（Capabilities 分数显著领跑）；",
@@ -277,8 +370,7 @@ def generate_idc_executive_briefing(
     lines.append("| 厂商代码 | 公司名称 | 区域 | 产业链层级 | 交付质量 (Capabilities) | 战略动能 (Strategies) | 市值 (USD) | 12M预测增速 |")
     lines.append("| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |")
     for _, lr in leaders.iterrows():
-        p_g = lr.get("predicted_growth")
-        pg_str = f"{p_g:+.1%}" if p_g is not None else "—"
+        pg_str = _fmt_pct(lr.get("predicted_growth"), signed=True)
         lines.append(
             f"| **{lr['ticker']}** | {lr['name']} | `{lr['leg']}` | `{lr['layer']}` | "
             f"**{lr['capabilities_score']:.1f}** | **{lr['strategies_score']:.1f}** | "
@@ -348,8 +440,10 @@ def generate_analyst_vendor_profile(
     """Generate a high-density 1-page IDC Vendor Profile & Flash Note for research analysts."""
     ms_df = compute_idc_marketscape(snap_df, fc_df)
     target = str(ticker).strip().upper()
-    v_rows = ms_df[ms_df["ticker"] == target]
+    if ms_df.empty or "ticker" not in ms_df.columns:
+        return f"# ❌ Vendor {target} not found in current coverage universe."
 
+    v_rows = ms_df[ms_df["ticker"] == target]
     if v_rows.empty:
         return f"# ❌ Vendor {target} not found in current coverage universe."
 
@@ -363,7 +457,8 @@ def generate_analyst_vendor_profile(
     if links_df is not None and not links_df.empty:
         c_sub = links_df[links_df["supplier_ticker"].astype(str).str.upper() == target]
         for _, cr in c_sub.iterrows():
-            cust_links.append(f"{cr['customer_ticker']} ({cr.get('revenue_share_pct', 0):.0f}% rev share)")
+            share = _fmt_num(cr.get("revenue_share_pct"), 0)
+            cust_links.append(f"{cr['customer_ticker']} ({share}% rev share)")
         s_sub = links_df[links_df["customer_ticker"].astype(str).str.upper() == target]
         for _, sr in s_sub.iterrows():
             supp_links.append(f"{sr['supplier_ticker']} ({sr.get('relationship_type', 'supplier')})")
@@ -371,16 +466,17 @@ def generate_analyst_vendor_profile(
     cust_str = ", ".join(cust_links) if cust_links else "无直连主要客户申报或处于消费端终端"
     supp_str = ", ".join(supp_links) if supp_links else "无直连主要上游申报或全栈垂直整合"
 
-    pred_g = v.get("predicted_growth")
-    pg_str = f"{pred_g:+.1%}" if pred_g is not None else "N/A"
-    beat = v.get("expected_beat_pct")
-    beat_str = f"{beat:+.1%}" if beat is not None else "N/A"
-    vel = v.get("revision_velocity_14d")
-    vel_str = f"{vel:+.1%}" if vel is not None else "N/A"
-    roe = v.get("roe")
-    roe_str = f"{roe:.1%}" if roe is not None else "N/A"
-    imp_g = v.get("implied_growth")
-    impg_str = f"{imp_g:.1%}" if imp_g is not None else "N/A"
+    # Every value below may be NaN once the row has round-tripped through a
+    # float DataFrame column; _fmt_* treat NULL and NaN alike.
+    pg_str = _fmt_pct(v.get("predicted_growth"), signed=True)
+    beat_str = _fmt_pct(v.get("expected_beat_pct"), signed=True)
+    vel_str = _fmt_pct(v.get("revision_velocity_14d"), signed=True)
+    roe_str = _fmt_pct(v.get("roe"))
+    impg_str = _fmt_pct(v.get("implied_growth"))
+    ps = _num(v.get("ps_ratio"))
+    ps_str = f"{ps:.1f}x" if ps is not None else "N/A"
+    ai_rev = _num(v.get("ai_revenue_est_b"))
+    ai_rev_str = f"${ai_rev:.2f}B" if ai_rev is not None else "N/A"
 
     lines = [
         f"# 🔬 IDC Vendor Profile & Flash Note: {v['name']} ({target})",
@@ -394,7 +490,7 @@ def generate_analyst_vendor_profile(
         f"- **Capabilities Score (当前交付与财务质量):** `{v['capabilities_score']:.1f} / 100`",
         f"- **Strategies Score (未来战略与增长动能):** `{v['strategies_score']:.1f} / 100`",
         f"- **产业链归属:** `{v['leg']} 价值链 / {v['layer']} 层级` | **总市值:** `${v['market_cap_b']:.1f}B USD`",
-        f"- **实质 AI 估算收入 (年化):** `${v['ai_revenue_est_b']:.2f}B USD` | **AI 纯度暴露 (E_score):** `{v.get('e_score', 0):.0f} / 100`",
+        f"- **实质 AI 估算收入 (年化):** `{ai_rev_str} USD` | **AI 纯度暴露 (E_score):** `{v.get('e_score', 0):.0f} / 100`",
         "",
         "## 2. 产业链传导与客户依赖拓扑 (Supply Chain Topology)",
         f"- **主要下游客户 (Direct Customers):** {cust_str}",
@@ -402,7 +498,7 @@ def generate_analyst_vendor_profile(
         "",
         "## 3. 财务质量与估值张力分析 (Financial Quality & Bubble Audit)",
         f"- **ROE (净资产收益率):** `{roe_str}` (中股采用扣非净利)",
-        f"- **市销率 (P/S Ratio):** `{v.get('ps_ratio', 0):.1f}x` | **估值张力 (V_score):** `{v.get('v_score', 0):.0f} / 100`",
+        f"- **市销率 (P/S Ratio):** `{ps_str}` | **估值张力 (V_score):** `{v.get('v_score', 0):.0f} / 100`",
         f"- **逆向 DCF 隐含增长率 (Implied g*):** `{impg_str}`",
         f"- **ARF 综合指数:** `{v.get('arf', 0):.1f}`",
         "",
