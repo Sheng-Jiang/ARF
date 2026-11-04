@@ -330,9 +330,10 @@ with tab_barometer:
         """
     )
 
-    fc_df = data.load_forecasts(as_of)
-    if fc_df.empty:
-        fc_df = data.load_forecasts(None)
+    # Point-in-time: never borrow the newest date's forecasts for a past
+    # session. Missing forecasts are generated from this snapshot and written
+    # back to GCS.
+    fc_df = data.ensure_forecasts(as_of)
 
     # 1. CapEx 传导与供应链瓶颈敏感性沙盒 (Interactive Sandbox)
     with st.expander("🛠️ 下游云厂商 CapEx 传导与物理产能瓶颈压力测试 (Interactive CapEx Shock Simulator)", expanded=False):
@@ -804,25 +805,25 @@ with tab_control:
             st.cache_data.clear()
             st.rerun()
 
-        # In GCS mode the DuckDB is a temp download; anything written to it is
-        # lost on the next cache refresh and never reaches other replicas, so
-        # the button is disabled rather than pretending the write persisted.
-        gcs_mode = data.DATA_SOURCE == "gcs"
+        # In GCS mode the DuckDB is a temp download. Forecast rows generated
+        # there are now uploaded back (guarded by the object generation), so
+        # the button can persist instead of pretending the write is lost.
         if st.button(
-            "🔮 计算前瞻晴雨表",
+            "🔮 计算并保存前瞻晴雨表",
             use_container_width=True,
-            disabled=halted or gcs_mode,
+            disabled=halted,
         ):
             with st.spinner("正在计算 4 层前瞻预测晴雨表…"):
                 from arf.forecast import generate_forecasts_for_universe
                 conn = data.get_conn()
                 generate_forecasts_for_universe(as_of, conn, persist=True)
+                data.persist_db_to_gcs()
                 st.cache_data.clear()
                 st.rerun()
-        if gcs_mode:
+        if data.DATA_SOURCE == "gcs":
             st.caption(
-                "GCS 只读模式：本页数据库为临时副本，写入不会回传。"
-                "前瞻晴雨表由 `arf.run` 管线生成并写入 GCS。"
+                "GCS 模式：前瞻预测在临时副本生成后自动回传 `arf.db`；"
+                "若管线已写入更新版本，回传会安全跳过。"
             )
 
     st.divider()
