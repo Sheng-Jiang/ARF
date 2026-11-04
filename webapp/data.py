@@ -60,6 +60,33 @@ def load_snapshot(as_of: date) -> pd.DataFrame:
     ).fetchdf()
 
 
+def latest_complete_snapshot_date(as_of: date) -> date | None:
+    """Newest snapshot on or before *as_of* whose core cohort is fully scored.
+
+    A partially written snapshot (rows present, scoring not yet run) has NULL
+    ARF for core vendors. Research pages must not present such a snapshot as a
+    finished analysis — the scores would have to be invented. Pre-IPO/watch
+    rows are excluded from the completeness test because they are never
+    scored by design.
+    """
+    row = _open_conn().execute(
+        """
+        SELECT MAX(as_of_date)
+        FROM (
+            SELECT as_of_date,
+                   COUNT(*) FILTER (
+                       WHERE arf IS NULL AND COALESCE(cohort, 'core') = 'core'
+                   ) AS unscored
+            FROM snapshots
+            WHERE as_of_date <= ?
+            GROUP BY as_of_date
+        ) WHERE unscored = 0
+        """,
+        [as_of],
+    ).fetchone()
+    return row[0] if row else None
+
+
 def load_thermometer_series() -> pd.DataFrame:
     """Weekly bubble-thermometer metrics, core board only.
 
