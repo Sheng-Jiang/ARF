@@ -1,4 +1,5 @@
 """Storage abstraction: DATA_SOURCE=local reads data/arf.db, DATA_SOURCE=gcs downloads from GCS."""
+import logging
 import os
 import tempfile
 from datetime import date
@@ -7,6 +8,8 @@ from pathlib import Path
 import duckdb
 import pandas as pd
 import streamlit as st
+
+log = logging.getLogger(__name__)
 
 DATA_SOURCE = os.getenv("DATA_SOURCE", "local")
 LOCAL_DB_PATH = Path(os.getenv("LOCAL_DB_PATH", "data/arf.db"))
@@ -22,16 +25,23 @@ def _ensure_schema(path: Path) -> None:
 
 
 _ACTIVE_DB_PATH: Path | None = None
+# GCS generation of the object this instance downloaded from. Used as an
+# optimistic-concurrency guard: an upload only succeeds if nobody (the
+# pipeline job) has replaced the object since we read it.
+_DOWNLOADED_GENERATION: int | None = None
 
 
 @st.cache_resource(ttl=3600)
 def _open_conn() -> duckdb.DuckDBPyConnection:
-    global _ACTIVE_DB_PATH
+    global _ACTIVE_DB_PATH, _DOWNLOADED_GENERATION
     if DATA_SOURCE == "gcs":
         from google.cloud import storage  # type: ignore[import]
         client = storage.Client()
         tmp_path = Path(tempfile.mkdtemp()) / "arf.db"
-        client.bucket(GCS_BUCKET).blob(GCS_DB_OBJECT).download_to_filename(str(tmp_path))
+        blob = client.bucket(GCS_BUCKET).blob(GCS_DB_OBJECT)
+        blob.reload()
+        _DOWNLOADED_GENERATION = int(blob.generation) if blob.generation else None
+        blob.download_to_filename(str(tmp_path))
         _ensure_schema(tmp_path)
         _ACTIVE_DB_PATH = tmp_path
         return duckdb.connect(str(tmp_path), read_only=False)
@@ -45,6 +55,92 @@ def get_db_path() -> Path:
     if _ACTIVE_DB_PATH is None:
         _open_conn()
     return _ACTIVE_DB_PATH
+
+
+def persist_db_to_gcs() -> bool:
+    """Upload the temp DuckDB back to GCS after an on-demand write.
+
+    GCS is otherwise read-only for the webapp. On-demand forecasting is the
+    exception: a row generated into the temp copy is lost with the instance,
+    so the next cold start would have to generate it again. The upload is
+    conditional on the generation we downloaded, so a concurrent pipeline
+    write is never clobbered.
+    """
+    global _DOWNLOADED_GENERATION
+    if DATA_SOURCE != "gcs" or _ACTIVE_DB_PATH is None:
+        return False
+    if _DOWNLOADED_GENERATION is None:
+        log.warning("Refusing to upload arf.db: baseline GCS generation unknown")
+        return False
+
+    from google.cloud import storage  # type: ignore[import]
+
+    try:
+        # Flush the WAL so the uploaded file contains the committed rows.
+        _open_conn().execute("CHECKPOINT")
+    except duckdb.Error:
+        log.exception("CHECKPOINT failed before GCS upload")
+
+    blob = storage.Client().bucket(GCS_BUCKET).blob(GCS_DB_OBJECT)
+    try:
+        blob.upload_from_filename(
+            str(_ACTIVE_DB_PATH),
+            if_generation_match=_DOWNLOADED_GENERATION,
+        )
+    except Exception:
+        # A newer DB (pipeline run) landed after our download; keeping it is
+        # correct, and the next cold start will read their version.
+        log.exception("Skipped arf.db upload: GCS object changed since download")
+        return False
+
+    blob.reload()
+    _DOWNLOADED_GENERATION = int(blob.generation) if blob.generation else None
+    log.info("Uploaded arf.db to gs://%s/%s", GCS_BUCKET, GCS_DB_OBJECT)
+    return True
+
+
+def _load_forecasts_exact(conn: duckdb.DuckDBPyConnection, as_of: date, horizon_days: int) -> pd.DataFrame:
+    """Latest model version per ticker for exactly *as_of* (never another date)."""
+    return conn.execute(
+        """
+        WITH ranked AS (
+            SELECT *,
+                   ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY created_at DESC) AS rk
+            FROM forecasts
+            WHERE as_of_date = ? AND horizon_days = ?
+        )
+        SELECT * EXCLUDE (rk) FROM ranked
+        WHERE rk = 1
+        ORDER BY expected_beat_pct DESC NULLS LAST
+        """,
+        [as_of, horizon_days],
+    ).fetchdf()
+
+
+def ensure_forecasts(as_of: date, horizon_days: int = 90) -> pd.DataFrame:
+    """Forecasts for *as_of*, generating and persisting them when absent.
+
+    Generation is point-in-time: it uses the snapshot for *as_of* and never a
+    later date. In GCS mode the generated rows are uploaded back, so the next
+    session (and the pipeline) can read them.
+    """
+    from arf.forecast import generate_forecasts_for_universe
+
+    conn = _open_conn()
+    fc_df = _load_forecasts_exact(conn, as_of, horizon_days)
+    if not fc_df.empty:
+        return fc_df
+
+    try:
+        generate_forecasts_for_universe(as_of, conn, horizon_days=horizon_days, persist=True)
+    except Exception:
+        log.exception("On-demand forecast generation failed for %s", as_of)
+        return pd.DataFrame()
+
+    fc_df = _load_forecasts_exact(conn, as_of, horizon_days)
+    if not fc_df.empty:
+        persist_db_to_gcs()
+    return fc_df
 
 
 def list_dates() -> list[date]:
@@ -123,9 +219,10 @@ def refresh_data() -> None:
     In GCS mode the active path is a downloaded temp file; it must be cleared
     too, otherwise `get_db_path()` keeps handing out the stale download.
     """
-    global _ACTIVE_DB_PATH
+    global _ACTIVE_DB_PATH, _DOWNLOADED_GENERATION
     _open_conn.clear()
     _ACTIVE_DB_PATH = None
+    _DOWNLOADED_GENERATION = None
 
 
 def get_conn() -> duckdb.DuckDBPyConnection:

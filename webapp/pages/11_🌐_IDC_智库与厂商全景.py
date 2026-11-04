@@ -79,12 +79,12 @@ if snap_df.empty:
     st.warning(f"未找到 {as_of} 的快照数据，请在侧边栏选择有效日期。")
     st.stop()
 
-# Forecasts are point-in-time: only use rows for this exact date. Falling back
-# to the newest date would stamp the briefing with a past as-of while reading
-# growth/revision data from the future.
+# Forecasts are point-in-time: only rows for this exact date are used. If the
+# date has none, generate them from this snapshot and upload the result to GCS
+# so the next session does not have to generate (and show N/A) again.
 fc_df = pd.DataFrame()
-with contextlib.suppress(Exception):
-    fc_df = data.load_forecasts(as_of)
+with contextlib.suppress(Exception), st.spinner("加载前瞻预测（缺失时即时生成并写入 GCS）…"):
+    fc_df = data.ensure_forecasts(as_of)
 
 links_df = pd.DataFrame()
 with contextlib.suppress(Exception):
