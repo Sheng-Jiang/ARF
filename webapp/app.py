@@ -24,6 +24,13 @@ pages = {
         st.Page("pages/7_📝_一键研报.py", title="一键研报", icon="📝"),
         st.Page("pages/4_📈_技术指标与回测.py", title="技术指标与回测", icon="📈"),
     ],
+    "IDC 研究": [
+        st.Page(
+            "pages/11_🌐_IDC_智库与厂商全景.py",
+            title="IDC 智库与厂商全景",
+            icon="🌐",
+        ),
+    ],
     "执行与模拟": [
         st.Page("pages/10_💼_CIO_投资总监.py", title="AI CIO 投资总监", icon="💼"),
     ],
