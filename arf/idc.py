@@ -320,13 +320,28 @@ def generate_idc_executive_briefing(
     as_of: date,
     snap_df: pd.DataFrame,
     fc_df: pd.DataFrame | None = None,
+    lang: str = "zh",
 ) -> str:
-    """Generate an authoritative IDC Executive Market Briefing in official IDC research format."""
+    """Generate an authoritative IDC Executive Market Briefing in official IDC research format.
+    
+    Args:
+        as_of: Snapshot date.
+        snap_df: Evaluated universe snapshot DataFrame.
+        fc_df: Optional forward forecasts DataFrame.
+        lang: 'zh' for Chinese or 'en' for English.
+    """
     ms_df = compute_idc_marketscape(snap_df, fc_df)
     spending = compute_ai_spending_tracker(snap_df)
 
     doc_id = f"IDC-MR-{as_of.strftime('%Y%m')}-{as_of.strftime('%d')}"
     if ms_df.empty:
+        if lang == "en":
+            return (
+                "# 🌐 IDC MarketScape & Worldwide AI Spending Guide\n"
+                f"**Document ID:** `{doc_id}`\n\n"
+                "> No scored vendors found for this snapshot date. "
+                "Please select a fully scored snapshot and retry."
+            )
         return (
             "# 🌐 IDC MarketScape & Worldwide AI Spending Guide\n"
             f"**Document ID:** `{doc_id}`\n\n"
@@ -340,6 +355,89 @@ def generate_idc_executive_briefing(
     covered_count = int(spending.get("covered_count", len(ms_df)))
 
     timestamp = datetime.now(UTC).strftime("%B %d, %Y")
+
+    if lang == "en":
+        lines = [
+            "# 🌐 IDC MarketScape & Worldwide AI Spending Guide",
+            f"**Document ID:** `{doc_id}` | **Published:** `{timestamp}` | **Program:** *AI, Software & Infrastructure Strategies*",
+            "**Author:** *Sheng Jiang, Vice President, AI Market Research & Strategy*",
+            "",
+            "---",
+            "",
+            "## 1. IDC Opinion (Executive Summary & Key Theses)",
+            f"> **Market Perspective**: As of {as_of.isoformat()}, the aggregate market capitalization of the {covered_count} scored global AI leaders stands at **${spending.get('total_universe_mcap_t', 0.0)} Trillion USD**, "
+            f"supported by **${spending.get('total_ai_revenue_b', 0.0)} Billion USD** in purity-adjusted annualized economic AI revenue, "
+            f"yielding an overall narrative valuation multiple of **{spending.get('overall_bubble_multiple', 0.0)}x**.",
+            "",
+            "- **Value Aggregates at Physical Bottlenecks**: Midstream and upstream hardware infrastructure—notably CoWoS advanced packaging, 800G/1.6T optical transceivers, and datacenter high-voltage grid capacity—captures peak margin conversion (Capabilities scores outperforming);",
+            "- **Downstream Software & Agent Multiple Compression**: Layer 5 application wrappers lacking proprietary data flywheels face severe valuation de-rating; several high-ARF names have triggered froth circuit breakers;",
+            f"- **Froth Alert Watchlist**: Currently `{len(froth_list)}` vendors have breached the hard froth circuit breaker (including `{', '.join(froth_list) if froth_list else 'None'}`).",
+            "",
+            "---",
+            "",
+            "## 2. IDC MarketScape: Global AI Vendors Assessment",
+            "The IDC MarketScape employs a quantitative dual-axis evaluation model, assessing vendors along **Capabilities (Execution Quality & Financial Moat)** and **Strategies (Forward Growth & AI Exposure)**:",
+            "",
+            "### 🏆 Leaders Quadrant",
+            "Leaders demonstrate superior returns on equity (ROE > 25%), robust free cash flows, and defensible architectural moats:",
+            "| Ticker | Vendor Name | Leg | Stack Layer | Capabilities | Strategies | Market Cap (USD) | 12M Forecast Growth |",
+            "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |",
+        ]
+        for _, lr in leaders.iterrows():
+            pg_str = _fmt_pct(lr.get("predicted_growth"), signed=True)
+            lines.append(
+                f"| **{lr['ticker']}** | {lr['name']} | `{lr['leg']}` | `{lr['layer']}` | "
+                f"**{lr['capabilities_score']:.1f}** | **{lr['strategies_score']:.1f}** | "
+                f"${lr['market_cap_b']:.1f}B | {pg_str} |"
+            )
+        lines.append("")
+
+        lines.append("### ⚡ Contenders Quadrant (High-Beta Growth)")
+        lines.append("Vendors possessing exceptional strategic exposure and forward revenue momentum, accompanied by higher delivery margin volatility:")
+        lines.append("| Ticker | Vendor Name | Leg | Stack Layer | Capabilities | Strategies | ARF Score | Froth Status |")
+        lines.append("| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |")
+        for _, cr in contenders.iterrows():
+            f_badge = "🔴 FROTH WARNING" if cr["froth_flag"] else "🟢 NORMAL"
+            lines.append(
+                f"| **{cr['ticker']}** | {cr['name']} | `{cr['leg']}` | `{cr['layer']}` | "
+                f"{cr['capabilities_score']:.1f} | **{cr['strategies_score']:.1f}** | "
+                f"`{cr['arf']:.1f}` | {f_badge} |"
+            )
+        lines.append("")
+
+        lines.extend([
+            "---",
+            "",
+            "## 3. Worldwide AI Spending & Bubble Gap Analysis",
+            "| AI Stack Layer | Scored Vendors | Equity Market Cap (USD) | Real Economic AI Revenue | Narrative Bubble Multiple | Valuation Stance | Representative Leaders |",
+            "| :--- | :--- | :--- | :--- | :--- | :--- | :--- |",
+        ])
+        for l_stat in spending.get("layers", []):
+            f_count = l_stat["froth_count"]
+            status = "🔴 Overheating" if f_count > 0 or l_stat["bubble_multiple"] > 35 else "🟢 Balanced"
+            lines.append(
+                f"| **{l_stat['layer_name']}** | {l_stat['vendor_count']} | ${l_stat['market_cap_b']:.1f}B | "
+                f"${l_stat['ai_revenue_est_b']:.1f}B | **{l_stat['bubble_multiple']:.1f}x** | {status} | "
+                f"{l_stat['top_vendors']} |"
+            )
+        lines.append("")
+
+        lines.extend([
+            "---",
+            "",
+            "## 4. Essential Guidance for Technology Buyers (CIO / CTO)",
+            "1. **Scrutinize Layer 5 Application Valuations**: Prioritize vendors with proprietary workflow data moats and verified employee-productivity gains. For thin prompt-wrapper apps without unique IP, negotiate short subscription terms or pilot internal open-source alternatives.",
+            "2. **Secure Midstream Supply-Chain Allocations**: Physical compute bottlenecks (CoWoS packaging, 800G+ optical transceivers) remain hard constraints over the next 4 quarters. Enterprise procurement must establish dual-sourcing agreements across both US and China supply-chain corridors.",
+            "3. **Benchmark Business Viability via Reverse-DCF Implied Growth**: When a vendor's implied perpetual growth rate exceeds twice your internal IT budget expansion rate, their pricing cycle is late-stage, offering favorable commercial renegotiation windows.",
+            "",
+            "## 5. Essential Guidance for Technology Vendors (CEO / CRO)",
+            "1. **Shift Focus from Raw Compute to Unit Tokenomics**: With open-source model convergence and distillation diffusion, vendor pricing power is migrating to full-stack inference efficiency and vertical systems integration.",
+            "2. **Establish Counter-Cyclical Valuation Defenses**: Vendors in the high-ARF froth territory (Decile 1) face severe multiple de-rating risks. Take advantage of high-valuation windows to accelerate strategic acquisitions, reinforce balance-sheet cash reserves, and strengthen ROE fundamentals.",
+            "",
+            "---",
+            "*Report compiled by IDC AI & Software Research Practice using ARF Quantitative Methodology. Copyright © 2026 IDC. All rights reserved.*",
+        ])
+        return "\n".join(lines)
 
     lines = [
         "# 🌐 IDC MarketScape & Worldwide AI Spending Guide",
@@ -436,8 +534,18 @@ def generate_analyst_vendor_profile(
     fc_df: pd.DataFrame | None = None,
     links_df: pd.DataFrame | None = None,
     analyst_commentary: str = "",
+    lang: str = "zh",
 ) -> str:
-    """Generate a high-density 1-page IDC Vendor Profile & Flash Note for research analysts."""
+    """Generate a high-density 1-page IDC Vendor Profile & Flash Note for research analysts.
+    
+    Args:
+        ticker: Ticker symbol.
+        snap_df: Evaluated universe snapshot DataFrame.
+        fc_df: Optional forward forecasts DataFrame.
+        links_df: Optional supply chain topology DataFrame.
+        analyst_commentary: Custom analyst notes.
+        lang: 'zh' for Chinese or 'en' for English.
+    """
     ms_df = compute_idc_marketscape(snap_df, fc_df)
     target = str(ticker).strip().upper()
     if ms_df.empty or "ticker" not in ms_df.columns:
@@ -463,11 +571,13 @@ def generate_analyst_vendor_profile(
         for _, sr in s_sub.iterrows():
             supp_links.append(f"{sr['supplier_ticker']} ({sr.get('relationship_type', 'supplier')})")
 
-    cust_str = ", ".join(cust_links) if cust_links else "无直连主要客户申报或处于消费端终端"
-    supp_str = ", ".join(supp_links) if supp_links else "无直连主要上游申报或全栈垂直整合"
+    if lang == "en":
+        cust_str = ", ".join(cust_links) if cust_links else "No direct customer disclosures / end consumer facing"
+        supp_str = ", ".join(supp_links) if supp_links else "No direct upstream disclosures / vertically integrated"
+    else:
+        cust_str = ", ".join(cust_links) if cust_links else "无直连主要客户申报或处于消费端终端"
+        supp_str = ", ".join(supp_links) if supp_links else "无直连主要上游申报或全栈垂直整合"
 
-    # Every value below may be NaN once the row has round-tripped through a
-    # float DataFrame column; _fmt_* treat NULL and NaN alike.
     pg_str = _fmt_pct(v.get("predicted_growth"), signed=True)
     beat_str = _fmt_pct(v.get("expected_beat_pct"), signed=True)
     vel_str = _fmt_pct(v.get("revision_velocity_14d"), signed=True)
@@ -477,6 +587,55 @@ def generate_analyst_vendor_profile(
     ps_str = f"{ps:.1f}x" if ps is not None else "N/A"
     ai_rev = _num(v.get("ai_revenue_est_b"))
     ai_rev_str = f"${ai_rev:.2f}B" if ai_rev is not None else "N/A"
+
+    if lang == "en":
+        lines = [
+            f"# 🔬 IDC Vendor Profile & Flash Note: {v['name']} ({target})",
+            f"**Document ID:** `{doc_id}` | **Coverage Desk:** *AI Hardware, Software & Infrastructure*",
+            f"**Analyst:** *Sheng Jiang, VP, AI Market Research & Strategy* | **As-Of:** `{as_of_val}`",
+            f"**MarketScape Positioning:** 🏅 **{v['marketscape_category']}** | **Froth Circuit:** {'🔴 BREACHED' if v['froth_flag'] else '🟢 NORMAL'}",
+            "",
+            "---",
+            "",
+            "## 1. IDC MarketScape™ Quantitative Breakdown",
+            f"- **Capabilities Score (Execution Quality & Margins):** `{v['capabilities_score']:.1f} / 100`",
+            f"- **Strategies Score (Forward Growth & AI Exposure):** `{v['strategies_score']:.1f} / 100`",
+            f"- **Ecosystem Affiliation:** `{v['leg']} Value Chain / {v['layer']} Layer` | **Market Cap:** `${v['market_cap_b']:.1f}B USD`",
+            f"- **Estimated Real AI Revenue (Annualized):** `{ai_rev_str} USD` | **AI Pure-Play Exposure (E_score):** `{v.get('e_score', 0):.0f} / 100`",
+            "",
+            "## 2. Supply Chain Topology & Dependencies",
+            f"- **Key Direct Customers:** {cust_str}",
+            f"- **Key Upstream Suppliers:** {supp_str}",
+            "",
+            "## 3. Financial Quality & Bubble Audit",
+            f"- **ROE (Return on Equity):** `{roe_str}` (Adjusted for non-recurring items in China A-shares)",
+            f"- **Price-to-Sales (P/S Ratio):** `{ps_str}` | **Valuation Stretch (V_score):** `{v.get('v_score', 0):.0f} / 100`",
+            f"- **Reverse-DCF Implied Growth (Implied g*):** `{impg_str}`",
+            f"- **Composite ARF Score:** `{v.get('arf', 0):.1f}`",
+            "",
+            "## 4. Forward Forecast & Consensus Dynamics",
+            f"- **12M Forward Revenue Forecast (ARF ĝ):** `{pg_str}`",
+            f"- **Expected Beat Margin vs Consensus:** `{beat_str}`",
+            f"- **14-Day Consensus Revision Velocity:** `{vel_str}`",
+            "",
+        ]
+
+        if analyst_commentary.strip():
+            lines.extend([
+                "## 5. IDC Analyst Custom Commentary",
+                f"> {analyst_commentary.strip()}",
+                "",
+            ])
+
+        lines.extend([
+            "## 6. IDC Essential Guidance for Technology Buyers",
+            f"- For enterprise CIOs/CTOs evaluating solutions from **{v['name']}**: Given their current positioning in the `{v['marketscape_category']}` quadrant, "
+            f"if market-implied growth rates substantially outpace your internal IT budget expansion rate, prioritize locking in multi-year price caps and performance SLAs during contract renewal.",
+            "",
+            "---",
+            "*IDC Quanta™ Research Desk Platform. Confident decision-making backed by quantitative data.*",
+        ])
+        return "\n".join(lines)
 
     lines = [
         f"# 🔬 IDC Vendor Profile & Flash Note: {v['name']} ({target})",

@@ -120,9 +120,9 @@ def test_compute_ai_spending_tracker(sample_snapshot_df):
 
 
 def test_generate_idc_executive_briefing(sample_snapshot_df, sample_forecast_df):
-    """Verify executive briefing generation in official IDC format."""
+    """Verify executive briefing generation in official IDC format (Chinese and English)."""
     as_of = date(2026, 6, 1)
-    briefing = generate_idc_executive_briefing(as_of, sample_snapshot_df, sample_forecast_df)
+    briefing = generate_idc_executive_briefing(as_of, sample_snapshot_df, sample_forecast_df, lang="zh")
 
     assert "IDC MarketScape" in briefing
     assert "Worldwide AI Spending Guide" in briefing
@@ -131,9 +131,18 @@ def test_generate_idc_executive_briefing(sample_snapshot_df, sample_forecast_df)
     assert "Essential Guidance for Technology Vendors" in briefing
     assert "Sheng Jiang" in briefing
 
+    # Test English version
+    briefing_en = generate_idc_executive_briefing(as_of, sample_snapshot_df, sample_forecast_df, lang="en")
+    assert "IDC MarketScape" in briefing_en
+    assert "Worldwide AI Spending Guide" in briefing_en
+    assert "Leaders Quadrant" in briefing_en
+    assert "Market Perspective" in briefing_en
+    assert "Essential Guidance for Technology Buyers" in briefing_en
+    assert "Sheng Jiang" in briefing_en
+
 
 def test_generate_analyst_vendor_profile(sample_snapshot_df, sample_forecast_df):
-    """Verify analyst vendor profile generation with IDC MarketScape scores."""
+    """Verify analyst vendor profile generation with IDC MarketScape scores (Chinese and English)."""
     from arf.idc import generate_analyst_vendor_profile
 
     links_df = pd.DataFrame([
@@ -151,6 +160,7 @@ def test_generate_analyst_vendor_profile(sample_snapshot_df, sample_forecast_df)
         fc_df=sample_forecast_df,
         links_df=links_df,
         analyst_commentary="Strong supplier pricing power in 1.6T transceivers.",
+        lang="zh",
     )
 
     assert "IDC Vendor Profile" in profile
@@ -158,6 +168,20 @@ def test_generate_analyst_vendor_profile(sample_snapshot_df, sample_forecast_df)
     assert "Capabilities Score" in profile
     assert "Strategies Score" in profile
     assert "Strong supplier pricing power" in profile
+
+    # Test English version
+    profile_en = generate_analyst_vendor_profile(
+        ticker="NVDA",
+        snap_df=sample_snapshot_df,
+        fc_df=sample_forecast_df,
+        links_df=links_df,
+        analyst_commentary="Strong supplier pricing power in 1.6T transceivers.",
+        lang="en",
+    )
+    assert "IDC Vendor Profile" in profile_en
+    assert "Execution Quality & Margins" in profile_en
+    assert "Supply Chain Topology" in profile_en
+    assert "Key Direct Customers" in profile_en
 
     # Test unknown ticker
     unknown = generate_analyst_vendor_profile("UNKNOWN_TICKER", sample_snapshot_df)

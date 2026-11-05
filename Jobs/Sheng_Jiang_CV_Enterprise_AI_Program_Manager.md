@@ -114,3 +114,4 @@ Specifically positioned to take immediate, day-one ownership of IDC's **Enterpri
 **Language Proficiency:**
 - **English:** Full Professional Working Proficiency (Bilingual) — Educated in the United States, 6 years at Microsoft Redmond HQ; extensive experience presenting to US/European C-suites and authoring formal system specifications.
 - **Mandarin Chinese:** Native
+

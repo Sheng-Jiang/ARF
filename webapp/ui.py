@@ -16,6 +16,29 @@ from webapp.data import (
 from webapp.mobile import is_mobile
 
 
+def get_current_lang() -> str:
+    """Return active language code ('en' or 'zh')."""
+    if "lang" in st.session_state:
+        return str(st.session_state["lang"])
+    query_lang = st.query_params.get("lang")
+    if query_lang and str(query_lang).lower().startswith("zh"):
+        st.session_state["lang"] = "zh"
+        return "zh"
+    st.session_state["lang"] = "en"
+    return "en"
+
+
+def set_current_lang(lang: str) -> None:
+    """Update active language in session_state and query_params."""
+    st.session_state["lang"] = lang
+    st.query_params["lang"] = lang
+
+
+def tr(zh: str, en: str) -> str:
+    """Translate string based on active language."""
+    return en if get_current_lang() == "en" else zh
+
+
 def render_freshness_badge(latest: date | None = None) -> None:
     """Sidebar badge for how current the latest snapshot is (weekly cadence)."""
     from arf.health import freshness_status, next_monday_utc
@@ -29,24 +52,53 @@ def render_freshness_badge(latest: date | None = None) -> None:
         "critical": "🔴",
         "unknown": "⚪",
     }.get(status.level, "⚪")
-    st.sidebar.markdown(f"**数据新鲜度** {icon} {status.label}")
-    st.sidebar.caption(status.detail)
-    if status.level in ("stale", "critical"):
-        nxt = next_monday_utc()
-        st.sidebar.caption(f"下次计划周更（周一 UTC）：{nxt}")
+
+    is_en = get_current_lang() == "en"
+    if is_en:
+        en_labels = {
+            "fresh": "Up to Date",
+            "stale": "Stale",
+            "critical": "Outdated",
+            "unknown": "Unknown",
+        }
+        lbl = en_labels.get(status.level, status.level)
+        st.sidebar.markdown(f"**Data Freshness** {icon} {lbl}")
+        st.sidebar.caption(f"Latest weekly snapshot: {latest_as_of or 'None'}")
+        if status.level in ("stale", "critical"):
+            nxt = next_monday_utc()
+            st.sidebar.caption(f"Next scheduled run (Mon UTC): {nxt}")
+    else:
+        st.sidebar.markdown(f"**数据新鲜度** {icon} {status.label}")
+        st.sidebar.caption(status.detail)
+        if status.level in ("stale", "critical"):
+            nxt = next_monday_utc()
+            st.sidebar.caption(f"下次计划周更（周一 UTC）：{nxt}")
 
 
 def render_sidebar() -> date | None:
-    """Render date selector + refresh button; return selected date."""
+    """Render language switcher, date selector + refresh button; return selected date."""
+    curr_lang = get_current_lang()
+    sel_lang = st.sidebar.radio(
+        "🌐 Language / 语言",
+        ["English", "中文"],
+        index=0 if curr_lang == "en" else 1,
+        horizontal=True,
+        key="_sidebar_lang_selector",
+    )
+    new_lang = "en" if sel_lang == "English" else "zh"
+    if new_lang != curr_lang:
+        set_current_lang(new_lang)
+        st.rerun()
+
     dates = list_dates()
     if not dates:
-        st.sidebar.warning("未找到快照数据，请先运行数据管道。")
+        st.sidebar.warning(tr("未找到快照数据，请先运行数据管道。", "No snapshot data found. Please run data pipeline first."))
         render_freshness_badge(None)
         return None
     render_freshness_badge(dates[0])
     date_strs = [str(d) for d in dates]
-    sel = st.sidebar.selectbox("快照日期", date_strs, key="selected_date_str")
-    if st.sidebar.button("刷新数据"):
+    sel = st.sidebar.selectbox(tr("快照日期", "Snapshot Date"), date_strs, key="selected_date_str")
+    if st.sidebar.button(tr("刷新数据", "Refresh Data")):
         refresh_data()
         st.rerun()
     return date.fromisoformat(sel)
