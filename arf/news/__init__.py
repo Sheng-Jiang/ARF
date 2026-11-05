@@ -25,3 +25,4 @@ __all__ = [
     "sync_financial_press",
     "upsert_news_articles",
 ]
+

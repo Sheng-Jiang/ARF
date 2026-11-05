@@ -63,3 +63,4 @@ class NewsArticle:
             "sentiment_label": str(self.sentiment_label),
             "sentiment_score": self.sentiment_score,
         }
+

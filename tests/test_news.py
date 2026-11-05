@@ -311,3 +311,4 @@ class TestSyncFinancialPress:
         assert df.iloc[0]["article_id"] == "mock-001"
         assert "NVDA" in df.iloc[0]["tickers"]
         conn.close()
+
