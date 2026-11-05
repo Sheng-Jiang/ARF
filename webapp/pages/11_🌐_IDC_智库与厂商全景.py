@@ -109,7 +109,7 @@ with m_col1:
     st.metric(
         "🏛️ AI 核心纳管市值",
         f"${spending.get('total_universe_mcap_t', 0.0)}T",
-        help=f"{scored_count} 家已评分标的 ({as_of})",
+        help="全部已评分标的的美元总市值（中美双轨合计）",
     )
 with m_col2:
     st.metric(
@@ -131,6 +131,14 @@ with m_col4:
         f"{froth_total} 家",
         help="D1泡沫 + 负/低ROE + P/S>25",
     )
+
+# Keep the as-of / coverage context visible: it is the first thing an analyst
+# needs to judge whether the numbers are current, and st.metric's help tooltip
+# is hover-only.
+st.caption(
+    f"{as_of} 快照 · {scored_count} 家已评分标的 · "
+    "泡沫熔断 = ARF D1 且 ROE < 权益成本 且 P/S > 25"
+)
 
 st.divider()
 
