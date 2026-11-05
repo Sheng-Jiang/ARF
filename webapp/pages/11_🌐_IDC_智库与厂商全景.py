@@ -25,7 +25,7 @@ st.set_page_config(
     page_title="IDC Quanta™ 分析师工作台 — ARF MarketScape™",
     page_icon="🌐",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="auto",
 )
 inject_mobile_css()
 
@@ -109,29 +109,27 @@ with m_col1:
     st.metric(
         "🏛️ AI 核心纳管市值",
         f"${spending.get('total_universe_mcap_t', 0.0)}T",
-        f"{scored_count} 家已评分标的 ({as_of})",
+        help=f"{scored_count} 家已评分标的 ({as_of})",
     )
 with m_col2:
     st.metric(
         "💰 实质 AI 纯度收入 (年化)",
         f"${spending.get('total_ai_revenue_b', 0.0)}B",
-        "经 E-score 纯度加权折算",
+        help="经 E-score 纯度加权折算",
     )
 with m_col3:
     bubble_mult = spending.get("overall_bubble_multiple", 0.0)
     st.metric(
         "🫧 全局叙事泡沫倍数 (P/S_AI)",
         f"{bubble_mult:.1f}x",
-        "资本市值 / 实质 AI 收入",
-        delta_color="inverse",
+        help="资本市值 / 实质 AI 收入",
     )
 with m_col4:
     froth_total = sum(item["froth_count"] for item in spending.get("layers", []))
     st.metric(
         "🚨 触碰泡沫熔断厂商",
         f"{froth_total} 家",
-        "D1泡沫 + 负/低ROE + P/S>25",
-        delta_color="inverse",
+        help="D1泡沫 + 负/低ROE + P/S>25",
     )
 
 st.divider()
@@ -301,7 +299,9 @@ with tab_marketscape:
         fig.update_layout(
             title=dict(
                 text=f"<b>IDC MarketScape: Global AI Vendors Assessment ({as_of})</b>",
-                font=dict(size=17, color="#f8fafc"),
+                # The paper is transparent over the light Streamlit theme, so a
+                # light title is invisible; only the plot area itself is dark.
+                font=dict(size=17, color="#0f172a"),
             ),
             xaxis=dict(
                 title="<b>STRATEGIES (未来战略与增长弹性 ➔)</b>",
@@ -383,14 +383,18 @@ with tab_deepdive:
     with card_c2:
         st.metric("战略动能 (Strategies)", f"{v_primary['strategies_score']:.1f} / 100")
     with card_c3:
-        st.metric("ARF 泡沫估值指数", f"{v_primary['arf']:.1f}", "D1 泡沫阈值 ≥ 90")
+        st.metric("ARF 泡沫估值指数", f"{v_primary['arf']:.1f}", help="D1 泡沫阈值 ≥ 90")
     with card_c4:
-        st.metric("逆向 DCF 隐含增速", _pct(v_primary.get("implied_growth")), "市场定价所需永续增速")
+        st.metric(
+            "逆向 DCF 隐含增速",
+            _pct(v_primary.get("implied_growth")),
+            help="市场定价所需永续增速",
+        )
     with card_c5:
         st.metric(
             "12M 预期超一致差",
             _pct(v_primary.get("expected_beat_pct"), signed=True),
-            "ARF模型前瞻弹性",
+            help="ARF模型前瞻弹性",
         )
 
     # Side-by-Side Peer Comparison Table
@@ -493,7 +497,11 @@ with tab_sandbox:
         )
     with sb_c3:
         status_lbl = "正向强拉动" if capex_input >= 20 else ("温和扩张" if capex_input > 0 else "缩减承压")
-        st.metric("📡 传导情景模拟状态", status_lbl, f"CapEx {capex_input:+d}% / 产能截断 {clamp_input}%")
+        st.metric(
+            "📡 传导情景模拟状态",
+            status_lbl,
+            help=f"CapEx {capex_input:+d}% / 产能截断 {clamp_input}%",
+        )
 
     try:
         from arf.agent.cio_loop import simulate_supply_chain_shock
@@ -577,7 +585,7 @@ with tab_spending:
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
                 height=380,
                 xaxis=dict(gridcolor="#334155"),
-                yaxis=dict(gridcolor="#334155", title="亿美元 ($B)"),
+                yaxis=dict(gridcolor="#334155", title="十亿美元 ($B)"),
             )
             show_plotly(fig_bar)
 
@@ -590,6 +598,7 @@ with tab_spending:
                 color_continuous_scale="Reds",
                 title="<b>各层级叙事泡沫乘数 (Market Cap / AI Revenue)</b>",
                 text="bubble_multiple",
+                labels={"bubble_multiple": "叙事泡沫乘数", "layer_code": "产业链层级"},
             )
             fig_mult.update_traces(texttemplate="%{text:.1f}x", textposition="outside")
             fig_mult.update_layout(
@@ -598,6 +607,9 @@ with tab_spending:
                 height=380,
                 xaxis=dict(title="产业链层级", gridcolor="#334155"),
                 yaxis=dict(title="泡沫乘数 (倍)", gridcolor="#334155"),
+                # Values are already printed on each bar; the raw column-name
+                # colorbar is redundant analyst clutter.
+                coloraxis_showscale=False,
                 showlegend=False,
             )
             show_plotly(fig_mult)

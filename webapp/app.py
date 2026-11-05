@@ -5,7 +5,7 @@ st.set_page_config(
     page_title="ARF 仪表盘",
     page_icon="📊",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="auto",
 )
 
 # 三组导航对应三种使用意图：看当前估值状态、做个股研究、维护系统。
