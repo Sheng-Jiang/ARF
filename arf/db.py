@@ -397,6 +397,8 @@ def init_db(path: Path = Path("data/arf.db")) -> duckdb.DuckDBPyConnection:
     conn.execute(_SCHEMA_OPPORTUNITY_STATE)
     conn.execute(_SCHEMA_SUPPLY_CHAIN_LINKS)
     conn.execute(_SCHEMA_FORECASTS)
+    from arf.news.storage import init_news_table
+    init_news_table(conn)
     _add_missing_columns(conn)
     conn.execute(_VIEW_SNAPSHOTS)
     _mark_stale_runs_interrupted(conn)

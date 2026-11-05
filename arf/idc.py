@@ -333,6 +333,7 @@ def generate_idc_executive_briefing(
     as_of: date,
     snap_df: pd.DataFrame,
     fc_df: pd.DataFrame | None = None,
+    news_df: pd.DataFrame | None = None,
     lang: str = "zh",
 ) -> str:
     """Generate an authoritative IDC Executive Market Briefing in official IDC research format.
@@ -341,6 +342,7 @@ def generate_idc_executive_briefing(
         as_of: Snapshot date.
         snap_df: Evaluated universe snapshot DataFrame.
         fc_df: Optional forward forecasts DataFrame.
+        news_df: Optional recent WSJ & NYT news intelligence DataFrame.
         lang: 'zh' for Chinese or 'en' for English.
     """
     ms_df = compute_idc_marketscape(snap_df, fc_df)
@@ -435,15 +437,43 @@ def generate_idc_executive_briefing(
             )
         lines.append("")
 
+        # Optional Financial Press Intelligence Section
+        if news_df is not None and not news_df.empty:
+            total_arts = len(news_df)
+            wsj_c = int((news_df["source"] == "WSJ").sum()) if "source" in news_df.columns else 0
+            nyt_c = int((news_df["source"] == "NYT").sum()) if "source" in news_df.columns else 0
+            lines.extend([
+                "---",
+                "",
+                "## 4. Financial Press Wire & Narrative Velocity (WSJ & NYT Intelligence)",
+                f"> **Automated Press Synthesis**: Indexed **{total_arts} articles** (WSJ: `{wsj_c}`, NYT: `{nyt_c}`) covering ecosystem CapEx, supply chain constraints, export sanctions, and capital allocation governance.",
+                "",
+                "- **CapEx Infrastructure & Grid Constraints**: Global reporting highlights the massive datacenter power demand and hyperscaler capital expenditure cycles, driving demand for physical bottlenecks (optical transceivers, cooling, CoWoS).",
+                "- **Capital Allocation & Governance Dynamics**: Corroborating institutional findings on US vs China equity discounts, corporate buyback velocity and capital return remain primary catalysts for valuation multiple sustainability.",
+                "",
+                "**Key Recent Financial Press Reports:**",
+            ])
+            for _, art in news_df.head(4).iterrows():
+                pub_date = art["published_at"].strftime("%Y-%m-%d") if hasattr(art["published_at"], "strftime") else str(art["published_at"])[:10]
+                src = art.get("source", "Press")
+                title = art.get("title", "")
+                url = art.get("url", "#")
+                sent = art.get("sentiment_label", "Neutral")
+                lines.append(f"- `[{pub_date}]` **{src}**: [{title}]({url}) — *Sentiment: {sent}*")
+            lines.append("")
+
+        guidance_buyer_num = "5" if (news_df is not None and not news_df.empty) else "4"
+        guidance_vendor_num = "6" if (news_df is not None and not news_df.empty) else "5"
+
         lines.extend([
             "---",
             "",
-            "## 4. Essential Guidance for Technology Buyers (CIO / CTO)",
+            f"## {guidance_buyer_num}. Essential Guidance for Technology Buyers (CIO / CTO)",
             "1. **Scrutinize Layer 5 Application Valuations**: Prioritize vendors with proprietary workflow data moats and verified employee-productivity gains. For thin prompt-wrapper apps without unique IP, negotiate short subscription terms or pilot internal open-source alternatives.",
             "2. **Secure Midstream Supply-Chain Allocations**: Physical compute bottlenecks (CoWoS packaging, 800G+ optical transceivers) remain hard constraints over the next 4 quarters. Enterprise procurement must establish dual-sourcing agreements across both US and China supply-chain corridors.",
             "3. **Benchmark Business Viability via Reverse-DCF Implied Growth**: When a vendor's implied perpetual growth rate exceeds twice your internal IT budget expansion rate, their pricing cycle is late-stage, offering favorable commercial renegotiation windows.",
             "",
-            "## 5. Essential Guidance for Technology Vendors (CEO / CRO)",
+            f"## {guidance_vendor_num}. Essential Guidance for Technology Vendors (CEO / CRO)",
             "1. **Shift Focus from Raw Compute to Unit Tokenomics**: With open-source model convergence and distillation diffusion, vendor pricing power is migrating to full-stack inference efficiency and vertical systems integration.",
             "2. **Establish Counter-Cyclical Valuation Defenses**: Vendors in the high-ARF froth territory (Decile 1) face severe multiple de-rating risks. Take advantage of high-valuation windows to accelerate strategic acquisitions, reinforce balance-sheet cash reserves, and strengthen ROE fundamentals.",
             "",
@@ -521,16 +551,44 @@ def generate_idc_executive_briefing(
         )
     lines.append("")
 
+    # Optional Financial Press Intelligence Section
+    if news_df is not None and not news_df.empty:
+        total_arts = len(news_df)
+        wsj_c = int((news_df["source"] == "WSJ").sum()) if "source" in news_df.columns else 0
+        nyt_c = int((news_df["source"] == "NYT").sum()) if "source" in news_df.columns else 0
+        lines.extend([
+            "---",
+            "",
+            "## 4. 权威财经舆情前沿与叙事动能 (WSJ & NYT 媒体智库)",
+            f"> **金融媒体智能聚合**：系统已索引 **{total_arts} 篇**深度报道（《华尔街日报》`{wsj_c}` 篇，《纽约时报》`{nyt_c}` 篇），覆盖产业链资本开支、物理瓶颈、出口管制与股东回报治理。",
+            "",
+            "- **算力基建投资与电网/封装瓶颈**：海外权威媒体高度关注超大规模数据中心用电负荷与电力扩容瓶颈，带动高压电网与光模块/先进封装等中游物理瓶颈的确定性景气；",
+            "- **中美估值分水岭：股份回购与资本配置**：印证中美资本市场比较研究结论，美股科技龙头凭借高 ROE 支撑的大规模股份回购（股本稀释率下降）维持高估值倍数，而中股在「新国九条」与市值管理改革下，分红与回购政策的落地力度正在成为估值修复的核心锚点。",
+            "",
+            "**近期重点媒体要闻：**",
+        ])
+        for _, art in news_df.head(4).iterrows():
+            pub_date = art["published_at"].strftime("%Y-%m-%d") if hasattr(art["published_at"], "strftime") else str(art["published_at"])[:10]
+            src = art.get("source", "媒体")
+            title = art.get("title", "")
+            url = art.get("url", "#")
+            sent = "看多" if art.get("sentiment_label") == "Bullish" else ("看空" if art.get("sentiment_label") == "Bearish" else "中性")
+            lines.append(f"- `[{pub_date}]` **{src}**: [{title}]({url}) — *舆情偏向: {sent}*")
+        lines.append("")
+
+    guidance_buyer_num = "5" if (news_df is not None and not news_df.empty) else "4"
+    guidance_vendor_num = "6" if (news_df is not None and not news_df.empty) else "5"
+
     # Essential Guidance
     lines.extend([
         "---",
         "",
-        "## 4. Essential Guidance for Technology Buyers (CIO / CTO 决策指南)",
+        f"## {guidance_buyer_num}. Essential Guidance for Technology Buyers (CIO / CTO 决策指南)",
         "1. **警惕 Layer 5 应用层高估值陷阱**：优先采购具备「专有工作流数据护城河」与「实际人效节省验证」的厂商；对于缺乏私有数据的纯 Prompt 包装软件，建议采取审慎订阅或自建开源替代方案。",
         "2. **锁定中游供应链交付配额**：物理算力瓶颈（CoWoS、800G+ 光模块）在未来 4 个季度仍是硬约束，建议企业 IT 采购提前锁定多源供应商（Dual-Sourcing），特别是在中美双轨供应链中保持采购弹性。",
         "3. **以逆向 DCF 隐含增长反推商业可行性**：当供应商估值隐含的永续增长率超过客户自身 IT 预算年均复合增速的 2 倍时，该供应商的提价周期已处于晚期，买方具备更强的商务议价窗口。",
         "",
-        "## 5. Essential Guidance for Technology Vendors (CEO / 战略高管指南)",
+        f"## {guidance_vendor_num}. Essential Guidance for Technology Vendors (CEO / 战略高管指南)",
         "1. **从纯算力比拼转向单位 Token 经济学 (Tokenomics)**：面对模型开源化与蒸馏技术扩散，厂商的定价权正在向系统级效能与垂直行业工程化能力转移。",
         "2. **建立逆向估值防线**：高度警惕高 ARF 泡沫区（D1 分位）带来的估值重估风险，应利用高估值窗口期加快战略性 M&A 与技术资产沉淀，提升 ROE 底色以夯实 Capabilities 护城河。",
         "",
@@ -547,6 +605,7 @@ def generate_analyst_vendor_profile(
     fc_df: pd.DataFrame | None = None,
     links_df: pd.DataFrame | None = None,
     analyst_commentary: str = "",
+    news_df: pd.DataFrame | None = None,
     lang: str = "zh",
 ) -> str:
     """Generate a high-density 1-page IDC Vendor Profile & Flash Note for research analysts.
@@ -633,15 +692,41 @@ def generate_analyst_vendor_profile(
             "",
         ]
 
+        # Filter news for this vendor if provided
+        v_news = pd.DataFrame()
+        if news_df is not None and not news_df.empty:
+            if "tickers" in news_df.columns:
+                v_news = news_df[news_df["tickers"].astype(str).str.contains(f'"{target}"', case=False, na=False)]
+            else:
+                v_news = news_df
+
+        if not v_news.empty:
+            lines.extend([
+                "## 5. Financial Press Intelligence (WSJ & NYT Narrative Pulse)",
+                f"> **Media Sentiment Tracking**: Identified **{len(v_news)} recent articles** from The Wall Street Journal and The New York Times citing `{target}`.",
+                "",
+            ])
+            for _, art in v_news.head(3).iterrows():
+                pub_date = art["published_at"].strftime("%Y-%m-%d") if hasattr(art["published_at"], "strftime") else str(art["published_at"])[:10]
+                src = art.get("source", "Press")
+                title = art.get("title", "")
+                url = art.get("url", "#")
+                sent = art.get("sentiment_label", "Neutral")
+                lines.append(f"- `[{pub_date}]` **{src}**: [{title}]({url}) — *Sentiment: {sent}*")
+            lines.append("")
+
+        comm_num = "6" if not v_news.empty else "5"
+        guide_num = "7" if not v_news.empty else "6"
+
         if analyst_commentary.strip():
             lines.extend([
-                "## 5. IDC Analyst Custom Commentary",
+                f"## {comm_num}. IDC Analyst Custom Commentary",
                 f"> {analyst_commentary.strip()}",
                 "",
             ])
 
         lines.extend([
-            "## 6. IDC Essential Guidance for Technology Buyers",
+            f"## {guide_num}. IDC Essential Guidance for Technology Buyers",
             f"- For enterprise CIOs/CTOs evaluating solutions from **{v['name']}**: Given their current positioning in the `{v['marketscape_category']}` quadrant, "
             f"if market-implied growth rates substantially outpace your internal IT budget expansion rate, prioritize locking in multi-year price caps and performance SLAs during contract renewal.",
             "",
@@ -681,15 +766,41 @@ def generate_analyst_vendor_profile(
         "",
     ]
 
+    # Filter news for this vendor if provided
+    v_news = pd.DataFrame()
+    if news_df is not None and not news_df.empty:
+        if "tickers" in news_df.columns:
+            v_news = news_df[news_df["tickers"].astype(str).str.contains(f'"{target}"', case=False, na=False)]
+        else:
+            v_news = news_df
+
+    if not v_news.empty:
+        lines.extend([
+            "## 5. 华尔街日报与纽时实时舆情追踪 (WSJ & NYT Narrative Pulse)",
+            f"> **媒体情绪雷达**：系统已匹配 **{len(v_news)} 篇**提及 `{target}` 的《华尔街日报》与《纽约时报》深度报道。",
+            "",
+        ])
+        for _, art in v_news.head(3).iterrows():
+            pub_date = art["published_at"].strftime("%Y-%m-%d") if hasattr(art["published_at"], "strftime") else str(art["published_at"])[:10]
+            src = art.get("source", "媒体")
+            title = art.get("title", "")
+            url = art.get("url", "#")
+            sent = "看多" if art.get("sentiment_label") == "Bullish" else ("看空" if art.get("sentiment_label") == "Bearish" else "中性")
+            lines.append(f"- `[{pub_date}]` **{src}**: [{title}]({url}) — *舆情偏向: {sent}*")
+        lines.append("")
+
+    comm_num = "6" if not v_news.empty else "5"
+    guide_num = "7" if not v_news.empty else "6"
+
     if analyst_commentary.strip():
         lines.extend([
-            "## 5. IDC Analyst Custom Commentary (分析师独家洞察)",
+            f"## {comm_num}. IDC Analyst Custom Commentary (分析师独家洞察)",
             f"> {analyst_commentary.strip()}",
             "",
         ])
 
     lines.extend([
-        "## 6. IDC Essential Guidance for Buyers",
+        f"## {guide_num}. IDC Essential Guidance for Buyers (企业买方采购指南)",
         f"- 对采购 **{v['name']}** 解决方案的企业 CIO/CTO：结合其当前处于 `{v['marketscape_category']}` 的竞争站位，"
         f"若其隐含增长率高于业务实际 IT 预算扩张节奏，应在合同续约中重点锁定价格上限与交付服务等级协议 (SLA)。",
         "",

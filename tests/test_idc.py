@@ -271,3 +271,76 @@ def test_english_briefing_has_no_chinese(sample_snapshot_df, sample_forecast_df)
     )
 
     assert not re.search(r"[一-鿿]", briefing)
+
+
+def test_briefing_and_vendor_profile_with_news_df(sample_snapshot_df, sample_forecast_df):
+    """Ensure WSJ & NYT news intelligence seamlessly integrates into IDC briefing and vendor profile."""
+    from datetime import UTC, datetime
+
+    from arf.idc import generate_analyst_vendor_profile
+
+    sample_news = pd.DataFrame([
+        {
+            "article_id": "art-wsj-1",
+            "source": "WSJ",
+            "title": "Nvidia Accelerates CoWoS Packaging Supply with TSMC",
+            "summary": "Hyperscaler datacenter CapEx expands rapidly.",
+            "url": "https://wsj.com/nvidia-cowos",
+            "published_at": datetime.now(UTC),
+            "tickers": '["NVDA", "TSM"]',
+            "sentiment_label": "Bullish",
+        },
+        {
+            "article_id": "art-nyt-1",
+            "source": "NYT",
+            "title": "Big Tech Share Buybacks Surpass Capital Expenditure",
+            "summary": "Capital allocation shifts toward equity reduction.",
+            "url": "https://nytimes.com/tech-buybacks",
+            "published_at": datetime.now(UTC),
+            "tickers": '["MSFT"]',
+            "sentiment_label": "Neutral",
+        },
+    ])
+
+    # 1. Executive briefing with news
+    en_briefing = generate_idc_executive_briefing(
+        date(2026, 6, 1),
+        sample_snapshot_df,
+        sample_forecast_df,
+        news_df=sample_news,
+        lang="en",
+    )
+    assert "Financial Press Wire & Narrative Velocity" in en_briefing
+    assert "https://wsj.com/nvidia-cowos" in en_briefing
+
+    zh_briefing = generate_idc_executive_briefing(
+        date(2026, 6, 1),
+        sample_snapshot_df,
+        sample_forecast_df,
+        news_df=sample_news,
+        lang="zh",
+    )
+    assert "权威财经舆情前沿与叙事动能" in zh_briefing
+    assert "https://wsj.com/nvidia-cowos" in zh_briefing
+
+    # 2. Vendor profile with news
+    en_profile = generate_analyst_vendor_profile(
+        ticker="NVDA",
+        snap_df=sample_snapshot_df,
+        fc_df=sample_forecast_df,
+        news_df=sample_news,
+        lang="en",
+    )
+    assert "Financial Press Intelligence" in en_profile
+    assert "https://wsj.com/nvidia-cowos" in en_profile
+
+    zh_profile = generate_analyst_vendor_profile(
+        ticker="NVDA",
+        snap_df=sample_snapshot_df,
+        fc_df=sample_forecast_df,
+        news_df=sample_news,
+        lang="zh",
+    )
+    assert "华尔街日报与纽时实时舆情追踪" in zh_profile
+    assert "https://wsj.com/nvidia-cowos" in zh_profile
+

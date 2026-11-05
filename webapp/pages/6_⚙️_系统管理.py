@@ -17,6 +17,7 @@ from webapp.data import (
     list_dates,
     load_fetch_outcomes,
     load_latest_run,
+    load_news_stats,
     load_runs,
     load_snapshot,
     refresh_data,
@@ -283,6 +284,31 @@ with col_dates:
         tr(
             f"数据库中已存快照数：**{len(dates)}** 个 · 最近：{dates[0] if dates else '—'}",
             f"Snapshots stored in the database: **{len(dates)}** · Latest: {dates[0] if dates else '—'}",
+        )
+    )
+
+st.divider()
+
+# ---------- WSJ & NYT Financial Press Wire ----------
+st.subheader(tr("📰 华尔街日报与纽时舆情数据源", "📰 WSJ & NYT Financial Press Data Source"))
+news_telemetry = load_news_stats(days=30)
+col_sync_news, col_info_news = st.columns([1, 3])
+with col_sync_news:
+    if st.button(tr("⟳ 立即同步金融舆情", "⟳ Sync Press Wire Now"), key="admin_sync_press_wire"):
+        with st.spinner(tr("正在抓取 WSJ、NYT 与专题报道...", "Fetching & classifying WSJ and NYT articles...")):
+            from arf.news.sync import sync_financial_press
+            cnt = sync_financial_press(max_items_per_feed=25)
+            st.success(tr(f"同步完成！新增/更新 {cnt} 篇金融报道。", f"Sync complete! Upserted {cnt} articles."))
+            refresh_data()
+            st.rerun()
+with col_info_news:
+    total_art = news_telemetry.get("total_articles", 0)
+    latest_pub = news_telemetry.get("latest_published_at")
+    latest_str = latest_pub.strftime("%Y-%m-%d %H:%M UTC") if latest_pub and hasattr(latest_pub, "strftime") else (str(latest_pub) if latest_pub else "—")
+    st.caption(
+        tr(
+            f"已索引权威报道：**{total_art}** 篇（WSJ: {news_telemetry.get('wsj_count', 0)} · NYT: {news_telemetry.get('nyt_count', 0)}）· 最近更新：{latest_str}",
+            f"Indexed Press Articles: **{total_art}** (WSJ: {news_telemetry.get('wsj_count', 0)} · NYT: {news_telemetry.get('nyt_count', 0)}) · Latest: {latest_str}",
         )
     )
 
