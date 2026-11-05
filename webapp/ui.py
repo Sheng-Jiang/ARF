@@ -7,6 +7,7 @@ import streamlit as st
 
 from webapp import gemini
 from webapp.data import (
+    latest_complete_snapshot_date,
     list_dates,
     load_gemini_summaries,
     load_research_reports,
@@ -143,7 +144,39 @@ def render_sidebar() -> date | None:
         return None
     render_freshness_badge(dates[0])
     date_strs = [str(d) for d in dates]
-    sel = st.sidebar.selectbox(tr("快照日期", "Snapshot Date"), date_strs, key="selected_date_str")
+
+    # Default to the newest fully-scored snapshot. Partially-written snapshots
+    # (rows present, scoring not yet run) would make every ranking page look
+    # empty, so they stay selectable but are clearly marked.
+    complete = latest_complete_snapshot_date(dates[0])
+    default_str = str(complete) if complete is not None and str(complete) in date_strs else date_strs[0]
+
+    stored = st.session_state.get("selected_date_str")
+    if (
+        stored in date_strs
+        and complete is not None
+        and not st.session_state.get("_date_user_selected")
+        and date.fromisoformat(stored) > complete
+    ):
+        # Migrate a pre-existing selection that points at an unscored snapshot.
+        st.session_state["selected_date_str"] = default_str
+
+    def _mark_date_selected() -> None:
+        st.session_state["_date_user_selected"] = True
+
+    def _fmt_date(value: str) -> str:
+        if complete is not None and date.fromisoformat(value) > complete:
+            return value + tr("（未评分）", " (unscored)")
+        return value
+
+    sel = st.sidebar.selectbox(
+        tr("快照日期", "Snapshot Date"),
+        date_strs,
+        index=date_strs.index(default_str),
+        key="selected_date_str",
+        format_func=_fmt_date,
+        on_change=_mark_date_selected,
+    )
     if st.sidebar.button(tr("刷新数据", "Refresh Data")):
         refresh_data()
         st.rerun()

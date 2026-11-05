@@ -5,7 +5,6 @@ from pathlib import Path
 import numpy as np
 import streamlit as st
 import yaml
-from streamlit_echarts import st_pyecharts
 
 from arf.fetchers.prices import (
     CURRENCY_SYMBOLS,
@@ -25,7 +24,7 @@ from webapp import gemini
 from webapp.backtest import run_backtrader
 from webapp.charts import draw_pro_kline, draw_result_bar
 from webapp.data import _open_conn
-from webapp.mobile import inject_mobile_css, is_mobile
+from webapp.mobile import inject_mobile_css, is_mobile, show_plotly
 from webapp.schemas import BacktraderParams, StrategyBase
 from webapp.ui import get_current_lang, tr
 
@@ -423,7 +422,7 @@ st.subheader(f"📈 {ticker} " + (
     else tr("交互式日 K 线与均线系统", "Interactive Daily Candlestick & Moving Averages")
 ))
 kline_chart = draw_pro_kline(df_indicators, static=_mobile)
-st_pyecharts(kline_chart, height="360px" if _mobile else "500px")
+show_plotly(kline_chart, key="tech_kline")
 
 # ── Section 3: Backtesting & Parameter Optimization ──────────────────────────
 st.divider()
@@ -603,7 +602,7 @@ if run_button:
 
                     st.write(tr("### 📊 参数组合绩效指标对比图 (选择图例切换指标)", "### 📊 Performance Metrics by Parameter Combination (use the legend to switch metrics)"))
                     bar_chart = draw_result_bar(display_df)
-                    st_pyecharts(bar_chart, height="450px")
+                    show_plotly(bar_chart, key="backtest_bar")
             except Exception as e:
                 st.error(tr(f"❌ 执行回测失败: {e}", f"❌ Backtest failed: {e}"))
                 st.exception(e)

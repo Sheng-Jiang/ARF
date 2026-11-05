@@ -1,253 +1,178 @@
-"""Pyecharts Chart Generators for stock prices and backtesting results."""
+"""Plotly Chart Generators for stock prices and backtesting results.
+
+These used to return pyecharts objects rendered through ``streamlit-echarts``.
+That package's 0.7.x releases register a file-backed component that Streamlit
+1.58 refuses to load ("must be declared ... with asset_dir"), so the charts are
+now native Plotly — the same library the rest of the dashboard uses.
+"""
+from __future__ import annotations
+
 import pandas as pd
-from pyecharts import options as opts
-from pyecharts.charts import Bar, Grid, Kline, Line
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
+# China market convention: red = up, green = down.
+_UP_COLOR = "#ec0000"
+_DOWN_COLOR = "#00da3c"
+_MA_COLORS = {5: "#f6c343", 10: "#ff7f50", 20: "#87cefa", 30: "#b0c4de"}
+
+
+def _column(df: pd.DataFrame, zh: str, en: str) -> str:
+    return zh if zh in df.columns else en
 
 
 def split_data(df: pd.DataFrame) -> tuple[list[str], list[list[float]], pd.Series, list[list[float]]]:
-    """Helper to split pandas DataFrame into pyecharts-compatible formats."""
-    # Standardise column names from English or Chinese
-    date_col = "日期" if "日期" in df.columns else "date"
-    open_col = "开盘" if "开盘" in df.columns else "open"
-    close_col = "收盘" if "收盘" in df.columns else "close"
-    low_col = "最低" if "最低" in df.columns else "low"
-    high_col = "最高" if "最高" in df.columns else "high"
-    vol_col = "成交量" if "成交量" in df.columns else "volume"
-    
-    # Format date as YYYY-MM-DD string
+    """Split a price DataFrame into Plotly-friendly lists (ZH or EN headers)."""
+    date_col = _column(df, "日期", "date")
+    open_col = _column(df, "开盘", "open")
+    close_col = _column(df, "收盘", "close")
+    low_col = _column(df, "最低", "low")
+    high_col = _column(df, "最高", "high")
+    vol_col = _column(df, "成交量", "volume")
+
     df_temp = df.copy()
     df_temp[date_col] = pd.to_datetime(df_temp[date_col]).dt.strftime("%Y-%m-%d")
-    
+
     x_data = df_temp[date_col].values.tolist()
     y_data = df_temp[[open_col, close_col, low_col, high_col]].values.tolist()
     df_close = df_temp[close_col]
 
     df_temp["index"] = df_temp.index
-    df_temp["rise"] = df_temp[[open_col, close_col]].apply(lambda x: 1 if x.iloc[0] > x.iloc[1] else -1, axis=1)
+    df_temp["rise"] = df_temp[[open_col, close_col]].apply(
+        lambda x: 1 if x.iloc[0] > x.iloc[1] else -1, axis=1
+    )
     y_vol = df_temp[["index", vol_col, "rise"]].values.tolist()
     return x_data, y_data, df_close, y_vol
 
-def calculate_ma(day_count: int, df_close: pd.Series) -> list[float]:
-    """Calculate moving average as a list of rounded floats or '-' for NaNs."""
-    df_ma = df_close.rolling(day_count).mean().round(2).fillna("-")
-    return df_ma.values.tolist()
 
-def draw_pro_kline(df: pd.DataFrame, static: bool = False) -> Grid:
-    """Draw a professional candlestick chart with volume and MA lines.
+def calculate_ma(day_count: int, df_close: pd.Series) -> list[float | None]:
+    """Moving average as a list of floats with ``None`` for the warm-up NaNs."""
+    df_ma = df_close.rolling(day_count).mean().round(2)
+    return [None if pd.isna(v) else float(v) for v in df_ma.values]
 
-    When ``static`` (used on phones), the chart becomes a fixed graphic: it shows
-    only the most recent ~90 bars and drops the inside data-zoom, tooltip and
-    axis-pointer so it cannot capture touch gestures and hijack page scrolling.
+
+def draw_pro_kline(df: pd.DataFrame, static: bool = False) -> go.Figure:
+    """Candlestick chart with MA5/10/20/30 and a volume panel.
+
+    ``static`` (used on phones) keeps only the most recent ~90 bars and turns
+    off hover/zoom so the chart cannot hijack page scrolling.
     """
     if static:
         df = df.tail(90)
-    x_data, y_data, df_close, y_vol = split_data(df)
 
-    # Touch-capturing interactions are stripped on mobile so the page scrolls past
-    # the chart instead of panning it.
-    if static:
-        datazoom_opts: list = []
-        tooltip_opts = opts.TooltipOpts(is_show=False)
-    else:
-        datazoom_opts = [
-            opts.DataZoomOpts(
-                is_show=False,
-                type_="inside",
-                xaxis_index=[0, 1],
-                range_start=80,
-                range_end=100,
-            ),
-            opts.DataZoomOpts(
-                is_show=True,
-                xaxis_index=[0, 1],
-                type_="slider",
-                pos_top="85%",
-                range_start=80,
-                range_end=100,
-            ),
-        ]
-        tooltip_opts = opts.TooltipOpts(
-            trigger="axis",
-            axis_pointer_type="cross",
-            background_color="rgba(245, 245, 245, 0.8)",
-            border_width=1,
-            border_color="#ccc",
-            textstyle_opts=opts.TextStyleOpts(color="#000"),
-        )
+    date_col = _column(df, "日期", "date")
+    open_col = _column(df, "开盘", "open")
+    close_col = _column(df, "收盘", "close")
+    low_col = _column(df, "最低", "low")
+    high_col = _column(df, "最高", "high")
+    vol_col = _column(df, "成交量", "volume")
 
-    kline_global_opts = dict(
-        legend_opts=opts.LegendOpts(is_show=False, pos_bottom=10, pos_left="center"),
-        datazoom_opts=datazoom_opts,
-        yaxis_opts=opts.AxisOpts(
-            is_scale=True,
-            splitarea_opts=opts.SplitAreaOpts(is_show=True, areastyle_opts=opts.AreaStyleOpts(opacity=1)),
+    dates = pd.to_datetime(df[date_col]).dt.strftime("%Y-%m-%d").tolist()
+    opens = df[open_col].tolist()
+    closes = df[close_col].tolist()
+    lows = df[low_col].tolist()
+    highs = df[high_col].tolist()
+    volumes = df[vol_col].tolist()
+
+    fig = make_subplots(
+        rows=2,
+        cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.03,
+        row_heights=[0.72, 0.28],
+    )
+
+    fig.add_trace(
+        go.Candlestick(
+            x=dates,
+            open=opens,
+            high=highs,
+            low=lows,
+            close=closes,
+            name="Daily K" if static else "日K",
+            increasing_line_color=_UP_COLOR,
+            increasing_fillcolor=_UP_COLOR,
+            decreasing_line_color=_DOWN_COLOR,
+            decreasing_fillcolor=_DOWN_COLOR,
+            showlegend=False,
         ),
-        tooltip_opts=tooltip_opts,
-        visualmap_opts=opts.VisualMapOpts(
-            is_show=False,
-            dimension=2,
-            series_index=5,
-            is_piecewise=True,
-            pieces=[
-                {"value": 1, "color": "#00da3c"},
-                {"value": -1, "color": "#ec0000"},
-            ],
-        ),
-        axispointer_opts=opts.AxisPointerOpts(
-            is_show=not static,
-            link=[{"xAxisIndex": "all"}],
-            label=opts.LabelOpts(background_color="#777"),
-        ),
-    )
-    if not static:
-        kline_global_opts["brush_opts"] = opts.BrushOpts(
-            x_axis_index="all",
-            brush_link="all",
-            out_of_brush={"colorAlpha": 0.1},
-            brush_type="lineX",
-        )
-
-    kline = (
-        Kline()
-        .add_xaxis(xaxis_data=x_data)
-        .add_yaxis(
-            series_name="日K",
-            y_axis=y_data,
-            itemstyle_opts=opts.ItemStyleOpts(color="#ec0000", color0="#00da3c"),
-        )
-        .set_global_opts(**kline_global_opts)
+        row=1,
+        col=1,
     )
 
-    line = (
-        Line()
-        .add_xaxis(xaxis_data=x_data)
-        .add_yaxis(
-            series_name="MA5",
-            y_axis=calculate_ma(5, df_close),
-            is_smooth=True,
-            is_hover_animation=False,
-            linestyle_opts=opts.LineStyleOpts(width=2, opacity=0.7),
-            label_opts=opts.LabelOpts(is_show=False),
-        )
-        .add_yaxis(
-            series_name="MA10",
-            y_axis=calculate_ma(10, df_close),
-            is_smooth=True,
-            is_hover_animation=False,
-            linestyle_opts=opts.LineStyleOpts(width=2, opacity=0.7),
-            label_opts=opts.LabelOpts(is_show=False),
-        )
-        .add_yaxis(
-            series_name="MA20",
-            y_axis=calculate_ma(20, df_close),
-            is_smooth=True,
-            is_hover_animation=False,
-            linestyle_opts=opts.LineStyleOpts(width=2, opacity=0.7),
-            label_opts=opts.LabelOpts(is_show=False),
-        )
-        .add_yaxis(
-            series_name="MA30",
-            y_axis=calculate_ma(30, df_close),
-            is_smooth=True,
-            is_hover_animation=False,
-            linestyle_opts=opts.LineStyleOpts(width=2, opacity=0.7),
-            label_opts=opts.LabelOpts(is_show=False),
-        )
-        .set_global_opts(xaxis_opts=opts.AxisOpts(type_="category"))
-    )
-
-    bar = (
-        Bar()
-        .add_xaxis(xaxis_data=x_data)
-        .add_yaxis(
-            series_name="成交量",
-            y_axis=y_vol,
-            xaxis_index=1,
-            yaxis_index=1,
-            label_opts=opts.LabelOpts(is_show=False),
-        )
-        .set_global_opts(
-            xaxis_opts=opts.AxisOpts(
-                type_="category",
-                is_scale=True,
-                grid_index=1,
-                boundary_gap=True,
-                axisline_opts=opts.AxisLineOpts(is_on_zero=False),
-                axistick_opts=opts.AxisTickOpts(is_show=False),
-                splitline_opts=opts.SplitLineOpts(is_show=False),
-                axislabel_opts=opts.LabelOpts(is_show=False),
-                split_number=20,
-                min_="dataMin",
-                max_="dataMax",
+    for period, color in _MA_COLORS.items():
+        fig.add_trace(
+            go.Scatter(
+                x=dates,
+                y=calculate_ma(period, df[close_col]),
+                mode="lines",
+                name=f"MA{period}",
+                line=dict(width=1.5, color=color),
+                hoverinfo="skip" if static else "all",
             ),
-            yaxis_opts=opts.AxisOpts(
-                grid_index=1,
-                is_scale=True,
-                split_number=2,
-                axislabel_opts=opts.LabelOpts(is_show=False),
-                axisline_opts=opts.AxisLineOpts(is_show=False),
-                axistick_opts=opts.AxisTickOpts(is_show=False),
-                splitline_opts=opts.SplitLineOpts(is_show=False),
-            ),
-            legend_opts=opts.LegendOpts(is_show=False),
+            row=1,
+            col=1,
         )
+
+    vol_colors = [
+        _UP_COLOR if close >= open_ else _DOWN_COLOR
+        for open_, close in zip(opens, closes, strict=False)
+    ]
+    fig.add_trace(
+        go.Bar(
+            x=dates,
+            y=volumes,
+            name="Volume",
+            marker_color=vol_colors,
+            showlegend=False,
+            hoverinfo="skip" if static else "all",
+        ),
+        row=2,
+        col=1,
     )
 
-    # Overlap Kline and Line
-    overlap_kline_line = kline.overlap(line)
-
-    # Grid layout combining price chart and volume chart
-    grid_chart = Grid(
-        init_opts=opts.InitOpts(
-            animation_opts=opts.AnimationOpts(animation=False),
-            width="100%",
-        )
+    fig.update_xaxes(type="category", nticks=12)
+    fig.update_yaxes(side="right", row=1, col=1)
+    fig.update_yaxes(side="right", showticklabels=not static, row=2, col=1)
+    fig.update_layout(
+        height=360 if static else 520,
+        margin=dict(l=10, r=10, t=30, b=10),
+        bargap=0.1,
+        showlegend=not static,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        hovermode=False if static else "x unified",
+        dragmode=False if static else "zoom",
+        xaxis_rangeslider_visible=False,
     )
-    grid_chart.add(
-        overlap_kline_line,
-        grid_opts=opts.GridOpts(pos_left="5%", pos_right="5%", height="55%"),
-    )
-    grid_chart.add(
-        bar,
-        grid_opts=opts.GridOpts(pos_left="5%", pos_right="5%", pos_top="68%", height="15%"),
-    )
+    return fig
 
-    return grid_chart
 
-def draw_result_bar(df: pd.DataFrame, n_scores: int = 3) -> Bar:
-    """Draw a bar chart comparing performance metrics for different backtest parameters."""
-    params_columns = df.columns[:-n_scores]
-    scores_columns = df.columns[-n_scores:]
-    
-    # Custom x-axis labels describing the parameter combinations
+def draw_result_bar(df: pd.DataFrame, n_scores: int = 3) -> go.Figure:
+    """Grouped bar chart comparing backtest metrics across parameter combinations."""
+    params_columns = list(df.columns[:-n_scores])
+    scores_columns = list(df.columns[-n_scores:])
+
     x_data = (
         df[params_columns]
         .apply(
-            lambda x: "\n".join([f"{name}: {value}" for name, value in zip(params_columns, x, strict=False)]),
+            lambda x: "<br>".join(
+                f"{name}: {value}"
+                for name, value in zip(params_columns, x, strict=False)
+            ),
             axis=1,
         )
-        .values.tolist()
-    )
-    
-    bar = (
-        Bar()
-        .add_xaxis(x_data)
-        .set_global_opts(
-            tooltip_opts=opts.TooltipOpts(trigger="axis"),
-            legend_opts=opts.LegendOpts(selected_mode="single"),
-        )
-    )
-    for col in scores_columns:
-        bar.add_yaxis(col, df[col].values.tolist())
-        
-    bar.set_series_opts(
-        label_opts=opts.LabelOpts(is_show=False),
-        markpoint_opts=opts.MarkPointOpts(
-            data=[
-                opts.MarkPointItem(type_="max", name="最大值"),
-                opts.MarkPointItem(type_="min", name="最小值"),
-            ]
-        ),
+        .tolist()
     )
 
-    return bar
+    fig = go.Figure()
+    for col in scores_columns:
+        fig.add_trace(go.Bar(x=x_data, y=df[col].tolist(), name=str(col)))
+
+    fig.update_layout(
+        barmode="group",
+        height=450,
+        margin=dict(l=10, r=10, t=30, b=10),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        hovermode="x unified",
+    )
+    return fig
