@@ -51,6 +51,20 @@ def _usd_b(value: object, decimals: int = 1) -> str:
     return f"${float(value):.{decimals}f}B"
 
 
+_CATEGORY_ZH = {
+    "Leaders": "领军者",
+    "Major Players": "主要厂商",
+    "Contenders": "挑战者",
+    "Participants": "参与者",
+}
+
+
+def _cat(category: object, is_en: bool) -> str:
+    if is_en:
+        return str(category)
+    return _CATEGORY_ZH.get(str(category), str(category))
+
+
 # ── Analyst Desk Header ──────────────────────────────────────────────────────
 st.title(
     "🌐 IDC Quanta™ AI Analyst Research Desk (MarketScape™)"
@@ -114,7 +128,7 @@ with contextlib.suppress(Exception):
 
 # Compute IDC intelligence datasets
 ms_df = compute_idc_marketscape(snap_df, fc_df)
-spending = compute_ai_spending_tracker(snap_df)
+spending = compute_ai_spending_tracker(snap_df, lang="en" if is_en else "zh")
 
 if ms_df.empty:
     st.warning(
@@ -346,7 +360,7 @@ with tab_marketscape:
             hover_texts = [
                 f"<b>{r['name']}</b> ({r['ticker']})<br>"
                 f"Region: {r['leg']} | Layer: {r['layer']}<br>"
-                f"Quadrant: <b>{r['marketscape_category']}</b><br>"
+                f"Quadrant: <b>{_cat(r['marketscape_category'], True)}</b><br>"
                 f"Capabilities Score: <b>{r['capabilities_score']:.1f}</b><br>"
                 f"Strategies Score: <b>{r['strategies_score']:.1f}</b><br>"
                 f"Market Cap: {_usd_b(r['market_cap_b'])} | Real AI Rev: {_usd_b(r['ai_revenue_est_b'])}<br>"
@@ -358,7 +372,7 @@ with tab_marketscape:
             hover_texts = [
                 f"<b>{r['name']}</b> ({r['ticker']})<br>"
                 f"区域: {r['leg']} | 层级: {r['layer']}<br>"
-                f"阵营: <b>{r['marketscape_category']}</b><br>"
+                f"阵营: <b>{_cat(r['marketscape_category'], False)}</b><br>"
                 f"交付质量 (Capabilities): <b>{r['capabilities_score']:.1f}</b><br>"
                 f"战略动能 (Strategies): <b>{r['strategies_score']:.1f}</b><br>"
                 f"市值: {_usd_b(r['market_cap_b'])} | 实质AI收入: {_usd_b(r['ai_revenue_est_b'])}<br>"
@@ -389,7 +403,10 @@ with tab_marketscape:
 
         fig.update_layout(
             title=dict(
-                text=f"<b>IDC MarketScape: Global AI Vendors Assessment ({as_of})</b>",
+                text=tr(
+                    f"<b>IDC MarketScape：全球 AI 厂商评估 ({as_of})</b>",
+                    f"<b>IDC MarketScape: Global AI Vendors Assessment ({as_of})</b>",
+                ),
                 font=dict(size=17, color="#0f172a"),
             ),
             xaxis=dict(
@@ -532,7 +549,7 @@ with tab_deepdive:
     )
     dim_lbl = "Dimension" if is_en else "指标维度"
     peer_metrics_table = [
-        {dim_lbl: tr("IDC MarketScape 阵营", "MarketScape Quadrant"), chosen_ticker: v_primary["marketscape_category"], peer_ticker: v_peer["marketscape_category"]},
+        {dim_lbl: tr("IDC MarketScape 阵营", "MarketScape Quadrant"), chosen_ticker: _cat(v_primary["marketscape_category"], is_en), peer_ticker: _cat(v_peer["marketscape_category"], is_en)},
         {dim_lbl: tr("Capabilities (交付与财务质量)", "Capabilities (Execution Quality)"), chosen_ticker: f"{v_primary['capabilities_score']:.1f}", peer_ticker: f"{v_peer['capabilities_score']:.1f}"},
         {dim_lbl: tr("Strategies (未来战略与增速)", "Strategies (Forward Momentum)"), chosen_ticker: f"{v_primary['strategies_score']:.1f}", peer_ticker: f"{v_peer['strategies_score']:.1f}"},
         {dim_lbl: tr("资本总市值 (USD)", "Equity Market Cap (USD)"), chosen_ticker: f"${v_primary['market_cap_b']:.1f}B", peer_ticker: f"${v_peer['market_cap_b']:.1f}B"},

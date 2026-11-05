@@ -17,10 +17,12 @@ import streamlit as st
 
 from webapp import data
 from webapp.mobile import inject_mobile_css
-from webapp.ui import render_sidebar
+from webapp.ui import get_current_lang, render_sidebar, tr
+
+is_en = get_current_lang() == "en"
 
 st.set_page_config(
-    page_title="ARF — AI CIO 投资总监驾驶舱",
+    page_title=tr("ARF — AI CIO 投资总监驾驶舱", "ARF — AI CIO Executive Desk Cockpit"),
     page_icon="💼",
     layout="wide",
 )
@@ -42,25 +44,45 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.title("💼 AI CIO 投资总监驾驶舱 (Autonomous AI CIO Cockpit)")
+st.title(
+    tr(
+        "💼 AI CIO 投资总监驾驶舱 (Autonomous AI CIO Cockpit)",
+        "💼 AI CIO Executive Desk (Autonomous AI CIO Cockpit)",
+    )
+)
 st.caption(
-    "由 AI-CIO Supervisory Brain 驱动的对冲基金管理中心：回放 ARF Thematic 委托，"
-    "展示真实持仓、调仓指令、风控熔断与分析师计分卡。"
+    tr(
+        "由 AI-CIO Supervisory Brain 驱动的对冲基金管理中心：回放 ARF Thematic 委托，"
+        "展示真实持仓、调仓指令、风控熔断与分析师计分卡。",
+        "Hedge-fund management center driven by the AI-CIO Supervisory Brain: replays the "
+        "ARF Thematic mandate and shows real positions, rebalance orders, risk clamps and "
+        "analyst scorecards.",
+    )
 )
 
 selected_date = render_sidebar()
 if selected_date is None:
-    st.info("👈 请在左侧边栏选择快照日期。")
+    st.info(tr("👈 请在左侧边栏选择快照日期。", "👈 Select a snapshot date in the left sidebar."))
     st.stop()
 
 as_of = data.latest_scored_date(selected_date)
 if as_of is None:
-    st.error(f"{selected_date} 及之前的快照都没有完成评分（ARF 为空），无法回放。")
+    st.error(
+        tr(
+            f"{selected_date} 及之前的快照都没有完成评分（ARF 为空），无法回放。",
+            f"No snapshot on or before {selected_date} has completed scoring (ARF is empty); "
+            "the replay cannot run.",
+        )
+    )
     st.stop()
 if as_of != selected_date:
     st.warning(
-        f"快照 **{selected_date}** 尚未完成评分（ARF 为空），"
-        f"以下使用最近一个完成评分的快照 **{as_of}**。"
+        tr(
+            f"快照 **{selected_date}** 尚未完成评分（ARF 为空），"
+            f"以下使用最近一个完成评分的快照 **{as_of}**。",
+            f"Snapshot **{selected_date}** has not completed scoring (ARF is empty); "
+            f"using the latest fully scored snapshot **{as_of}** below.",
+        )
     )
 
 try:
@@ -75,20 +97,24 @@ try:
     )
 except Exception as exc:  # noqa: BLE001 — the page must explain a broken install
     st.error(
-        "AI CIO 依赖未安装：需要 `aihf`（ai-hedge-fund）。"
-        f"请安装 `pip install -e '.[webapp]'` 后重试。\n\n`{exc}`"
+        tr(
+            "AI CIO 依赖未安装：需要 `aihf`（ai-hedge-fund）。"
+            f"请安装 `pip install -e '.[webapp]'` 后重试。\n\n`{exc}`",
+            "AI CIO dependencies are not installed: `aihf` (ai-hedge-fund) is required. "
+            f"Install with `pip install -e '.[webapp]'` and retry.\n\n`{exc}`",
+        )
     )
     st.stop()
 
 mandate_path = default_mandate_path()
 if not mandate_path.exists():
-    st.error(f"找不到 ARF 委托文件：{mandate_path}")
+    st.error(tr(f"找不到 ARF 委托文件：{mandate_path}", f"ARF mandate file not found: {mandate_path}"))
     st.stop()
 
 try:
     spec = load_spec(mandate_path)
 except Exception as exc:  # noqa: BLE001
-    st.error(f"无法加载基金委托 ({mandate_path}): {exc}")
+    st.error(tr(f"无法加载基金委托 ({mandate_path}): {exc}", f"Unable to load fund mandate ({mandate_path}): {exc}"))
     st.stop()
 
 
@@ -153,24 +179,29 @@ coverage_ends = [
 ]
 if not coverage_ends:
     end_iso = as_of.isoformat()
-    st.error("所选区间没有美股日线数据，回放无法运行。")
+    st.error(tr("所选区间没有美股日线数据，回放无法运行。", "No US daily bars in the selected window; the replay cannot run."))
 else:
     end_iso = pd.Timestamp(min(coverage_ends)).date().isoformat()
     if end_iso < as_of.isoformat():
-        st.caption(f"美股日线覆盖至 **{end_iso}**（快照日 {as_of}），回放在此截止。")
+        st.caption(
+            tr(
+                f"美股日线覆盖至 **{end_iso}**（快照日 {as_of}），回放在此截止。",
+                f"US daily bars cover through **{end_iso}** (snapshot date {as_of}); the replay ends there.",
+            )
+        )
     try:
         benchmark = _cached_benchmark(start_iso, end_iso)
         if benchmark is None or benchmark.empty:
             raise RuntimeError("SPY 没有返回任何交易日")
         prices["SPY"] = benchmark
     except Exception as exc:  # noqa: BLE001 — a missing benchmark blocks the replay
-        st.error(f"无法获取 SPY 基准数据，回放暂停：{exc}")
+        st.error(tr(f"无法获取 SPY 基准数据，回放暂停：{exc}", f"Unable to fetch SPY benchmark data; replay paused: {exc}"))
 
 replay = None
 cockpit = None
 if "SPY" in prices and universe and end_iso >= start_iso:
     try:
-        with st.spinner("正在回放 ARF Thematic 委托…"):
+        with st.spinner(tr("正在回放 ARF Thematic 委托…", "Replaying the ARF Thematic mandate…")):
             replay = _cached_replay(
                 data.load_snapshot_history(),
                 tuple(sorted(prices.items())),
@@ -182,7 +213,7 @@ if "SPY" in prices and universe and end_iso >= start_iso:
             )
             cockpit = build_cockpit(replay, snapshot_df=snapshot_df, spec_path=mandate_path)
     except Exception as exc:  # noqa: BLE001 — surface the real failure
-        st.error(f"回放失败：{exc}")
+        st.error(tr(f"回放失败：{exc}", f"Replay failed: {exc}"))
 
 
 # ---------------------------------------------------------------------------
@@ -194,106 +225,137 @@ kpis = cockpit.kpis if cockpit is not None else {}
 col1, col2, col3, col4, col5, col6 = st.columns(6)
 with col1:
     st.metric(
-        "💰 基金总净值 (NAV)",
+        tr("💰 基金总净值 (NAV)", "💰 Fund NAV"),
         f"${kpis['nav']:,.0f}" if kpis else "—",
         f"{kpis['total_return']:+.2%}" if kpis else None,
-        help="回放窗口期末清算资产总值",
+        help=tr("回放窗口期末清算资产总值", "Total liquidation value at the end of the replay window"),
     )
 with col2:
     st.metric(
-        "💵 现金储备",
+        tr("💵 现金储备", "💵 Cash Reserve"),
         f"${kpis['cash']:,.0f}" if kpis else "—",
         f"{kpis['cash_pct']:.1%}" if kpis and kpis.get("cash_pct") is not None else None,
-        help="现金 / NAV",
+        help=tr("现金 / NAV", "Cash / NAV"),
     )
 with col3:
     st.metric(
-        "⚖️ 净敞口",
+        tr("⚖️ 净敞口", "⚖️ Net Exposure"),
         f"{kpis['net_exposure']:+.1%}" if kpis and kpis.get("net_exposure") is not None else "—",
         f"Gross {kpis['gross_exposure']:.1%}" if kpis and kpis.get("gross_exposure") is not None else None,
-        help="多头市值减空头市值；括号内为总敞口",
+        help=tr("多头市值减空头市值；括号内为总敞口", "Long market value minus short market value; gross exposure shown as delta"),
     )
 with col4:
     st.metric(
-        "🎯 超额收益 (Alpha)",
+        tr("🎯 超额收益 (Alpha)", "🎯 Excess Return (Alpha)"),
         f"{kpis['excess_return']:+.2%}" if kpis else "—",
         f"vs SPY {kpis['benchmark_return']:+.2%}" if kpis else None,
-        help="基金总收益减去基准总收益",
+        help=tr("基金总收益减去基准总收益", "Fund total return minus benchmark total return"),
     )
 with col5:
     st.metric(
-        "📊 夏普比率",
+        tr("📊 夏普比率", "📊 Sharpe Ratio"),
         f"{kpis['sharpe']:.2f}" if kpis else "—",
-        "年化",
-        help="年化超额回报 / 波动率 (Sharpe ratio)",
+        tr("年化", "Annualized"),
+        help=tr("年化超额回报 / 波动率 (Sharpe ratio)", "Annualized excess return / volatility (Sharpe ratio)"),
     )
 with col6:
     st.metric(
-        "🛡️ 最大回撤",
+        tr("🛡️ 最大回撤", "🛡️ Max Drawdown"),
         f"{kpis['max_drawdown']:.2%}" if kpis else "—",
-        f"{kpis['n_cycles']} 次调仓" if kpis else None,
-        help="回放窗口内的峰谷回撤",
+        tr(f"{kpis['n_cycles']} 次调仓", f"{kpis['n_cycles']} rebalances") if kpis else None,
+        help=tr("回放窗口内的峰谷回撤", "Peak-to-trough drawdown within the replay window"),
     )
 
 if cockpit is not None:
     st.caption(
-        f"回放窗口 {start_iso} → {end_iso} · 最后交易日 **{cockpit.last_session}** · "
-        f"{kpis.get('n_orders', 0)} 笔成交"
+        tr(
+            f"回放窗口 {start_iso} → {end_iso} · 最后交易日 **{cockpit.last_session}** · "
+            f"{kpis.get('n_orders', 0)} 笔成交",
+            f"Replay window {start_iso} → {end_iso} · Last session **{cockpit.last_session}** · "
+            f"{kpis.get('n_orders', 0)} fills",
+        )
     )
 
 st.divider()
 
 tab_regime, tab_barometer, tab_book, tab_rebalance, tab_scorecard, tab_control = st.tabs([
-    "🌐 宏观政体与 Pod 资本分配",
-    "🔮 预测晴雨表与前瞻 Alpha",
-    "📚 投资组合底仓与价值链结构",
-    "📋 调仓指令与风控熔断",
-    "🏆 分析师与策略计分卡",
-    "🎮 CIO 指挥中心与数据同步",
+    tr("🌐 宏观政体与 Pod 资本分配", "🌐 Macro Regime & Pod Capital Allocation"),
+    tr("🔮 预测晴雨表与前瞻 Alpha", "🔮 Predictive Barometer & Forward Alpha"),
+    tr("📚 投资组合底仓与价值链结构", "📚 Portfolio Book & Value Chain Structure"),
+    tr("📋 调仓指令与风控熔断", "📋 Rebalance Orders & Risk Clamps"),
+    tr("🏆 分析师与策略计分卡", "🏆 Analyst & Strategy Scorecard"),
+    tr("🎮 CIO 指挥中心与数据同步", "🎮 CIO Control Center & Data Sync"),
 ])
 
 # ── TAB 1: 宏观政体与 Pod 资本分配 ───────────────────────────────────────────
 with tab_regime:
-    st.subheader("🌐 AI 产业宏观估值政体 (Macro AI Valuation Regime)")
+    st.subheader(tr("🌐 AI 产业宏观估值政体 (Macro AI Valuation Regime)", "🌐 Macro AI Valuation Regime"))
 
     try:
         regime = data.load_regime_stats(as_of)
     except Exception as exc:  # noqa: BLE001
         regime = None
-        st.error(f"无法读取泡沫温度计：{exc}")
+        st.error(tr(f"无法读取泡沫温度计：{exc}", f"Unable to read the bubble thermometer: {exc}"))
 
     regime_col1, regime_col2 = st.columns([2, 3])
     with regime_col1:
-        st.markdown("#### 🌡️ 泡沫温度计与估值状态")
+        st.markdown(tr("#### 🌡️ 泡沫温度计与估值状态", "#### 🌡️ Bubble Thermometer & Valuation Regime"))
         if regime and regime["total_scored"]:
             froth_count = regime["froth_count"]
             median_gap = regime["median_gap"] or 0.0
             is_frothy = froth_count >= 3 or median_gap > 0.05
             if is_frothy:
                 st.warning(
-                    f"⚠️ **高泡沫警报期 (Elevated Froth Regime)**: 检测到 {froth_count} 只股票触发 "
-                    f"Froth Flag，中位数隐含增长差额为 {median_gap:+.1%}。"
+                    tr(
+                        f"⚠️ **高泡沫警报期 (Elevated Froth Regime)**: 检测到 {froth_count} 只股票触发 "
+                        f"Froth Flag，中位数隐含增长差额为 {median_gap:+.1%}。",
+                        f"⚠️ **Elevated Froth Regime**: {froth_count} tickers triggered the "
+                        f"Froth Flag; the median implied growth gap is {median_gap:+.1%}.",
+                    )
                 )
-                rec_text = "CIO 建议：提高美元中性对冲比例，加大 D1 极度拉伸标的做空权重，严控多头单票上限。"
+                rec_text = tr(
+                    "CIO 建议：提高美元中性对冲比例，加大 D1 极度拉伸标的做空权重，严控多头单票上限。",
+                    "CIO recommendation: raise the USD-neutral hedge ratio, increase short weight "
+                    "on D1 extreme-stretch names, and cap single-name long exposure.",
+                )
             else:
                 st.success(
-                    f"💎 **理性复利增长期 (Compounder Regime)**: 泡沫警报数 {froth_count} 只，"
-                    f"估值拉伸中位数 {median_gap:+.1%}，基本面韧性良好。"
+                    tr(
+                        f"💎 **理性复利增长期 (Compounder Regime)**: 泡沫警报数 {froth_count} 只，"
+                        f"估值拉伸中位数 {median_gap:+.1%}，基本面韧性良好。",
+                        f"💎 **Compounder Regime**: {froth_count} froth warnings, median "
+                        f"valuation stretch {median_gap:+.1%}, with solid fundamental resilience.",
+                    )
                 )
-                rec_text = "CIO 建议：保持 ARF Thematic 多头优质高 ROE 标的分配，对冲低效产能资产。"
+                rec_text = tr(
+                    "CIO 建议：保持 ARF Thematic 多头优质高 ROE 标的分配，对冲低效产能资产。",
+                    "CIO recommendation: maintain ARF Thematic long allocations to quality, "
+                    "high-ROE names and hedge inefficient-capacity assets.",
+                )
             st.info(rec_text)
-            st.markdown(f"""
+            st.markdown(
+                tr(
+                    f"""
             - **核心组合已覆盖 AI 标的**: {regime['total_scored']} 只
             - **触发 Froth Flag 泡沫警报**: {froth_count} 只
             - **DCF 逆向隐含增长差额 (g* vs 预期)**: {median_gap:+.1%}
             - **核心组合 ARF 平均得分**: {regime['avg_arf']:.1f} / 100
             - **统计快照日**: {regime['snapshot_date']}
-            """)
+            """,
+                    f"""
+            - **AI names covered in the core portfolio**: {regime['total_scored']}
+            - **Froth Flag warnings triggered**: {froth_count}
+            - **Reverse-DCF implied growth gap (g* vs consensus)**: {median_gap:+.1%}
+            - **Average ARF score of the core portfolio**: {regime['avg_arf']:.1f} / 100
+            - **Snapshot date**: {regime['snapshot_date']}
+            """,
+                )
+            )
         else:
-            st.info("所选日期没有可用的核心组合评分。")
+            st.info(tr("所选日期没有可用的核心组合评分。", "No core-portfolio scores are available for the selected date."))
 
     with regime_col2:
-        st.markdown("#### 🍰 多策略 Pod 资本分配权重 (Capital Slices)")
+        st.markdown(tr("#### 🍰 多策略 Pod 资本分配权重 (Capital Slices)", "#### 🍰 Multi-Strategy Pod Capital Slices"))
         pod_df = pd.DataFrame([
             {
                 "Pod": strategy.display_name or strategy.name,
@@ -322,12 +384,20 @@ with tab_regime:
 
 # ── TAB 2: 预测晴雨表与前瞻 Alpha ──────────────────────────────────────────
 with tab_barometer:
-    st.subheader("🔮 4 层前瞻预测晴雨表与机会雷达 (Predictive Barometer)")
+    st.subheader(tr("🔮 4 层前瞻预测晴雨表与机会雷达 (Predictive Barometer)", "🔮 4-Layer Predictive Barometer & Opportunity Radar"))
     st.markdown(
-        """
+        tr(
+            """
         > **从滞后温度计到前瞻晴雨表**：传统 ARF 温度计仅测量市场*已经定价了多少*（Trailing FCF 逆向 DCF）；
         > 4 层前瞻晴雨表系统性预测**未来 1–4 个季度的超预期弹性 (Alpha)**，在财报披露前 6 周捕获一致预期修正动能。
-        """
+        """,
+            """
+        > **From a lagging thermometer to a forward barometer**: the traditional ARF thermometer only measures
+        > *how much the market has already priced* (trailing FCF reverse DCF); the 4-layer forward barometer
+        > systematically forecasts **earnings-surprise elasticity (Alpha) over the next 1–4 quarters**, capturing
+        > consensus-revision momentum 6 weeks ahead of earnings releases.
+        """,
+        )
     )
 
     # Point-in-time: never borrow the newest date's forecasts for a past
@@ -336,45 +406,74 @@ with tab_barometer:
     fc_df = data.ensure_forecasts(as_of)
 
     # 1. CapEx 传导与供应链瓶颈敏感性沙盒 (Interactive Sandbox)
-    with st.expander("🛠️ 下游云厂商 CapEx 传导与物理产能瓶颈压力测试 (Interactive CapEx Shock Simulator)", expanded=False):
+    with st.expander(
+        tr(
+            "🛠️ 下游云厂商 CapEx 传导与物理产能瓶颈压力测试 (Interactive CapEx Shock Simulator)",
+            "🛠️ Downstream Hyperscaler CapEx Transmission & Physical Capacity Bottleneck Stress Test "
+            "(Interactive CapEx Shock Simulator)",
+        ),
+        expanded=False,
+    ):
         sim_col1, sim_col2, sim_col3 = st.columns([2, 2, 2])
         with sim_col1:
             capex_shock = st.slider(
-                "☁️ 下游云巨头 (MSFT/GOOGL/META) CapEx 变动冲击",
+                tr(
+                    "☁️ 下游云巨头 (MSFT/GOOGL/META) CapEx 变动冲击",
+                    "☁️ Downstream Hyperscaler (MSFT/GOOGL/META) CapEx Shock",
+                ),
                 min_value=-30,
                 max_value=60,
                 value=0,
                 step=5,
                 format="%+d%%",
-                help="调整下游 Hyperscaler 算力资本开支假设，实时传导至中上游硬件与光模块供应商",
+                help=tr(
+                    "调整下游 Hyperscaler 算力资本开支假设，实时传导至中上游硬件与光模块供应商",
+                    "Adjust downstream hyperscaler compute capex assumptions and transmit them in "
+                    "real time to midstream/upstream hardware and optical-module suppliers",
+                ),
             )
         with sim_col2:
             capacity_cap = st.slider(
-                "🏭 晶圆/先进封装 (CoWoS) 物理产能扩张上限",
+                tr(
+                    "🏭 晶圆/先进封装 (CoWoS) 物理产能扩张上限",
+                    "🏭 Wafer / Advanced Packaging (CoWoS) Physical Capacity Ceiling",
+                ),
                 min_value=20,
                 max_value=120,
                 value=100,
                 step=10,
                 format="%d%%",
-                help="Leontief 瓶颈夹钳：物理产能上限硬性截断名义需求拉动，防止虚假高增长（100% = 不截断基准预测）",
+                help=tr(
+                    "Leontief 瓶颈夹钳：物理产能上限硬性截断名义需求拉动，防止虚假高增长（100% = 不截断基准预测）",
+                    "Leontief bottleneck clamp: the physical capacity ceiling hard-caps nominal demand "
+                    "pull to prevent spurious growth (100% = no clamp on the baseline forecast)",
+                ),
             )
         with sim_col3:
             if capex_shock > 0:
-                sim_state = "正向拉动"
+                sim_state = tr("正向拉动", "Positive Pull")
             elif capex_shock < 0:
-                sim_state = "削减承压"
+                sim_state = tr("削减承压", "Capex Cut Pressure")
             elif capacity_cap < 100:
-                sim_state = "产能约束"
+                sim_state = tr("产能约束", "Capacity Constrained")
             else:
-                sim_state = "基准中性"
+                sim_state = tr("基准中性", "Baseline Neutral")
             st.metric(
-                "📡 传导效应状态",
+                tr("📡 传导效应状态", "📡 Transmission State"),
                 sim_state,
-                f"冲击 {capex_shock:+d}% / 产能截断 {capacity_cap}%",
+                tr(
+                    f"冲击 {capex_shock:+d}% / 产能截断 {capacity_cap}%",
+                    f"Shock {capex_shock:+d}% / capacity clamp {capacity_cap}%",
+                ),
             )
 
     # ── AI-CIO Autonomous Decision Packet & Thesis Watchdog ───────────────────
-    st.markdown("#### 📬 AI-CIO 自主决策简报与持仓哨兵 (Autonomous Decision Packet & Thesis Watchdog)")
+    st.markdown(
+        tr(
+            "#### 📬 AI-CIO 自主决策简报与持仓哨兵 (Autonomous Decision Packet & Thesis Watchdog)",
+            "#### 📬 AI-CIO Autonomous Decision Packet & Thesis Watchdog",
+        )
+    )
 
     held_list = None
     if cockpit is not None and not cockpit.positions.empty and "代码" in cockpit.positions.columns:
@@ -417,11 +516,18 @@ with tab_barometer:
 
         # 1. Display Watchdog Alerts
         if packet.watchdog_alerts:
-            st.markdown(f"**⚠️ 哨兵触发告警 ({len(packet.watchdog_alerts)} 项)**")
+            st.markdown(
+                tr(
+                    f"**⚠️ 哨兵触发告警 ({len(packet.watchdog_alerts)} 项)**",
+                    f"**⚠️ Watchdog Alerts Triggered ({len(packet.watchdog_alerts)})**",
+                )
+            )
             for alert in packet.watchdog_alerts:
-                alert_text = (
+                alert_text = tr(
                     f"**[{alert.severity}] {alert.ticker} ({alert.name})** — `{alert.alert_type}`: "
-                    f"{alert.triggered_rule} (当前值: `{alert.current_value}`) ➔ **建议: {alert.recommended_action}**"
+                    f"{alert.triggered_rule} (当前值: `{alert.current_value}`) ➔ **建议: {alert.recommended_action}**",
+                    f"**[{alert.severity}] {alert.ticker} ({alert.name})** — `{alert.alert_type}`: "
+                    f"{alert.triggered_rule} (current: `{alert.current_value}`) ➔ **Rec: {alert.recommended_action}**",
                 )
                 if alert.severity == "CRITICAL":
                     st.error(alert_text)
@@ -430,41 +536,58 @@ with tab_barometer:
                 else:
                     st.info(alert_text)
         else:
-            st.success("✅ 持仓哨兵监测中：未触发定量证伪规则 (Kill Conditions) 或估值泡沫熔断。")
+            st.success(
+                tr(
+                    "✅ 持仓哨兵监测中：未触发定量证伪规则 (Kill Conditions) 或估值泡沫熔断。",
+                    "✅ Position watchdog active: no quantitative falsification rules (Kill Conditions) "
+                    "or valuation froth circuit breakers triggered.",
+                )
+            )
 
         # 2. Display Proposals Table
         if packet.proposals:
-            st.markdown(f"**🎯 自主交易决策建议 ({len(packet.proposals)} 项提案)**")
+            st.markdown(
+                tr(
+                    f"**🎯 自主交易决策建议 ({len(packet.proposals)} 项提案)**",
+                    f"**🎯 Autonomous Trade Proposals ({len(packet.proposals)})**",
+                )
+            )
             prop_rows = []
             for p in packet.proposals:
                 kills_str = "; ".join(f"{kc.metric} {kc.operator} {kc.threshold}" for kc in p.kill_conditions[:2])
                 b_val = _num(p.expected_beat_pct)
                 r_val = _num(p.expected_return_p50)
                 prop_rows.append({
-                    "标的代码": p.ticker,
-                    "公司": p.name,
-                    "区域/层级": f"{p.leg} / {p.layer}",
-                    "执行动作": p.action,
-                    "置信度": f"{p.conviction:+.2f}",
-                    "预期超额差 (Beat)": f"{b_val:+.1%}" if b_val is not None else "—",
-                    "12M P50 空间": f"{r_val:+.1%}" if r_val is not None else "—",
-                    "G1–G4 门禁裁决": p.gate_verdict,
-                    "证伪条件 (Kill Conditions)": kills_str,
-                    "决策论证": p.rationale,
+                    tr("标的代码", "Ticker"): p.ticker,
+                    tr("公司", "Company"): p.name,
+                    tr("区域/层级", "Leg / Layer"): f"{p.leg} / {p.layer}",
+                    tr("执行动作", "Action"): p.action,
+                    tr("置信度", "Conviction"): f"{p.conviction:+.2f}",
+                    tr("预期超额差 (Beat)", "Expected Beat"): f"{b_val:+.1%}" if b_val is not None else "—",
+                    tr("12M P50 空间", "12M P50 Upside"): f"{r_val:+.1%}" if r_val is not None else "—",
+                    tr("G1–G4 门禁裁决", "G1–G4 Gate Verdict"): p.gate_verdict,
+                    tr("证伪条件 (Kill Conditions)", "Kill Conditions"): kills_str,
+                    tr("决策论证", "Rationale"): p.rationale,
                 })
             st.dataframe(pd.DataFrame(prop_rows), use_container_width=True, hide_index=True)
 
         # 3. Full Markdown Brief Expander
-        with st.expander("📄 查看 / 导出完整 AI-CIO 机构简报 (Markdown Decision Packet)", expanded=False):
+        with st.expander(
+            tr(
+                "📄 查看 / 导出完整 AI-CIO 机构简报 (Markdown Decision Packet)",
+                "📄 View / Export Full AI-CIO Institutional Brief (Markdown Decision Packet)",
+            ),
+            expanded=False,
+        ):
             st.markdown(packet.markdown_brief)
             st.download_button(
-                label="📥 下载 Markdown 决策简报",
+                label=tr("📥 下载 Markdown 决策简报", "📥 Download Markdown Decision Brief"),
                 data=packet.markdown_brief,
                 file_name=f"{packet.packet_id}.md",
                 mime="text/markdown",
             )
     except Exception as exc:
-        st.warning(f"自主 CIO 决策简报引擎运行提示: {exc}")
+        st.warning(tr(f"自主 CIO 决策简报引擎运行提示: {exc}", f"Autonomous CIO decision-brief engine notice: {exc}"))
 
     if not fc_df.empty:
         display_df = fc_df.copy()
@@ -521,7 +644,12 @@ with tab_barometer:
             merged_radar["expected_beat_pct"] = pd.to_numeric(merged_radar["expected_beat_pct"], errors="coerce").fillna(0.0)
             merged_radar["eps_surprise_prob"] = pd.to_numeric(merged_radar["eps_surprise_prob"], errors="coerce").fillna(0.5)
 
-            st.markdown("#### 🎯 前瞻业绩超越预期 vs 滞后估值倍数 (Alpha Opportunity Radar)")
+            st.markdown(
+                tr(
+                    "#### 🎯 前瞻业绩超越预期 vs 滞后估值倍数 (Alpha Opportunity Radar)",
+                    "#### 🎯 Forward Earnings Beat vs Lagging Valuation Multiple (Alpha Opportunity Radar)",
+                )
+            )
             fig_radar = px.scatter(
                 merged_radar,
                 x="v_score",
@@ -532,9 +660,16 @@ with tab_barometer:
                 hover_data=["predicted_rev_growth", "fair_value_p50", "expected_return_p50"],
                 color_continuous_scale=["#f87171", "#fbbf24", "#34d399"],
                 labels={
-                    "v_score": "滞后估值拉伸 (V-score 0-100)",
-                    "expected_beat_pct": "前瞻超越一致预期幅度 (ĝ_ARF - Consensus)",
-                    "eps_surprise_prob": "超预期胜率",
+                    "ticker": tr("标的代码", "Ticker"),
+                    "v_score": tr("滞后估值拉伸 (V-score 0-100)", "Lagging Valuation Stretch (V-score 0-100)"),
+                    "expected_beat_pct": tr(
+                        "前瞻超越一致预期幅度 (ĝ_ARF - Consensus)",
+                        "Forward Beat vs Consensus (ĝ_ARF - Consensus)",
+                    ),
+                    "eps_surprise_prob": tr("超预期胜率", "Surprise Hit Rate"),
+                    "predicted_rev_growth": tr("L1 预测营收增速 (ĝ)", "L1 Forecast Revenue Growth (ĝ)"),
+                    "fair_value_p50": tr("基准估值 (P50)", "Base Fair Value (P50)"),
+                    "expected_return_p50": tr("12月空间 (P50)", "12M Upside (P50)"),
                 },
             )
             fig_radar.add_hline(y=0.0, line_dash="dash", line_color="rgba(148, 163, 184, 0.4)")
@@ -549,7 +684,12 @@ with tab_barometer:
             st.plotly_chart(fig_radar, use_container_width=True)
 
         # 3. 4-Layer Multi-Horizon Metrics Table
-        st.markdown("#### 📑 4 层全景预测明细表 (Multi-Horizon Forecast Fan)")
+        st.markdown(
+            tr(
+                "#### 📑 4 层全景预测明细表 (Multi-Horizon Forecast Fan)",
+                "#### 📑 4-Layer Multi-Horizon Forecast Fan",
+            )
+        )
         table_cols = [
             "ticker", "predicted_rev_growth", "consensus_rev_growth",
             "expected_beat_pct", "eps_surprise_prob", "revision_velocity_14d",
@@ -578,36 +718,69 @@ with tab_barometer:
                 ]
 
         rename_dict = {
-            "ticker": "标的代码",
-            "predicted_rev_growth": "L1 预测营收增速 (ĝ)",
-            "consensus_rev_growth": "卖方一致增速",
-            "expected_beat_pct": "预期超额差 (Beat)",
-            "eps_surprise_prob": "L2 超预期胜率",
-            "revision_velocity_14d": "14天修正动能",
-            "fair_value_p10": "L3 悲观估值 (P10)",
-            "fair_value_p50": "基准估值 (P50)",
-            "fair_value_p90": "乐观估值 (P90)",
-            "expected_return_p50": "12月空间 (P50)",
-            "regime_breakout_prob": "L4 筹码突破率",
+            "ticker": tr("标的代码", "Ticker"),
+            "predicted_rev_growth": tr("L1 预测营收增速 (ĝ)", "L1 Forecast Revenue Growth (ĝ)"),
+            "consensus_rev_growth": tr("卖方一致增速", "Consensus Revenue Growth"),
+            "expected_beat_pct": tr("预期超额差 (Beat)", "Expected Beat"),
+            "eps_surprise_prob": tr("L2 超预期胜率", "L2 Surprise Hit Rate"),
+            "revision_velocity_14d": tr("14天修正动能", "14D Revision Velocity"),
+            "fair_value_p10": tr("L3 悲观估值 (P10)", "L3 Bear Fair Value (P10)"),
+            "fair_value_p50": tr("基准估值 (P50)", "Base Fair Value (P50)"),
+            "fair_value_p90": tr("乐观估值 (P90)", "L3 Bull Fair Value (P90)"),
+            "expected_return_p50": tr("12月空间 (P50)", "12M Upside (P50)"),
+            "regime_breakout_prob": tr("L4 筹码突破率", "L4 Regime Breakout Rate"),
         }
         view_df = view_df.rename(columns=rename_dict)
-        st.caption("估值列以各标的的**交易本币**计价（A 股 ¥ / 港股 HK$ / 美股 $）。")
+        st.caption(
+            tr(
+                "估值列以各标的的**交易本币**计价（A 股 ¥ / 港股 HK$ / 美股 $）。",
+                "Valuation columns are quoted in each ticker's **trading currency** "
+                "(A-shares ¥ / HK stocks HK$ / US stocks $).",
+            )
+        )
         st.dataframe(view_df, use_container_width=True, hide_index=True)
     else:
-        st.info("当前快照日暂无前瞻预测晴雨表数据，请在【CIO 指挥中心】运行预测管线。")
+        st.info(
+            tr(
+                "当前快照日暂无前瞻预测晴雨表数据，请在【CIO 指挥中心】运行预测管线。",
+                "No predictive barometer data for this snapshot date. Run the forecast pipeline "
+                "from the [CIO Control Center] tab.",
+            )
+        )
 
 # ── TAB 3: 投资组合持仓与价值链结构 ───────────────────────────────────────────
 with tab_book:
-    st.subheader("📚 基金活跃持仓与 5 层价值链分布 (Current Book)")
+    st.subheader(tr("📚 基金活跃持仓与 5 层价值链分布 (Current Book)", "📚 Active Portfolio Book & 5-Layer Value Chain Distribution"))
     if cockpit is None or cockpit.positions.empty:
-        st.info("没有可展示的持仓：回放尚未完成。")
+        st.info(tr("没有可展示的持仓：回放尚未完成。", "No positions to show: the replay has not completed."))
     else:
-        st.markdown(f"##### 📑 最后交易日持仓 · {cockpit.last_session}")
+        st.markdown(tr(f"##### 📑 最后交易日持仓 · {cockpit.last_session}", f"##### 📑 Positions as of Last Session · {cockpit.last_session}"))
         shown = cockpit.positions.copy()
         shown["组合权重"] = shown["组合权重"].map(lambda v: f"{v:+.1%}")
+        if is_en:
+            shown = shown.replace({
+                "⚠️ 超限": "⚠️ Breach",
+                "✅ 达标": "✅ Within Limit",
+            })
+            shown = shown.rename(columns={
+                "代码": "Ticker",
+                "公司": "Company",
+                "方向": "Side",
+                "层级": "Layer",
+                "持股数": "Shares",
+                "收盘价": "Close",
+                "持仓市值 ($)": "Market Value ($)",
+                "组合权重": "Portfolio Weight",
+                "单票上限 (20%)": "Single-Name Cap (20%)",
+            })
         st.dataframe(shown, use_container_width=True, hide_index=True)
 
-        st.markdown("##### 🍰 Jensen Huang 5 层价值链风险暴露")
+        st.markdown(
+            tr(
+                "##### 🍰 Jensen Huang 5 层价值链风险暴露",
+                "##### 🍰 Jensen Huang 5-Layer Value Chain Exposure",
+            )
+        )
         fig_bar = px.bar(
             cockpit.layer_exposure,
             x="Layer",
@@ -626,43 +799,79 @@ with tab_book:
 
 # ── TAB 3: 调仓指令与风控熔断 ────────────────────────────────────────────────
 with tab_rebalance:
-    st.subheader("📋 调仓指令与风控审计 (T+1 Execution Pipeline)")
+    st.subheader(tr("📋 调仓指令与风控审计 (T+1 Execution Pipeline)", "📋 Rebalance Orders & Risk Audit (T+1 Execution Pipeline)"))
     if cockpit is None:
-        st.info("没有可展示的调仓记录：回放尚未完成。")
+        st.info(tr("没有可展示的调仓记录：回放尚未完成。", "No rebalance records to show: the replay has not completed."))
     else:
         st.markdown(
-            "根据 **Decide at T, Execute at T+1** 铁律，以下订单来自回放引擎的实际决策与撮合记录："
+            tr(
+                "根据 **Decide at T, Execute at T+1** 铁律，以下订单来自回放引擎的实际决策与撮合记录：",
+                "Under the **Decide at T, Execute at T+1** rule, the orders below come from the replay "
+                "engine's actual decisions and fills:",
+            )
         )
         col_orders, col_clamps = st.columns([3, 2])
         with col_orders:
-            st.markdown("##### 🎯 报单票据 (Orders)")
+            st.markdown(tr("##### 🎯 报单票据 (Orders)", "##### 🎯 Order Tickets (Orders)"))
             if cockpit.order_note:
-                st.caption(cockpit.order_note)
+                order_note = cockpit.order_note
+                if is_en:
+                    order_note = order_note.replace("待执行决策", "Pending decision").replace(
+                        "最近一次已执行调仓", "Last executed rebalance"
+                    )
+                st.caption(order_note)
             if cockpit.staged_orders.empty:
-                st.info("该交易日没有产生订单。")
+                st.info(tr("该交易日没有产生订单。", "No orders were generated on this session."))
             else:
-                st.dataframe(cockpit.staged_orders, use_container_width=True, hide_index=True)
+                orders_display = cockpit.staged_orders
+                if is_en:
+                    orders_display = orders_display.rename(columns={
+                        "代码": "Ticker",
+                        "操作": "Side",
+                        "数量": "Quantity",
+                        "预估成交价": "Est. Fill Price",
+                        "金额 ($)": "Notional ($)",
+                        "目标权重": "Target Weight",
+                    })
+                st.dataframe(orders_display, use_container_width=True, hide_index=True)
         with col_clamps:
-            st.markdown("##### 🛡️ 主风控硬阈值触发日志 (Risk Clamps)")
+            st.markdown(tr("##### 🛡️ 主风控硬阈值触发日志 (Risk Clamps)", "##### 🛡️ Main Risk Hard-Limit Trigger Log (Risk Clamps)"))
             if cockpit.clamps.empty:
-                st.info("该周期没有触发风控阈值。")
+                st.info(tr("该周期没有触发风控阈值。", "No risk limits were triggered in this period."))
             else:
                 st.dataframe(cockpit.clamps, use_container_width=True, hide_index=True)
         for note in cockpit.notes:
-            st.caption(f"ℹ️ {note}")
+            note_text = note
+            if is_en:
+                note_text = note_text.replace(
+                    "回放窗口在两次调仓之间结束；订单表显示最近一次已执行调仓。",
+                    "The replay window ended between rebalances; the order table shows the last executed rebalance.",
+                ).replace("计分卡不可用：", "Scorecard unavailable: ")
+            st.caption(f"ℹ️ {note_text}")
 
 # ── TAB 4: 分析师与策略计分卡 ────────────────────────────────────────────────
 with tab_scorecard:
-    st.subheader("🏆 分析师与策略量化计分卡 (Scorecard)")
-    st.caption("基于回放期间的前瞻预测与实际价格反馈（无前视偏误）统计：")
+    st.subheader(tr("🏆 分析师与策略量化计分卡 (Scorecard)", "🏆 Analyst & Strategy Quantitative Scorecard"))
+    st.caption(
+        tr(
+            "基于回放期间的前瞻预测与实际价格反馈（无前视偏误）统计：",
+            "Computed from forward forecasts and realized price feedback during the replay (no look-ahead bias):",
+        )
+    )
 
     scorecard = cockpit.scorecard if cockpit is not None else None
     if scorecard is None:
-        st.info("计分卡不可用：回放尚未完成，或窗口内没有足够的决策记录。")
+        st.info(
+            tr(
+                "计分卡不可用：回放尚未完成，或窗口内没有足够的决策记录。",
+                "Scorecard unavailable: the replay has not completed, or there are not enough "
+                "decision records in the window.",
+            )
+        )
     else:
         col_analyst, col_strat = st.columns(2)
         with col_analyst:
-            st.markdown("##### 🧑‍💼 分析师能力评估 (Analyst Performance)")
+            st.markdown(tr("##### 🧑‍💼 分析师能力评估 (Analyst Performance)", "##### 🧑‍💼 Analyst Performance"))
             analysts_score = pd.DataFrame([
                 {
                     "Analyst": row.name,
@@ -682,7 +891,7 @@ with tab_scorecard:
                 hide_index=True,
             )
         with col_strat:
-            st.markdown("##### 💼 策略 Pod 盈亏归因 (Strategy Attribution)")
+            st.markdown(tr("##### 💼 策略 Pod 盈亏归因 (Strategy Attribution)", "##### 💼 Strategy Pod P&L Attribution"))
             strategy_score = pd.DataFrame([
                 {
                     "Strategy": row.name,
@@ -705,22 +914,28 @@ with tab_scorecard:
 
 # ── TAB 5: CIO 指挥中心与数据同步 ────────────────────────────────────────────
 with tab_control:
-    st.subheader("🎮 CIO 控制中心与数据同步 (Control Center)")
-    st.caption("生产环境的数据源是 GCS 中的权威 arf.db；Lighthouse 定时把中国腿推送进同一对象。")
+    st.subheader(tr("🎮 CIO 控制中心与数据同步 (Control Center)", "🎮 CIO Control Center & Data Sync"))
+    st.caption(
+        tr(
+            "生产环境的数据源是 GCS 中的权威 arf.db；Lighthouse 定时把中国腿推送进同一对象。",
+            "In production the source of truth is the authoritative arf.db in GCS; Lighthouse "
+            "pushes the China leg into the same object on a schedule.",
+        )
+    )
 
     st.session_state.setdefault("cio_halted", False)
     halted = bool(st.session_state["cio_halted"])
 
     if halted:
-        st.error("🛑 **本会话已冻结**：驾驶舱操作已锁定。解除后需重新运行回放。")
+        st.error(tr("🛑 **本会话已冻结**：驾驶舱操作已锁定。解除后需重新运行回放。", "🛑 **Session frozen**: cockpit operations are locked. Re-run the replay after unfreezing."))
     else:
-        st.success("🟢 **ACTIVE NORMAL**：回放只读运行，未发现挂起风控违规。")
+        st.success(tr("🟢 **ACTIVE NORMAL**：回放只读运行，未发现挂起风控违规。", "🟢 **ACTIVE NORMAL**: replay running read-only; no pending risk violations found."))
 
     try:
         freshness = data.load_data_freshness()
     except Exception as exc:  # noqa: BLE001
         freshness = {"legs": {}, "runs": {}}
-        st.warning(f"无法读取数据新鲜度：{exc}")
+        st.warning(tr(f"无法读取数据新鲜度：{exc}", f"Unable to read data freshness: {exc}"))
 
     from arf.cloud_sync import SyncResult, gcs_blob_info, sync_dual_cloud
 
@@ -731,10 +946,10 @@ with tab_control:
     act_col1, act_col2, act_col3 = st.columns(3)
 
     with act_col1:
-        st.markdown("#### ☁️ 1. 刷新权威数据")
-        st.caption("GCS 模式：丢弃缓存并重新下载权威 arf.db。")
-        if st.button("🔄 刷新数据", use_container_width=True, disabled=halted):
-            with st.spinner("正在刷新…"):
+        st.markdown(tr("#### ☁️ 1. 刷新权威数据", "#### ☁️ 1. Refresh Authoritative Data"))
+        st.caption(tr("GCS 模式：丢弃缓存并重新下载权威 arf.db。", "GCS mode: discard the cache and re-download the authoritative arf.db."))
+        if st.button(tr("🔄 刷新数据", "🔄 Refresh Data"), use_container_width=True, disabled=halted):
+            with st.spinner(tr("正在刷新…", "Refreshing…")):
                 report: dict[str, SyncResult] = {}
                 if os.getenv("DATA_SOURCE", "local").lower() == "gcs":
                     try:
@@ -779,29 +994,43 @@ with tab_control:
         legs = freshness.get("legs", {})
         if legs:
             st.caption(
-                "最新快照 · " + " · ".join(f"{leg}: {latest}" for leg, latest in legs.items())
+                tr("最新快照 · ", "Latest snapshot · ") + " · ".join(f"{leg}: {latest}" for leg, latest in legs.items())
             )
         runs = freshness.get("runs", {})
         if runs:
             st.caption(
-                "最近运行 · " + " · ".join(
+                tr("最近运行 · ", "Latest runs · ") + " · ".join(
                     f"{source}: {started} ({status})"
                     for source, (started, status) in runs.items()
                 )
             )
 
     with act_col2:
-        st.markdown("#### ⚡ 2. 模拟实盘状态")
-        st.caption("本环境未部署持久化 paper fund；驾驶舱展示的是只读回放。")
+        st.markdown(tr("#### ⚡ 2. 模拟实盘状态", "#### ⚡ 2. Paper Trading Status"))
+        st.caption(
+            tr(
+                "本环境未部署持久化 paper fund；驾驶舱展示的是只读回放。",
+                "No persistent paper fund is deployed in this environment; the cockpit shows a read-only replay.",
+            )
+        )
         st.info(
-            "Paper tick 需要 `aihf paper create` 部署的基金目录。"
-            "生产容器没有持久磁盘，因此这里不伪造推进结果。"
+            tr(
+                "Paper tick 需要 `aihf paper create` 部署的基金目录。"
+                "生产容器没有持久磁盘，因此这里不伪造推进结果。",
+                "Paper ticks require a fund directory deployed via `aihf paper create`. "
+                "The production container has no persistent disk, so no advance is faked here.",
+            )
         )
 
     with act_col3:
-        st.markdown("#### 📈 3. 重新回放")
-        st.caption(f"窗口 {start_iso} → {end_iso}，{len(universe)} 只美股 AI 标的。")
-        if st.button("🚀 重新运行回放", use_container_width=True, disabled=halted):
+        st.markdown(tr("#### 📈 3. 重新回放", "#### 📈 3. Re-run Replay"))
+        st.caption(
+            tr(
+                f"窗口 {start_iso} → {end_iso}，{len(universe)} 只美股 AI 标的。",
+                f"Window {start_iso} → {end_iso}, {len(universe)} US AI names.",
+            )
+        )
+        if st.button(tr("🚀 重新运行回放", "🚀 Re-run Replay"), use_container_width=True, disabled=halted):
             st.cache_data.clear()
             st.rerun()
 
@@ -809,11 +1038,11 @@ with tab_control:
         # there are now uploaded back (guarded by the object generation), so
         # the button can persist instead of pretending the write is lost.
         if st.button(
-            "🔮 计算并保存前瞻晴雨表",
+            tr("🔮 计算并保存前瞻晴雨表", "🔮 Compute & Save Predictive Barometer"),
             use_container_width=True,
             disabled=halted,
         ):
-            with st.spinner("正在计算 4 层前瞻预测晴雨表…"):
+            with st.spinner(tr("正在计算 4 层前瞻预测晴雨表…", "Computing the 4-layer predictive barometer…")):
                 from arf.forecast import generate_forecasts_for_universe
                 conn = data.get_conn()
                 generate_forecasts_for_universe(as_of, conn, persist=True)
@@ -822,26 +1051,36 @@ with tab_control:
                 st.rerun()
         if data.DATA_SOURCE == "gcs":
             st.caption(
-                "GCS 模式：前瞻预测在临时副本生成后自动回传 `arf.db`；"
-                "若管线已写入更新版本，回传会安全跳过。"
+                tr(
+                    "GCS 模式：前瞻预测在临时副本生成后自动回传 `arf.db`；"
+                    "若管线已写入更新版本，回传会安全跳过。",
+                    "GCS mode: forecasts are generated on a temporary copy and `arf.db` is "
+                    "uploaded back automatically; if the pipeline has written a newer version, "
+                    "the upload is safely skipped.",
+                )
             )
 
     st.divider()
-    st.markdown("#### 🛡️ 风控冻结开关 (Session Kill-Switch)")
+    st.markdown(tr("#### 🛡️ 风控冻结开关 (Session Kill-Switch)", "#### 🛡️ Session Kill-Switch"))
     st.caption(
-        "本环境没有持久化账本，此开关只冻结当前浏览器会话中的驾驶舱操作；"
-        "它不会改写 GCS 中的数据，也不会阻止其他会话。"
+        tr(
+            "本环境没有持久化账本，此开关只冻结当前浏览器会话中的驾驶舱操作；"
+            "它不会改写 GCS 中的数据，也不会阻止其他会话。",
+            "This environment has no persistent ledger; this switch only freezes cockpit "
+            "operations in the current browser session. It does not modify data in GCS and "
+            "does not block other sessions.",
+        )
     )
     c_halt1, c_halt2 = st.columns([1, 4])
     with c_halt1:
         if halted:
-            if st.button("✅ 解除冻结", use_container_width=True):
+            if st.button(tr("✅ 解除冻结", "✅ Unfreeze"), use_container_width=True):
                 st.session_state["cio_halted"] = False
                 st.rerun()
         else:
-            if st.button("🛑 冻结本会话", type="primary", use_container_width=True):
+            if st.button(tr("🛑 冻结本会话", "🛑 Freeze This Session"), type="primary", use_container_width=True):
                 st.session_state["cio_halted"] = True
                 st.rerun()
     with c_halt2:
         state_text = "🛑 **SESSION FROZEN**" if halted else "🟢 **ACTIVE NORMAL**"
-        st.caption(f"当前会话状态：{state_text}")
+        st.caption(tr(f"当前会话状态：{state_text}", f"Current session state: {state_text}"))

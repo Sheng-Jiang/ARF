@@ -226,22 +226,35 @@ def compute_idc_marketscape(
     return df.sort_values(["capabilities_score", "strategies_score"], ascending=False).reset_index(drop=True)
 
 
-def compute_ai_spending_tracker(snap_df: pd.DataFrame) -> dict[str, Any]:
-    """Size the worldwide AI market across Jensen's 5 layers, comparing real revenue to valuation.
-
-    Returns structured summary with market cap, estimated AI spending/revenue,
-    bubble multiplier, and layer-by-layer breakdowns.
-    """
-    if snap_df.empty:
-        return {}
-
-    layer_names = {
+_LAYER_NAMES = {
+    "zh": {
         "L1": "L1 芯片设计与制造 (Foundry & Chip Design)",
         "L2": "L2 核心互联与硬件 (Hardware & Optical Interconnect)",
         "L3": "L3 基础设施与云厂商 (Infrastructure & Hyperscalers)",
         "L4": "L4 基础大模型与开发平台 (Foundation Models & Platforms)",
         "L5": "L5 垂直行业应用与智能体 (Enterprise Apps & Agentic AI)",
-    }
+    },
+    "en": {
+        "L1": "L1 Chip Design & Foundry",
+        "L2": "L2 Hardware & Optical Interconnect",
+        "L3": "L3 Infrastructure & Hyperscalers",
+        "L4": "L4 Foundation Models & Platforms",
+        "L5": "L5 Enterprise Apps & Agentic AI",
+    },
+}
+
+
+def compute_ai_spending_tracker(snap_df: pd.DataFrame, lang: str = "zh") -> dict[str, Any]:
+    """Size the worldwide AI market across Jensen's 5 layers, comparing real revenue to valuation.
+
+    Returns structured summary with market cap, estimated AI spending/revenue,
+    bubble multiplier, and layer-by-layer breakdowns. ``lang`` selects the
+    display language for ``layer_name`` ('zh' or 'en').
+    """
+    if snap_df.empty:
+        return {}
+
+    layer_names = _LAYER_NAMES.get(lang, _LAYER_NAMES["zh"])
 
     df = snap_df.copy()
     df["mcap_usd"] = df["market_cap_usd"].apply(lambda x: _num(x) or 0.0)
@@ -331,7 +344,7 @@ def generate_idc_executive_briefing(
         lang: 'zh' for Chinese or 'en' for English.
     """
     ms_df = compute_idc_marketscape(snap_df, fc_df)
-    spending = compute_ai_spending_tracker(snap_df)
+    spending = compute_ai_spending_tracker(snap_df, lang=lang)
 
     doc_id = f"IDC-MR-{as_of.strftime('%Y%m')}-{as_of.strftime('%d')}"
     if ms_df.empty:

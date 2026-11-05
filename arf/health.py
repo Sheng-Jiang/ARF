@@ -210,42 +210,70 @@ def _leg_coverage(leg: str, g: pd.DataFrame) -> LegCoverage:
     )
 
 
-def _coverage_warnings(legs: dict[str, LegCoverage]) -> list[str]:
+def _coverage_warnings(legs: dict[str, LegCoverage], lang: str = "zh") -> list[str]:
     """Flag systemic data holes that make ARF rankings less trustworthy."""
+    is_en = lang == "en"
     warnings: list[str] = []
     for leg_name, leg in legs.items():
         if leg.n_tickers == 0:
             continue
         if leg.scored_rate < 0.9:
-            warnings.append(
-                f"{leg_name}: 仅 {leg.n_scored}/{leg.n_tickers} 只产出 ARF "
-                f"({leg.scored_rate:.0%})，低于 90% 门槛"
-            )
+            if is_en:
+                warnings.append(
+                    f"{leg_name} leg: only {leg.n_scored}/{leg.n_tickers} produced ARF "
+                    f"({leg.scored_rate:.0%}), below the 90% threshold"
+                )
+            else:
+                warnings.append(
+                    f"{leg_name}: 仅 {leg.n_scored}/{leg.n_tickers} 只产出 ARF "
+                    f"({leg.scored_rate:.0%})，低于 90% 门槛"
+                )
         # V-C1 reverse-DCF is the most economically meaningful stretch signal
         if leg.v_c1_usable / leg.n_tickers < 0.5:
-            warnings.append(
-                f"{leg_name}: 逆向DCF可用仅 {leg.v_c1_usable}/{leg.n_tickers} "
-                f"({leg.v_c1_usable / leg.n_tickers:.0%}) — V分主要靠 PEG/EV·S 撑着"
-            )
+            if is_en:
+                warnings.append(
+                    f"{leg_name} leg: reverse-DCF usable for only {leg.v_c1_usable}/{leg.n_tickers} "
+                    f"({leg.v_c1_usable / leg.n_tickers:.0%}) — V-score leans on PEG/EV·S"
+                )
+            else:
+                warnings.append(
+                    f"{leg_name}: 逆向DCF可用仅 {leg.v_c1_usable}/{leg.n_tickers} "
+                    f"({leg.v_c1_usable / leg.n_tickers:.0%}) — V分主要靠 PEG/EV·S 撑着"
+                )
         rev = leg.fields.get("revenue_yoy_growth")
         if rev is not None and rev.rate < 0.5:
-            warnings.append(
-                f"{leg_name}: 营收增速覆盖 {rev.present}/{rev.total} "
-                f"({rev.pct}%) — E分增长项大量回落默认值"
-            )
+            if is_en:
+                warnings.append(
+                    f"{leg_name} leg: revenue-growth coverage {rev.present}/{rev.total} "
+                    f"({rev.pct}%) — the E-score growth term mostly falls back to its default"
+                )
+            else:
+                warnings.append(
+                    f"{leg_name}: 营收增速覆盖 {rev.present}/{rev.total} "
+                    f"({rev.pct}%) — E分增长项大量回落默认值"
+                )
         c3 = leg.fields.get("ev_sales_5yr_percentile")
         if c3 is not None and c3.rate < 0.5:
-            warnings.append(
-                f"{leg_name}: EV/S 五年分位覆盖 {c3.present}/{c3.total} "
-                f"({c3.pct}%) — V-C3 缺失"
-            )
+            if is_en:
+                warnings.append(
+                    f"{leg_name} leg: EV/S 5-year percentile coverage {c3.present}/{c3.total} "
+                    f"({c3.pct}%) — V-C3 missing"
+                )
+            else:
+                warnings.append(
+                    f"{leg_name}: EV/S 五年分位覆盖 {c3.present}/{c3.total} "
+                    f"({c3.pct}%) — V-C3 缺失"
+                )
     return warnings
 
 
-def coverage_report(df: pd.DataFrame, as_of: date | None = None) -> CoverageReport:
+def coverage_report(
+    df: pd.DataFrame, as_of: date | None = None, lang: str = "zh"
+) -> CoverageReport:
     """Compute field + V-component coverage for US/China legs in a snapshot."""
     if df.empty:
-        return CoverageReport(as_of=as_of, legs={}, warnings=["快照为空"])
+        warnings = ["Snapshot is empty"] if lang == "en" else ["快照为空"]
+        return CoverageReport(as_of=as_of, legs={}, warnings=warnings)
 
     if as_of is None and "as_of_date" in df.columns and df["as_of_date"].notna().any():
         raw = df["as_of_date"].iloc[0]
@@ -263,7 +291,7 @@ def coverage_report(df: pd.DataFrame, as_of: date | None = None) -> CoverageRepo
     return CoverageReport(
         as_of=as_of,
         legs=legs,
-        warnings=_coverage_warnings(legs),
+        warnings=_coverage_warnings(legs, lang=lang),
     )
 
 

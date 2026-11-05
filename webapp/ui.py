@@ -15,28 +15,65 @@ from webapp.data import (
 )
 from webapp.mobile import is_mobile
 
+_LANG_QUERY_KEY = "lang"
+_SUPPORTED_LANGS = ("en", "zh")
+
+
+def _lang_from_query() -> str | None:
+    """Read ?lang=... and normalise it to 'en'/'zh' (None if absent/invalid)."""
+    raw = st.query_params.get(_LANG_QUERY_KEY)
+    if isinstance(raw, (list, tuple)):
+        raw = raw[0] if raw else None
+    if not raw:
+        return None
+    token = str(raw).strip().lower()
+    for code in _SUPPORTED_LANGS:
+        if token.startswith(code):
+            return code
+    return None
+
 
 def get_current_lang() -> str:
     """Return active language code ('en' or 'zh')."""
-    if "lang" in st.session_state:
-        return str(st.session_state["lang"])
-    query_lang = st.query_params.get("lang")
-    if query_lang and str(query_lang).lower().startswith("zh"):
-        st.session_state["lang"] = "zh"
-        return "zh"
-    st.session_state["lang"] = "en"
-    return "en"
+    query_lang = _lang_from_query()
+    if "lang" not in st.session_state:
+        st.session_state["lang"] = query_lang or "en"
+    elif query_lang is not None and not st.session_state.get("_lang_user_set"):
+        # Honour deep links (?lang=zh) unless the user already chose explicitly.
+        st.session_state["lang"] = query_lang
+    return str(st.session_state["lang"])
 
 
 def set_current_lang(lang: str) -> None:
     """Update active language in session_state and query_params."""
     st.session_state["lang"] = lang
-    st.query_params["lang"] = lang
+    st.session_state["_lang_user_set"] = True
+    st.query_params[_LANG_QUERY_KEY] = lang
 
 
 def tr(zh: str, en: str) -> str:
     """Translate string based on active language."""
     return en if get_current_lang() == "en" else zh
+
+
+def render_language_switcher() -> None:
+    """Sidebar language toggle.
+
+    Rendered once from ``app.py`` (not from ``render_sidebar``) so that every
+    page — including those without a date selector — gets the same switcher.
+    """
+    curr_lang = get_current_lang()
+    sel_lang = st.sidebar.radio(
+        "🌐 Language / 语言",
+        ["English", "中文"],
+        index=0 if curr_lang == "en" else 1,
+        horizontal=True,
+        key="_sidebar_lang_selector",
+    )
+    new_lang = "en" if sel_lang == "English" else "zh"
+    if new_lang != curr_lang:
+        set_current_lang(new_lang)
+        st.rerun()
 
 
 def render_freshness_badge(latest: date | None = None) -> None:
@@ -63,7 +100,25 @@ def render_freshness_badge(latest: date | None = None) -> None:
         }
         lbl = en_labels.get(status.level, status.level)
         st.sidebar.markdown(f"**Data Freshness** {icon} {lbl}")
-        st.sidebar.caption(f"Latest weekly snapshot: {latest_as_of or 'None'}")
+        if latest_as_of is None:
+            detail = "No ARF snapshots in the database. Run the pipeline first."
+        elif status.level == "fresh" and (status.age_days or 0) < 0:
+            detail = f"Latest snapshot {latest_as_of} is dated in the future (possible timezone issue)."
+        elif status.level == "fresh":
+            detail = f"Latest snapshot {latest_as_of}, {status.age_days} days ago (within weekly cadence)."
+        elif status.level == "stale":
+            detail = (
+                f"Latest snapshot {latest_as_of}, {status.age_days} days ago. "
+                "Past the weekly window — check that the scheduler ran."
+            )
+        elif status.level == "critical":
+            detail = (
+                f"Latest snapshot {latest_as_of}, {status.age_days} days ago. "
+                "Beyond two weeks — rankings are unreliable; trigger the pipeline now."
+            )
+        else:
+            detail = f"Latest snapshot {latest_as_of}."
+        st.sidebar.caption(detail)
         if status.level in ("stale", "critical"):
             nxt = next_monday_utc()
             st.sidebar.caption(f"Next scheduled run (Mon UTC): {nxt}")
@@ -76,20 +131,11 @@ def render_freshness_badge(latest: date | None = None) -> None:
 
 
 def render_sidebar() -> date | None:
-    """Render language switcher, date selector + refresh button; return selected date."""
-    curr_lang = get_current_lang()
-    sel_lang = st.sidebar.radio(
-        "🌐 Language / 语言",
-        ["English", "中文"],
-        index=0 if curr_lang == "en" else 1,
-        horizontal=True,
-        key="_sidebar_lang_selector",
-    )
-    new_lang = "en" if sel_lang == "English" else "zh"
-    if new_lang != curr_lang:
-        set_current_lang(new_lang)
-        st.rerun()
+    """Render date selector + refresh button; return selected date.
 
+    The language switcher lives in ``render_language_switcher`` and is rendered
+    once from ``app.py`` so it appears on every page.
+    """
     dates = list_dates()
     if not dates:
         st.sidebar.warning(tr("未找到快照数据，请先运行数据管道。", "No snapshot data found. Please run data pipeline first."))
@@ -123,22 +169,44 @@ def _fmt_pct(v: object) -> str:
 
 
 def _build_display_df(df: pd.DataFrame) -> pd.DataFrame:
+    is_en = get_current_lang() == "en"
+    cols = (
+        {
+            "ticker": "Ticker",
+            "name": "Company",
+            "layer": "Layer",
+            "fwd_pe": "Fwd P/E",
+            "ps": "P/S",
+            "rev": "Rev YoY",
+            "roe": "ROE",
+        }
+        if is_en
+        else {
+            "ticker": "代码",
+            "name": "公司",
+            "layer": "层级",
+            "fwd_pe": "预期P/E",
+            "ps": "P/S",
+            "rev": "营收同比",
+            "roe": "ROE",
+        }
+    )
     rows = []
     for _, r in df.sort_values("arf", ascending=False, na_position="last").iterrows():
         d = r.get("decile")
         rows.append({
-            "代码": r.get("ticker", ""),
-            "公司": r.get("name", ""),
-            "层级": r.get("layer", ""),
+            cols["ticker"]: r.get("ticker", ""),
+            cols["name"]: r.get("name", ""),
+            cols["layer"]: r.get("layer", ""),
             "D": int(d) if pd.notna(d) else None,
             "ARF": _fmt_num(r.get("arf")),
             "E": _fmt_num(r.get("e_score")),
             "V": _fmt_num(r.get("v_score")),
             "★": "★" if r.get("froth_flag") else "",
-            "预期P/E": _fmt_num(r.get("forward_pe")),
-            "P/S": _fmt_num(r.get("ps_ratio")),
-            "营收同比": _fmt_pct(r.get("revenue_yoy_growth")),
-            "ROE": _fmt_pct(r.get("roe")),
+            cols["fwd_pe"]: _fmt_num(r.get("forward_pe")),
+            cols["ps"]: _fmt_num(r.get("ps_ratio")),
+            cols["rev"]: _fmt_pct(r.get("revenue_yoy_growth")),
+            cols["roe"]: _fmt_pct(r.get("roe")),
             "_decile": d,
             "_froth": bool(r.get("froth_flag")),
         })
@@ -209,15 +277,18 @@ def scatter_plot(df: pd.DataFrame, leg_name: str) -> go.Figure:
         _DECILE_COLOR.get(int(d), "#999999") if pd.notna(d) else "#999999"
         for d in plot_df.get("decile", pd.Series([None] * len(plot_df), index=plot_df.index))
     ]
+    is_en = get_current_lang() == "en"
 
     def _hover(row: pd.Series) -> str:
         d = int(row["decile"]) if pd.notna(row.get("decile")) else "?"
         ps = _fmt_num(row.get("ps_ratio"))
         roe = _fmt_pct(row.get("roe"))
+        e_lbl = "E" if is_en else "E分"
+        v_lbl = "V" if is_en else "V分"
         return (
             f"<b>{row['ticker']}</b> — {row.get('name', '')}<br>"
             f"ARF {_fmt_num(row.get('arf'))}  D{d}  {'★' if row.get('froth_flag') else ''}<br>"
-            f"E分 {_fmt_num(row.get('e_score'))}  V分 {_fmt_num(row.get('v_score'))}<br>"
+            f"{e_lbl} {_fmt_num(row.get('e_score'))}  {v_lbl} {_fmt_num(row.get('v_score'))}<br>"
             f"P/S {ps}  ROE {roe}"
         )
 
@@ -242,15 +313,24 @@ def scatter_plot(df: pd.DataFrame, leg_name: str) -> go.Figure:
 
     quadrant_style = dict(xref="x", yref="y", showarrow=False,
                           font=dict(size=10, color="rgba(120,120,120,0.6)"))
-    fig.add_annotation(x=90, y=90, text="高风险泡沫区", **quadrant_style)
-    fig.add_annotation(x=90, y=8,  text="基本面支撑区", **quadrant_style)
-    fig.add_annotation(x=8,  y=90, text="非AI高估区",  **quadrant_style)
-    fig.add_annotation(x=8,  y=8,  text="低参与低估值", **quadrant_style)
+    q_labels = (
+        ("High-Risk Bubble", "Fundamentally Supported", "AI-Exposed & Overvalued", "Low Exposure, Low Valuation")
+        if is_en
+        else ("高风险泡沫区", "基本面支撑区", "非AI高估区", "低参与低估值")
+    )
+    fig.add_annotation(x=90, y=90, text=q_labels[0], **quadrant_style)
+    fig.add_annotation(x=90, y=8,  text=q_labels[1], **quadrant_style)
+    fig.add_annotation(x=8,  y=90, text=q_labels[2], **quadrant_style)
+    fig.add_annotation(x=8,  y=8,  text=q_labels[3], **quadrant_style)
 
     fig.update_layout(
-        title=f"{leg_name} — AI曝光度（E）vs 估值拉伸（V）",
-        xaxis_title="E分 — AI曝光度 →",
-        yaxis_title="V分 — 估值拉伸 →",
+        title=(
+            f"{leg_name} — AI Exposure (E) vs Valuation Stretch (V)"
+            if is_en
+            else f"{leg_name} — AI曝光度（E）vs 估值拉伸（V）"
+        ),
+        xaxis_title="E — AI Exposure →" if is_en else "E分 — AI曝光度 →",
+        yaxis_title="V — Valuation Stretch →" if is_en else "V分 — 估值拉伸 →",
         xaxis=dict(range=[-5, 105]),
         yaxis=dict(range=[-5, 105]),
         height=480,
@@ -272,19 +352,23 @@ def render_ask_gemini(
     `section_key` namespaces the session_state cache so multiple pages don't collide.
     `label_intro` is the caption above the button explaining what cohort is covered.
     """
-    st.markdown("### 🤖 Ask Gemini — 新闻与叙事补充")
+    st.markdown(tr("### 🤖 Ask Gemini — 新闻与叙事补充", "### 🤖 Ask Gemini — News & Narrative"))
     st.caption(label_intro)
 
     if not gemini.is_enabled():
         st.info(
-            "未配置 Gemini API 密钥。请在 Cloud Run 上挂载 `GEMINI_API_KEY` "
-            "（推荐通过 Secret Manager），按钮即可启用。"
+            tr(
+                "未配置 Gemini API 密钥。请在 Cloud Run 上挂载 `GEMINI_API_KEY` "
+                "（推荐通过 Secret Manager），按钮即可启用。",
+                "No Gemini API key configured. Mount `GEMINI_API_KEY` on Cloud Run "
+                "(Secret Manager recommended) to enable this button.",
+            )
         )
         return
 
     cohort = gemini.cohort_for_overview(snapshot_df)
     if not cohort:
-        st.warning("该快照无评分股票，无法生成新闻摘要。")
+        st.warning(tr("该快照无评分股票，无法生成新闻摘要。", "No scored stocks in this snapshot — cannot generate a news summary."))
         return
 
     cache_key_str = gemini.to_session_cache_key(as_of, cohort)
@@ -307,35 +391,37 @@ def render_ask_gemini(
             is_precomputed = True
 
     btn_label = (
-        f"🔄 重新生成最新新闻（{len(cohort)} 只）"
+        tr(f"🔄 重新生成最新新闻（{len(cohort)} 只）", f"🔄 Regenerate Latest News ({len(cohort)} tickers)")
         if cached_report
-        else f"✨ 询问 Gemini（{len(cohort)} 只股票）"
+        else tr(f"✨ 询问 Gemini（{len(cohort)} 只股票）", f"✨ Ask Gemini ({len(cohort)} tickers)")
     )
 
     if st.button(btn_label, key=f"ask_gemini_btn_{section_key}"):
-        with st.spinner("Gemini 正在检索最新新闻并撰写摘要……（约30–45秒）"):
+        with st.spinner(tr("Gemini 正在检索最新新闻并撰写摘要……（约30–45秒）", "Gemini is searching live news and drafting summaries… (~30–45s)")):
             try:
                 report = gemini.summarize_stocks(snapshot_df, cohort, as_of)
                 cache[cache_key_str] = report
                 cached_report = report
                 is_precomputed = False
             except Exception as exc:  # noqa: BLE001
-                st.error(f"调用 Gemini 失败：{exc}")
+                st.error(tr(f"调用 Gemini 失败：{exc}", f"Gemini call failed: {exc}"))
                 return
 
     if cached_report is None:
-        st.caption("点击上方按钮，由 Gemini 联网检索此快照中股票的最新新闻。")
+        st.caption(tr("点击上方按钮，由 Gemini 联网检索此快照中股票的最新新闻。", "Click the button above to have Gemini search live news for the stocks in this snapshot."))
         return
 
     if not cached_report.stocks:
-        st.warning("Gemini 未返回任何可解析的股票卡片。原始输出：")
-        st.code(cached_report.raw_text[:2000] or "(空)")
+        st.warning(tr("Gemini 未返回任何可解析的股票卡片。原始输出：", "Gemini returned no parseable stock cards. Raw output:"))
+        st.code(cached_report.raw_text[:2000] or tr("(空)", "(empty)"))
         return
 
     if is_precomputed:
         st.info(
-            "📦 显示本次快照运行时预先生成的新闻摘要 · "
-            "点击「重新生成」获取实时最新版本。",
+            tr(
+                "📦 显示本次快照运行时预先生成的新闻摘要 · 点击「重新生成」获取实时最新版本。",
+                "📦 Showing the news summary precomputed during this snapshot run · click Regenerate for a live version.",
+            ),
             icon="📦",
         )
 
@@ -361,31 +447,33 @@ def render_ask_gemini(
                 for b in s.bullets:
                     st.markdown(f"- {b}")
             else:
-                st.caption("（无要点）")
+                st.caption(tr("（无要点）", "(no key points)"))
             if s.reconcile:
-                st.markdown(f"**与ARF读数的关系：** {s.reconcile}")
+                st.markdown(tr(f"**与ARF读数的关系：** {s.reconcile}", f"**Reconciled with ARF readings:** {s.reconcile}"))
 
             if stock_citations:
-                st.markdown("**来源：**")
+                st.markdown(tr("**来源：**", "**Sources:**"))
                 for c in stock_citations:
                     title = c.title or c.uri
                     st.markdown(f"- [{title}]({c.uri})")
             elif domain_mentions:
-                st.markdown("**引用来源：** " + " · ".join(f"`{d}`" for d in domain_mentions))
+                st.markdown(tr("**引用来源：** ", "**Cited sources:** ") + " · ".join(f"`{d}`" for d in domain_mentions))
 
             queries = getattr(s, "search_queries", []) or []
             if queries:
-                with st.expander(f"🔍 检索关键词（{len(queries)}）", expanded=False):
+                with st.expander(tr(f"🔍 检索关键词（{len(queries)}）", f"🔍 Search Queries ({len(queries)})"), expanded=False):
                     for q in queries:
                         st.markdown(f"- `{q}`")
 
     st.caption(
-        f"模型：{cached_report.model} · 快照日期：{cached_report.as_of} · "
-        f"共 {total_sources} 条来源"
+        tr(
+            f"模型：{cached_report.model} · 快照日期：{cached_report.as_of} · 共 {total_sources} 条来源",
+            f"Model: {cached_report.model} · Snapshot: {cached_report.as_of} · {total_sources} sources",
+        )
     )
 
 
-_CONSENSUS_DISPLAY_COLS = {
+_CONSENSUS_DISPLAY_COLS_ZH = {
     "ticker": "代码",
     "name": "名称",
     "n_institutions": "机构数",
@@ -397,6 +485,22 @@ _CONSENSUS_DISPLAY_COLS = {
     "latest_report": "最新研报",
 }
 
+_CONSENSUS_DISPLAY_COLS_EN = {
+    "ticker": "Ticker",
+    "name": "Company",
+    "n_institutions": "Institutions",
+    "n_reports": "Reports",
+    "rating_summary": "Ratings",
+    "consensus_target": "Consensus Target",
+    "implied_upside_pct": "Implied Upside %",
+    "eps_forecast": "EPS Forecast",
+    "latest_report": "Latest Report",
+}
+
+
+def _consensus_display_cols() -> dict[str, str]:
+    return _CONSENSUS_DISPLAY_COLS_EN if get_current_lang() == "en" else _CONSENSUS_DISPLAY_COLS_ZH
+
 
 def render_research_synthesis(snapshot_df: pd.DataFrame, as_of: date) -> None:
     """Render the institutional-research consensus table + Gemini synthesis.
@@ -407,19 +511,26 @@ def render_research_synthesis(snapshot_df: pd.DataFrame, as_of: date) -> None:
     """
     from arf.fetchers.research import compute_consensus
 
-    st.markdown("### 🏦 机构研报综述 — 卖方一致预期 × ARF 估值")
+    display_cols = _consensus_display_cols()
+
+    st.markdown(tr("### 🏦 机构研报综述 — 卖方一致预期 × ARF 估值", "### 🏦 Sell-Side Consensus × ARF Valuation"))
     st.caption(
-        "以本快照美股+中股各前5名（共10只）为口径，汇总各机构最新研报评级与目标价，"
-        "并与 ARF 估值泡沫读数对照，识别卖方乐观与模型分歧之处。"
+        tr(
+            "以本快照美股+中股各前5名（共10只）为口径，汇总各机构最新研报评级与目标价，"
+            "并与 ARF 估值泡沫读数对照，识别卖方乐观与模型分歧之处。",
+            "Covering the top 5 US and top 5 China names (10 tickers), aggregates the latest sell-side ratings and "
+            "price targets from each institution and contrasts them with ARF bubble readings to surface gaps "
+            "between analyst optimism and the model.",
+        )
     )
 
     try:
         research_df = load_research_reports(as_of)
     except Exception as exc:  # noqa: BLE001
-        st.info(f"研报数据暂不可用：{exc}")
+        st.info(tr(f"研报数据暂不可用：{exc}", f"Research data unavailable: {exc}"))
         return
     if research_df.empty:
-        st.info("本快照尚未抓取机构研报，将在下次数据管道运行时生成。")
+        st.info(tr("本快照尚未抓取机构研报，将在下次数据管道运行时生成。", "No sell-side research has been fetched for this snapshot yet; it will be generated on the next pipeline run."))
         return
 
     cohort = gemini.cohort_for_overview(snapshot_df)
@@ -432,21 +543,21 @@ def render_research_synthesis(snapshot_df: pd.DataFrame, as_of: date) -> None:
     if cohort:
         consensus = consensus[consensus["ticker"].isin(cohort)]
     if consensus.empty:
-        st.info("本快照评分股票暂无机构研报覆盖。")
+        st.info(tr("本快照评分股票暂无机构研报覆盖。", "No sell-side coverage for the scored stocks in this snapshot."))
         return
 
     name_lookup = dict(zip(snapshot_df["ticker"], snapshot_df["name"], strict=False))
     consensus = consensus.copy()
     consensus["name"] = consensus["ticker"].map(name_lookup)
-    show = consensus[[c for c in _CONSENSUS_DISPLAY_COLS if c in consensus.columns]]
+    show = consensus[[c for c in display_cols if c in consensus.columns]]
     st.dataframe(
-        show.rename(columns=_CONSENSUS_DISPLAY_COLS),
+        show.rename(columns=display_cols),
         hide_index=True,
         use_container_width=True,
         column_config={
-            "一致目标价": st.column_config.NumberColumn(format="%.2f"),
-            "隐含空间%": st.column_config.NumberColumn(format="%+.1f"),
-            "EPS预测": st.column_config.NumberColumn(format="%.2f"),
+            display_cols["consensus_target"]: st.column_config.NumberColumn(format="%.2f"),
+            display_cols["implied_upside_pct"]: st.column_config.NumberColumn(format="%+.1f"),
+            display_cols["eps_forecast"]: st.column_config.NumberColumn(format="%.2f"),
         },
     )
 
@@ -472,9 +583,13 @@ def render_research_synthesis(snapshot_df: pd.DataFrame, as_of: date) -> None:
     # On-demand (re)generation when a key is configured.
     session_slot = "research_synth_text"
     if gemini.is_enabled():
-        btn = "🔄 重新生成研报综述" if synth_text else "✨ 生成研报综述（Gemini）"
+        btn = (
+            tr("🔄 重新生成研报综述", "🔄 Regenerate Research Synthesis")
+            if synth_text
+            else tr("✨ 生成研报综述（Gemini）", "✨ Generate Research Synthesis (Gemini)")
+        )
         if st.button(btn, key="research_synth_btn"):
-            with st.spinner("Gemini 正在综合各机构研报……（约20–40秒）"):
+            with st.spinner(tr("Gemini 正在综合各机构研报……（约20–40秒）", "Gemini is synthesizing sell-side research… (~20–40s)")):
                 try:
                     synth = gemini.synthesize_research(snapshot_df, research_df, as_of, cohort)
                     st.session_state[session_slot] = synth.text
@@ -483,23 +598,27 @@ def render_research_synthesis(snapshot_df: pd.DataFrame, as_of: date) -> None:
                         {"title": c.title, "uri": c.uri} for c in synth.citations
                     ]
                 except Exception as exc:  # noqa: BLE001
-                    st.error(f"调用 Gemini 失败：{exc}")
+                    st.error(tr(f"调用 Gemini 失败：{exc}", f"Gemini call failed: {exc}"))
         if st.session_state.get(session_slot):
             synth_text = st.session_state[session_slot]
             synth_model = st.session_state.get("research_synth_model", synth_model)
             synth_citations = st.session_state.get("research_synth_citations", synth_citations)
     elif not synth_text:
         st.info(
-            "未配置 Gemini API 密钥时仅显示上方一致预期表格。挂载 `GEMINI_API_KEY` "
-            "后，数据管道会自动生成卖方叙事综述。"
+            tr(
+                "未配置 Gemini API 密钥时仅显示上方一致预期表格。挂载 `GEMINI_API_KEY` "
+                "后，数据管道会自动生成卖方叙事综述。",
+                "Without a Gemini API key only the consensus table above is shown. Mount "
+                "`GEMINI_API_KEY` and the pipeline will generate the sell-side narrative synthesis.",
+            )
         )
 
     if synth_text:
         st.markdown(synth_text)
         if synth_citations:
-            st.markdown("**来源：**")
+            st.markdown(tr("**来源：**", "**Sources:**"))
             for c in synth_citations:
                 title = c.get("title") or c.get("uri")
                 st.markdown(f"- [{title}]({c.get('uri')})")
         if synth_model:
-            st.caption(f"模型：{synth_model} · 快照日期：{as_of}")
+            st.caption(tr(f"模型：{synth_model} · 快照日期：{as_of}", f"Model: {synth_model} · Snapshot: {as_of}"))

@@ -37,6 +37,8 @@ with st.expander(tr("📖 如何解读ARF分数", "📖 How to Interpret ARF Fac
 - 🟢 **D8–D10**: Attractive value relative to AI exposure
 
 **★ Froth Circuit Breaker Warning**: Triggered when a stock simultaneously lands in **D1 + ROE < Cost of Equity + P/S > 25**.
+
+> **Note**: ARF is a *relative* ranking metric — it measures valuation stretch within the leg, not absolute overvaluation. A D1 stock will not necessarily fall; it means its price embeds the largest AI-narrative premium.
 """)
     else:
         st.markdown("""
@@ -56,6 +58,8 @@ with st.expander(tr("📖 如何解读ARF分数", "📖 How to Interpret ARF Fac
 - 🟢 **D8–D10**：相对于AI敞口，估值处于合理或低估区间
 
 **★ 泡沫预警**：同时满足 D1 + ROE < WACC + P/S > 25 三重条件，为极端高估的强烈信号。
+
+> **注意**：ARF 是相对排名指标，衡量的是板块内部的相对估值拉伸，而非绝对高估。D1 股票不代表必然下跌，但意味着其定价中包含了最高比例的 AI 叙事溢价。
 """)
 
 as_of = render_sidebar()
@@ -70,7 +74,7 @@ us = df[df["leg"] == "US"]
 china = df[df["leg"] == "China"]
 scored_df = df[df["leg"].isin(["US", "China"])]
 
-_cov = coverage_report(scored_df, as_of=as_of)
+_cov = coverage_report(scored_df, as_of=as_of, lang="en" if is_en else "zh")
 _cal = calibration_check(scored_df, as_of=as_of)
 if _cov.warnings or _cal.n_fail:
     warn_title = (
@@ -90,6 +94,7 @@ if _cov.warnings or _cal.n_fail:
                 for r in fails
             ]
             st.markdown(("Calibration failures:\n" if is_en else "校准未通过：\n") + "\n".join(lines))
+        st.caption(tr("完整明细见「系统管理 → 健康检查」。", "Full details: System Administration → Health Check."))
 
 d1_us = int((us["decile"] == 1).sum()) if len(us) else 0
 d1_china = int((china["decile"] == 1).sum()) if len(china) else 0

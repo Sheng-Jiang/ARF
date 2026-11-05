@@ -1,5 +1,6 @@
 """Unit tests for IDC Market Intelligence & MarketScape Engine."""
 
+import re
 from datetime import date
 
 import pandas as pd
@@ -251,3 +252,22 @@ def test_spending_tracker_excludes_manual_rows_without_scores(sample_snapshot_df
     tracker = compute_ai_spending_tracker(df)
 
     assert tracker["covered_count"] == len(sample_snapshot_df)
+
+
+def test_spending_tracker_localizes_layer_names(sample_snapshot_df):
+    """English reports must not inherit the Chinese-first layer labels."""
+    zh = compute_ai_spending_tracker(sample_snapshot_df, lang="zh")
+    en = compute_ai_spending_tracker(sample_snapshot_df, lang="en")
+
+    assert any(re.search(r"[一-鿿]", s["layer_name"]) for s in zh["layers"])
+    assert not any(re.search(r"[一-鿿]", s["layer_name"]) for s in en["layers"])
+    assert [s["layer_code"] for s in zh["layers"]] == [s["layer_code"] for s in en["layers"]]
+
+
+def test_english_briefing_has_no_chinese(sample_snapshot_df, sample_forecast_df):
+    """Regression: the English briefing previously emitted Chinese layer labels."""
+    briefing = generate_idc_executive_briefing(
+        date(2026, 6, 1), sample_snapshot_df, sample_forecast_df, lang="en"
+    )
+
+    assert not re.search(r"[一-鿿]", briefing)
