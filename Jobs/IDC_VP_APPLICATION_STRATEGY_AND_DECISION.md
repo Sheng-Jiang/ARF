@@ -4,7 +4,7 @@
 **Location:** Beijing, China  
 **Date:** November 2026  
 **Candidate:** Sheng Jiang  
-**Live Platform Showcase:** [https://arf-webapp-876642352965.asia-east1.run.app](https://arf-webapp-876642352965.asia-east1.run.app)  
+**Live Platform Showcase:** [https://stock.thekingfilter.com/IDC_MarketScape](https://stock.thekingfilter.com/IDC_MarketScape)  
 
 ---
 
@@ -62,8 +62,9 @@ Rather than presenting a static resume, we engineered a dedicated **IDC Market I
 * Sizes total equity market cap ($31+T) against real economic annualized AI revenue ($1.2+T) across Jensen Huang's 5 layers.
 * Calculates the **"Narrative Bubble Multiplier" ($P/S_{\text{AI}}$)**, quantifying where capital investment has outpaced revenue realization.
 
-### 3. Interactive Webapp Page (`webapp/pages/11_🌐_IDC_智库与厂商全景.py`)
+### 3. Interactive Webapp Page (`webapp/pages/11_🌐_IDC_MarketScape.py`)
 Transformed into the **IDC Quanta™ AI Analyst Research Desk (IDC 智库分析师研报工作台)**:
+* URL: `https://stock.thekingfilter.com/IDC_MarketScape`
 * **Tab 1: 🎯 IDC MarketScape™ 厂商竞争矩阵**
   * Live Plotly 2×2 MarketScape scatter plot with interactive filters (US vs. China leg, L1–L5 layers, keyword search) and detailed hover cards.
 * **Tab 2: 🔬 厂商深度调研与对标台 (Vendor Deep-Dive & Peer Radar)**
@@ -137,7 +138,7 @@ This initiative directly aligns with the core mandates of IDC's AI Research Prac
 IDC has set the global gold standard for technology intelligence for more than six decades. I would welcome the opportunity to bring this forward-looking, quantitative research architecture to IDC, equipping our clients across Greater China and APAC to navigate the AI frontier with defensible, data-driven conviction.
 
 A live deployment of the platform and the interactive IDC MarketScape matrix can be viewed here:
-👉 https://arf-webapp-876642352965.asia-east1.run.app
+👉 https://stock.thekingfilter.com/IDC_MarketScape
 
 I look forward to discussing how my experience can contribute to IDC’s continued market leadership.
 
@@ -152,6 +153,6 @@ Beijing, China
 
 * **Strategy Document:** `Jobs/IDC_VP_APPLICATION_STRATEGY_AND_DECISION.md`
 * **Underlying Engine:** [`arf/idc.py`](file:///Users/sheng/Developer/ARF/arf/idc.py)
-* **Interactive UI:** [`webapp/pages/11_🌐_IDC_智库与厂商全景.py`](file:///Users/sheng/Developer/ARF/webapp/pages/11_%F0%9F%8C%90_IDC_%E6%8A%95%E8%B5%84%E6%80%BB%E7%9B%91.py)
-* **Unit Tests:** [`tests/test_idc.py`](file:///Users/sheng/Developer/ARF/tests/test_idc.py) (`4 passed`, full suite `317 passed`)
+* **Interactive UI:** [`webapp/pages/11_🌐_IDC_MarketScape.py`](file:///Users/sheng/Developer/ARF/webapp/pages/11_%F0%9F%8C%90_IDC_MarketScape.py)
+* **Unit Tests:** [`tests/test_idc.py`](file:///Users/sheng/Developer/ARF/tests/test_idc.py) (`10 passed`, full suite `317 passed`)
 

@@ -26,9 +26,24 @@ pages = {
     ],
     "IDC 研究": [
         st.Page(
-            "pages/11_🌐_IDC_智库与厂商全景.py",
+            "pages/11_🌐_IDC_MarketScape.py",
             title="IDC 智库与厂商全景",
             icon="🌐",
+            url_path="IDC_MarketScape",
+        ),
+        st.Page(
+            "pages/11_🌐_IDC_MarketScape.py",
+            title="IDC 智库与厂商全景 (别名)",
+            icon="🌐",
+            url_path="IDC_智库与厂商全景",
+            visibility="hidden",
+        ),
+        st.Page(
+            "pages/11_🌐_IDC_MarketScape.py",
+            title="IDC MarketScape (alias)",
+            icon="🌐",
+            url_path="idc-marketscape",
+            visibility="hidden",
         ),
     ],
     "执行与模拟": [
