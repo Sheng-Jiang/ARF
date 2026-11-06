@@ -702,7 +702,7 @@ def run_pipeline(
         try:
             from arf.news.sync import sync_financial_press
             console.print("Syncing WSJ & NYT financial press intelligence…")
-            news_count = sync_financial_press(conn=conn, max_items_per_feed=25)
+            news_count = sync_financial_press(conn=conn, max_items_per_feed=25, as_of=as_of)
             console.print(f"Synced {news_count} relevant financial press articles")
         except Exception:
             log.exception("Financial press sync failed - continuing main pipeline")

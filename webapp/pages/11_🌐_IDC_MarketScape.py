@@ -66,6 +66,14 @@ _LAYER_ZH = {
     "L5": "企业应用与智能体",
 }
 
+_LAYER_EN = {
+    "L1": "Silicon & Foundry",
+    "L2": "Compute Chips & Hardware",
+    "L3": "Cloud & Power",
+    "L4": "Foundation Models",
+    "L5": "Enterprise Apps & Agents",
+}
+
 
 def _cat(category: object, is_en: bool) -> str:
     if is_en:
@@ -648,7 +656,9 @@ with tab_deepdive:
     st.markdown(
         tr(f"#### 📰 华尔街日报与纽时实时舆情速递 ({chosen_ticker} Media Wire)", f"#### 📰 Real-Time WSJ & NYT Press Coverage ({chosen_ticker})")
     )
-    v_news_df = data.load_ticker_news_signals(chosen_ticker, days=30, limit=6)
+    v_news_df = data.load_ticker_news_signals(
+        chosen_ticker, days=30, limit=6, as_of=as_of
+    )
     if not v_news_df.empty:
         st.caption(
             tr(
@@ -930,7 +940,14 @@ with tab_press:
         if st.button(tr("⟳ 抓取与同步媒体舆情", "⟳ Sync Press Wire Now"), key="sync_press_wire_btn"):
             with st.spinner(tr("正在从 WSJ、NYT 及聚合源拉取最新报道并完成分类...", "Fetching & classifying latest articles from WSJ & NYT feeds...")):
                 from arf.news.sync import sync_financial_press
-                synced_cnt = sync_financial_press(max_items_per_feed=25)
+
+                # Write through the webapp's active connection (in GCS mode
+                # that is the downloaded temp DB, not data/arf.db) and upload
+                # it back so the rows survive the next cold start.
+                synced_cnt = sync_financial_press(
+                    conn=data.get_conn(), max_items_per_feed=25
+                )
+                data.persist_db_to_gcs()
                 st.success(tr(f"同步完成！新增/更新 {synced_cnt} 篇金融报道。", f"Sync complete! Upserted {synced_cnt} news signals."))
                 data.refresh_data()
                 st.rerun()
@@ -944,7 +961,11 @@ with tab_press:
         bear_c = news_telemetry.get("bearish_count", 0)
         c3.metric(tr("多空舆情比 (Bull/Bear)", "Bull/Bear Split"), f"🟢 {bull_c} / 🔴 {bear_c}")
         avg_sent = news_telemetry.get("avg_sentiment", 0.0)
-        c4.metric(tr("全市场叙事偏向", "Average Polarity"), f"{avg_sent:+.2f}", help="-1.0 (极度悲观) ~ +1.0 (极度乐观)")
+        c4.metric(
+            tr("全市场叙事偏向", "Average Polarity"),
+            f"{avg_sent:+.2f}",
+            help=tr("-1.0 (极度悲观) ~ +1.0 (极度乐观)", "-1.0 (Very Bearish) to +1.0 (Very Bullish)"),
+        )
 
     st.markdown("---")
 
@@ -961,7 +982,11 @@ with tab_press:
         layer_choice = st.selectbox(
             tr("产业链层级", "Stack Layer"),
             layer_opts,
-            format_func=lambda x: tr("全部层级", "All Layers") if x == "All" else f"{x}: {_LAYER_ZH.get(x, x)}",
+            format_func=lambda x: (
+                tr("全部层级", "All Layers")
+                if x == "All"
+                else f"{x}: {_LAYER_ZH.get(x, x) if not is_en else _LAYER_EN.get(x, x)}"
+            ),
             key="news_layer_filter",
         )
     with f_col3:
@@ -1038,9 +1063,9 @@ with tab_press:
                 st.markdown(f"### [{art['title']}]({art['url']})")
                 meta_line = f"**{source_tag}** · `{pub_date} UTC` · {sent_badge}"
                 if t_badges:
-                    meta_line += f" · 标的: {t_badges}"
+                    meta_line += f" · {tr('标的', 'Tickers')}: {t_badges}"
                 if th_tags:
-                    meta_line += f" · 主题: *{th_tags}*"
+                    meta_line += f" · {tr('主题', 'Themes')}: *{th_tags}*"
                 st.markdown(meta_line)
                 if art.get("summary"):
                     st.markdown(f"> {art['summary']}")
@@ -1057,7 +1082,9 @@ with tab_studio:
         )
     )
 
-    recent_news_df = data.load_news_signals(days=30, limit=100)
+    # Point-in-time: a briefing for a historical snapshot must not cite
+    # articles published after that snapshot date.
+    recent_news_df = data.load_news_signals(days=30, limit=100, as_of=as_of)
 
     draft_opts = (
         ["🔬 Single-Vendor Deep Dive Profile (IDC Format)", "🌐 Global AI Industry Overview & MarketScape Briefing"]

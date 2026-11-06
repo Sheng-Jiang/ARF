@@ -7,11 +7,15 @@ import hashlib
 import html
 import logging
 import re
+import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from typing import Any
+
+from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from arf.news.schema import SourceOutlet
 
@@ -110,17 +114,54 @@ def _clean_url(raw_url: str) -> str:
     return urllib.parse.urlunparse(parsed._replace(query=new_query, fragment=""))
 
 
-def _parse_pub_date(pub_date_str: str | None) -> datetime:
-    """Parse RFC 822 date string to timezone-aware UTC datetime."""
+def _parse_pub_date(pub_date_str: str | None) -> datetime | None:
+    """Parse RFC 822 / ISO-8601 date string to timezone-aware UTC datetime.
+
+    Returns ``None`` when the date is missing or unparseable. Stamping such
+    items with the sync time would make them look freshly published forever,
+    so callers skip undated items instead.
+    """
     if not pub_date_str:
-        return datetime.now(UTC)
+        return None
     try:
         dt = email.utils.parsedate_to_datetime(pub_date_str)
-        if dt.tzinfo is None:
-            return dt.replace(tzinfo=UTC)
-        return dt.astimezone(UTC)
     except Exception:
-        return datetime.now(UTC)
+        try:
+            dt = datetime.fromisoformat(pub_date_str.replace("Z", "+00:00"))
+        except Exception:
+            return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
+
+
+def _first_text(item: ET.Element, tags: tuple[str, ...]) -> str | None:
+    """First non-empty child text among *tags* (Atom and RSS 2.0 variants)."""
+    for tag in tags:
+        elem = item.find(tag)
+        if elem is not None and elem.text:
+            return elem.text
+    return None
+
+
+def _is_retryable(exc: BaseException) -> bool:
+    """Retry transient network/parse failures, not permanent HTTP 4xx."""
+    if isinstance(exc, urllib.error.HTTPError):
+        return exc.code == 429 or exc.code >= 500
+    return isinstance(exc, (urllib.error.URLError, TimeoutError, ConnectionError, ET.ParseError))
+
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=0.5, min=0.5, max=4),
+    retry=retry_if_exception(_is_retryable),
+    reraise=True,
+)
+def _read_feed(url: str, timeout_sec: int) -> bytes:
+    """Download a feed with retry + exponential backoff (repo-wide rule)."""
+    req = urllib.request.Request(url, headers=_DEFAULT_HEADERS)
+    with urllib.request.urlopen(req, timeout=timeout_sec) as resp:
+        return resp.read()
 
 
 def _generate_article_id(url: str, title: str) -> str:
@@ -135,69 +176,81 @@ def fetch_feed_items(
     timeout_sec: int = 12,
 ) -> list[dict[str, Any]]:
     """Fetch and parse RSS XML items from a given URL."""
-    req = urllib.request.Request(url, headers=_DEFAULT_HEADERS)
     items_out = []
     try:
-        with urllib.request.urlopen(req, timeout=timeout_sec) as resp:
-            content = resp.read()
-            root = ET.fromstring(content)
-            for item in root.findall(".//item"):
-                title_elem = item.find("title")
-                link_elem = item.find("link")
-                desc_elem = item.find("description")
-                pub_elem = item.find("pubDate")
+        content = _read_feed(url, timeout_sec)
+        root = ET.fromstring(content)
+        for item in root.findall(".//item"):
+            title = _clean_text(_first_text(item, ("title",)))
+            link = (_first_text(item, ("link",)) or "").strip()
+            summary = _clean_text(_first_text(item, ("description", "summary", "content")))
+            pub_str = _first_text(
+                item,
+                ("pubDate", "published", "updated", "{http://purl.org/dc/elements/1.1/}date"),
+            )
 
-                title = _clean_text(title_elem.text if title_elem is not None else "")
-                link = (link_elem.text if link_elem is not None else "").strip()
-                summary = _clean_text(desc_elem.text if desc_elem is not None else "")
-                pub_str = pub_elem.text if pub_elem is not None else None
+            if not title or not link:
+                continue
 
-                if not title or not link:
-                    continue
+            published_at = _parse_pub_date(pub_str)
+            if published_at is None:
+                # Can't place the item in time; a fabricated "now" date would
+                # keep it in every rolling window forever.
+                log.debug("Skipping undated feed item: %s", title)
+                continue
 
-                # Determine source outlet if from syndication
-                actual_source = source_label
-                if "wsj.com" in link.lower() or title.endswith("- WSJ"):
-                    actual_source = "WSJ"
-                    title = re.sub(r"\s*-\s*WSJ$", "", title).strip()
-                elif "nytimes.com" in link.lower() or title.endswith("- The New York Times"):
-                    actual_source = "NYT"
-                    title = re.sub(r"\s*-\s*The New York Times$", "", title).strip()
+            # Determine source outlet if from syndication
+            actual_source = source_label
+            if "wsj.com" in link.lower() or title.endswith("- WSJ"):
+                actual_source = "WSJ"
+                title = re.sub(r"\s*-\s*WSJ$", "", title).strip()
+            elif "nytimes.com" in link.lower() or title.endswith("- The New York Times"):
+                actual_source = "NYT"
+                title = re.sub(r"\s*-\s*The New York Times$", "", title).strip()
 
-                clean_link = _clean_url(link)
-                art_id = _generate_article_id(clean_link, title)
+            clean_link = _clean_url(link)
+            art_id = _generate_article_id(clean_link, title)
 
-                items_out.append({
-                    "article_id": art_id,
-                    "source": actual_source,
-                    "title": title,
-                    "summary": summary,
-                    "url": clean_link,
-                    "published_at": _parse_pub_date(pub_str),
-                })
+            items_out.append({
+                "article_id": art_id,
+                "source": actual_source,
+                "title": title,
+                "summary": summary,
+                "url": clean_link,
+                "published_at": published_at,
+            })
     except Exception as exc:
         log.warning("Failed to fetch RSS feed from %s: %s", url, exc)
 
     return items_out
 
 
-def fetch_all_active_feeds(max_items_per_feed: int = 25) -> list[dict[str, Any]]:
-    """Fetch items across both WSJ, NYT, and targeted Google News queries."""
+def fetch_all_active_feeds(
+    max_items_per_feed: int = 25,
+    max_workers: int = 6,
+) -> list[dict[str, Any]]:
+    """Fetch items across both WSJ, NYT, and targeted Google News queries.
+
+    Feeds are fetched concurrently: with 13 endpoints and a 12 s timeout,
+    serial fetching can add ~156 s to every pipeline run / sync click.
+    """
+    feed_specs: list[tuple[str, SourceOutlet]] = [
+        (feed["url"], feed["source"]) for feed in FEED_REGISTRY
+    ]
+    feed_specs.extend(
+        (_build_google_news_rss_url(q), "WSJ/NYT Syndication")
+        for q in TARGETED_SEARCH_QUERIES
+    )
+
+    with ThreadPoolExecutor(max_workers=min(max_workers, len(feed_specs))) as pool:
+        # map preserves submission order, so dedup stays deterministic.
+        results = list(
+            pool.map(lambda spec: fetch_feed_items(spec[0], spec[1]), feed_specs)
+        )
+
     seen_ids: set[str] = set()
     aggregated_items: list[dict[str, Any]] = []
-
-    # 1. Fetch from direct editorial feeds
-    for feed in FEED_REGISTRY:
-        items = fetch_feed_items(feed["url"], feed["source"])
-        for it in items[:max_items_per_feed]:
-            if it["article_id"] not in seen_ids:
-                seen_ids.add(it["article_id"])
-                aggregated_items.append(it)
-
-    # 2. Fetch from targeted Google News search queries for WSJ / NYT
-    for q in TARGETED_SEARCH_QUERIES:
-        query_url = _build_google_news_rss_url(q)
-        items = fetch_feed_items(query_url, "WSJ/NYT Syndication")
+    for items in results:
         for it in items[:max_items_per_feed]:
             if it["article_id"] not in seen_ids:
                 seen_ids.add(it["article_id"])

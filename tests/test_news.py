@@ -108,6 +108,42 @@ class TestNewsClassifier:
         assert "L4" in res["layers"]
         assert "Model_Breakthrough" in res["themes"]
 
+    def test_generic_name_parts_do_not_resolve_to_tickers(self, classifier):
+        """Corporate suffixes inside display names must not become aliases."""
+        res = classifier.classify(
+            "Banks route capital as companies cut technology spending",
+            "The energy and digital networks group reports results.",
+        )
+        assert res["tickers"] == []
+        assert res["layers"] == []
+
+    @pytest.mark.parametrize(
+        "title",
+        [
+            "The central bank reported quarterly results",
+            "Logistics firms will route shipments through Asia",
+            "Warner Bros Discovery scheduled an investor day",
+            "Dropbox expanded its enterprise plan",
+            "Routine maintenance is scheduled for the weekend",
+        ],
+    )
+    def test_sentiment_has_no_substring_false_positives(self, classifier, title):
+        assert classifier.classify(title)["sentiment_label"] == "Neutral"
+
+    def test_sentiment_still_matches_inflections(self, classifier):
+        res = classifier.classify("Nvidia shares surged as profits soared")
+        assert res["sentiment_label"] == "Bullish"
+
+    def test_cowos_tags_capex_and_foundry_layer(self, classifier):
+        res = classifier.classify("TSMC Expands CoWoS Advanced Packaging Capacity")
+        assert "CapEx_Infrastructure" in res["themes"]
+        # TSMC is a known ticker, so its own layer assignment applies.
+        assert "L1" in res["layers"]
+
+    def test_livestock_is_not_a_capex_signal(self, classifier):
+        res = classifier.classify("Dairy farm reports record milk output as cows graze")
+        assert "CapEx_Infrastructure" not in res["themes"]
+
 
 class TestNewsFeedsHelpers:
     def test_clean_text(self):
@@ -141,9 +177,16 @@ class TestNewsFeedsHelpers:
         assert dt.day == 3
         assert dt.tzinfo is not None
 
-        # Fallback on invalid
-        assert _parse_pub_date(None) is not None
-        assert _parse_pub_date("invalid-date") is not None
+        # Undated/invalid items must not be stamped with "now" — callers skip
+        # them so they cannot linger in every rolling window forever.
+        assert _parse_pub_date(None) is None
+        assert _parse_pub_date("") is None
+        assert _parse_pub_date("invalid-date") is None
+
+        # ISO-8601 (Atom / Dublin Core) fallback
+        iso = _parse_pub_date("2026-11-03T14:30:00Z")
+        assert iso is not None
+        assert (iso.year, iso.month, iso.day) == (2026, 11, 3)
 
 
 class TestNewsDuckDBStorage:
@@ -275,6 +318,80 @@ class TestNewsDuckDBStorage:
         assert l1_row["article_count"] == 1
         assert pytest.approx(l1_row["avg_sentiment"], 0.01) == 0.80
 
+    def test_ticker_filter_accepts_partial_symbols(self, conn):
+        now = datetime.now(UTC)
+        articles = [
+            NewsArticle(
+                article_id="art-cambricon",
+                source="WSJ",
+                title="Cambricon AI Chip Demand",
+                summary="",
+                url="https://wsj.com/cambricon",
+                published_at=now - timedelta(days=1),
+                fetched_at=now,
+                tickers=["688256.SH"],
+                layers=["L1"],
+                themes=["General_AI_Tech"],
+                relevance_score=0.80,
+            ),
+            NewsArticle(
+                article_id="art-tencent",
+                source="NYT",
+                title="Tencent Cloud Buyback",
+                summary="",
+                url="https://nytimes.com/tencent",
+                published_at=now - timedelta(days=1),
+                fetched_at=now,
+                tickers=["0700.HK"],
+                layers=["L3"],
+                themes=["Buybacks_Capital_Allocation"],
+                relevance_score=0.80,
+            ),
+        ]
+        upsert_news_articles(conn, articles)
+
+        assert len(query_news_signals(conn, ticker="688256")) == 1
+        assert len(query_news_signals(conn, ticker="688256.SH")) == 1
+        assert len(query_news_signals(conn, ticker="0700")) == 1
+        assert len(query_news_signals(conn, ticker="0700.HK")) == 1
+        assert len(query_news_signals(conn, ticker="NVDA")) == 0
+
+    def test_as_of_bounds_window_to_that_date(self, conn):
+        now = datetime.now(UTC)
+        as_of = (now - timedelta(days=5)).date()
+        articles = [
+            NewsArticle(
+                article_id="art-before",
+                source="WSJ",
+                title="Nvidia Results Before Snapshot",
+                summary="",
+                url="https://wsj.com/before",
+                published_at=now - timedelta(days=6),
+                fetched_at=now,
+                tickers=["NVDA"],
+                layers=["L2"],
+                themes=["General_AI_Tech"],
+                relevance_score=0.90,
+            ),
+            NewsArticle(
+                article_id="art-after",
+                source="WSJ",
+                title="Nvidia Results After Snapshot",
+                summary="",
+                url="https://wsj.com/after",
+                published_at=now - timedelta(days=1),
+                fetched_at=now,
+                tickers=["NVDA"],
+                layers=["L2"],
+                themes=["General_AI_Tech"],
+                relevance_score=0.90,
+            ),
+        ]
+        upsert_news_articles(conn, articles)
+
+        df = query_news_signals(conn, days=30, as_of=as_of)
+        assert list(df["article_id"]) == ["art-before"]
+
 
 class TestSyncFinancialPress:
     @patch("arf.news.sync.fetch_all_active_feeds")
@@ -310,5 +427,28 @@ class TestSyncFinancialPress:
         assert len(df) == 1
         assert df.iloc[0]["article_id"] == "mock-001"
         assert "NVDA" in df.iloc[0]["tickers"]
+        conn.close()
+
+    @patch("arf.news.sync.fetch_all_active_feeds")
+    def test_sync_as_of_excludes_future_articles(self, mock_fetch):
+        now = datetime.now(UTC)
+        mock_fetch.return_value = [
+            {
+                "article_id": "mock-future",
+                "source": "WSJ",
+                "title": "Nvidia Datacenter Revenue Growth",
+                "summary": "AI CapEx drives demand for GPUs.",
+                "url": "https://wsj.com/mock-future",
+                "published_at": now,
+            },
+        ]
+
+        conn = duckdb.connect(":memory:")
+        init_news_table(conn)
+
+        past_as_of = (now - timedelta(days=30)).date()
+        count = sync_financial_press(conn=conn, as_of=past_as_of)
+        assert count == 0
+        assert query_news_signals(conn, days=365).empty
         conn.close()
 

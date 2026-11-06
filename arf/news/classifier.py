@@ -13,7 +13,7 @@ _THEME_KEYWORDS: dict[ThemeTag, list[str]] = {
     "CapEx_Infrastructure": [
         "capex", "capital expenditure", "capital spending", "datacenter", "data center",
         "power grid", "nuclear power", "smr", "small modular reactor", "cooling", "liquid cooling",
-        "cows", "advanced packaging", "optical transceiver", "800g", "1.6t", "hbm",
+        "cowos", "advanced packaging", "optical transceiver", "800g", "1.6t", "hbm",
         "high-bandwidth memory", "server buildout", "megawatt", "gigawatt",
     ],
     "Export_Controls_Policy": [
@@ -40,19 +40,72 @@ _THEME_KEYWORDS: dict[ThemeTag, list[str]] = {
     ],
 }
 
-# Positive / Bullish lexicon for tech journalism
-_BULLISH_KEYWORDS = [
-    "soar", "surge", "record profit", "record revenue", "beat estimate", "exceeds",
-    "rally", "breakthrough", "expansion", "accelerat", "boom", "upgrade", "outperform",
-    "milestone", "huge demand", "strong guidance",
+# Positive / Bullish lexicon for tech journalism. Patterns are word-bounded so
+# that e.g. "surge" cannot match "surgeon"; inflections are spelled out rather
+# than matched as substrings.
+_BULLISH_PATTERNS = [
+    r"soar\w*",
+    r"surge\w*",
+    r"record profits?",
+    r"record revenues?",
+    r"beats? estimates?",
+    r"exceed(?:s|ed)?",
+    r"rall(?:y|ies|ied)",
+    r"breakthrough\w*",
+    r"expansion\w*",
+    r"accelerat\w*",
+    r"boom\w*",
+    r"upgrade\w*",
+    r"outperform\w*",
+    r"milestone\w*",
+    r"huge demand",
+    r"strong guidance",
 ]
 
-# Negative / Bearish lexicon for tech journalism
-_BEARISH_KEYWORDS = [
-    "rout", "tumble", "slump", "fall", "drop", "sink", "selloff", "meltdown",
-    "miss estimate", "weak guidance", "scrutiny", "investigat", "ban", "curb",
-    "halt", "bubble", "froth", "warn", "plunge", "decelerat", "loss",
+# Negative / Bearish lexicon. Deliberately keeps short stems out of prefix
+# matching: "ban" must not match bank, "rout" must not match route, "warn"
+# must not match Warner, "drop" must not match Dropbox.
+_BEARISH_PATTERNS = [
+    r"rout\b",
+    r"tumbl\w*",
+    r"slump\w*",
+    r"fall(?:s|ing|en)?",
+    r"drops?|dropped|dropping",
+    r"sink\w*|sank",
+    r"selloffs?",
+    r"meltdown\w*",
+    r"miss(?:ed|es)? estimates?",
+    r"weak guidance",
+    r"scrutin\w*",
+    r"bans?",
+    r"curb\w*",
+    r"halt\w*",
+    r"bubbl\w*",
+    r"froth\w*",
+    r"warns?|warned|warning",
+    r"plung\w*",
+    r"investigat\w*",
+    r"decelerat\w*",
+    r"loss(?:es)?",
 ]
+
+_BULLISH_RE = [re.compile(rf"\b(?:{p})\b") for p in _BULLISH_PATTERNS]
+_BEARISH_RE = [re.compile(rf"\b(?:{p})\b") for p in _BEARISH_PATTERNS]
+
+# Corporate suffixes and bare industry words that appear inside universe display
+# names. Registering them as ticker aliases turns ordinary headlines into
+# matches ("companies" → WMB, "technology" → MRVL), so name parts are only
+# registered when they are distinctive.
+_GENERIC_NAME_TOKENS = {
+    "adr", "and", "black", "capital", "co", "companies", "company", "corp",
+    "corporation", "digital", "electric", "energy", "enterprise", "enterprises",
+    "financial", "fourth", "ge", "global", "group", "holding", "holdings",
+    "horizon", "inc", "industries", "industry", "information", "international",
+    "labs", "limited", "ltd", "micro", "motors", "network", "networks",
+    "platform", "platforms", "plc", "power", "robotics", "semiconductor",
+    "semiconductors", "serve", "services", "solutions", "super", "system",
+    "systems", "tech", "technologies", "technology", "the",
+}
 
 
 class NewsClassifier:
@@ -78,9 +131,14 @@ class NewsClassifier:
             name_clean = u.name.lower().strip()
             if name_clean and len(name_clean) > 2:
                 self._ticker_map[name_clean] = (t_upper, layer_val)
-                # Split English and Chinese parts if present
+                # Split English and Chinese parts if present. Bare corporate /
+                # industry words ("technology", "companies", "networks") are
+                # skipped: as aliases they would tag unrelated headlines.
                 for part in re.split(r"[\s/()（）]+", name_clean):
-                    if len(part) >= 3 and part not in ("tech", "group", "holdings", "inc", "corp", "ltd"):
+                    if part in _GENERIC_NAME_TOKENS:
+                        continue
+                    has_cjk = any("一" <= ch <= "鿿" for ch in part)
+                    if (has_cjk and len(part) >= 2) or len(part) >= 3:
                         self._ticker_map[part] = (t_upper, layer_val)
 
         # 2. Hardcoded high-frequency aliases for major companies (override / take precedence)
@@ -159,7 +217,7 @@ class NewsClassifier:
 
         for alias, (tk, layer) in self._ticker_map.items():
             # Disambiguate common English everyday words
-            if alias in ("apple", "now", "open") and not has_tech_context:
+            if alias in ("apple", "arm", "now", "open") and not has_tech_context:
                 continue
 
             # Use whole-word boundary matching
@@ -180,7 +238,7 @@ class NewsClassifier:
 
         # Fallback layer inference from text if no ticker matched directly
         if not matched_layers:
-            if re.search(r"\b(foundry|wafer|lithography|euv|packaging|cows)\b", full_text):
+            if re.search(r"\b(foundry|wafer|lithography|euv|packaging|cowos)\b", full_text):
                 matched_layers.add("L1")
             elif re.search(r"\b(gpus?|opticals?|transceivers?|accelerators?|servers?|liquid cooling)\b", full_text):
                 matched_layers.add("L2")
@@ -191,9 +249,9 @@ class NewsClassifier:
             elif re.search(r"\b(software seats?|saas|enterprise apps?|agentic workflows?)\b", full_text):
                 matched_layers.add("L5")
 
-        # 3. Sentiment Analysis
-        bull_count = sum(1 for kw in _BULLISH_KEYWORDS if kw in full_text)
-        bear_count = sum(1 for kw in _BEARISH_KEYWORDS if kw in full_text)
+        # 3. Sentiment Analysis — word-bounded, not substring matching
+        bull_count = sum(1 for rx in _BULLISH_RE if rx.search(full_text))
+        bear_count = sum(1 for rx in _BEARISH_RE if rx.search(full_text))
 
         sentiment_score = 0.0
         if bull_count > bear_count:

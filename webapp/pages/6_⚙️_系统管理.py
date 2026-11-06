@@ -14,12 +14,14 @@ from arf.health import (
 )
 from webapp import jobs
 from webapp.data import (
+    get_conn,
     list_dates,
     load_fetch_outcomes,
     load_latest_run,
     load_news_stats,
     load_runs,
     load_snapshot,
+    persist_db_to_gcs,
     refresh_data,
 )
 from webapp.mobile import inject_mobile_css
@@ -297,7 +299,12 @@ with col_sync_news:
     if st.button(tr("⟳ 立即同步金融舆情", "⟳ Sync Press Wire Now"), key="admin_sync_press_wire"):
         with st.spinner(tr("正在抓取 WSJ、NYT 与专题报道...", "Fetching & classifying WSJ and NYT articles...")):
             from arf.news.sync import sync_financial_press
-            cnt = sync_financial_press(max_items_per_feed=25)
+
+            # Use the webapp's active connection: in GCS mode that is the
+            # downloaded temp DB (data/arf.db does not exist), and the upload
+            # makes the new rows survive the next cold start.
+            cnt = sync_financial_press(conn=get_conn(), max_items_per_feed=25)
+            persist_db_to_gcs()
             st.success(tr(f"同步完成！新增/更新 {cnt} 篇金融报道。", f"Sync complete! Upserted {cnt} articles."))
             refresh_data()
             st.rerun()

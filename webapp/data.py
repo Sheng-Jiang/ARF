@@ -576,8 +576,13 @@ def load_news_signals(
     days: int = 14,
     min_relevance: float = 0.20,
     limit: int = 50,
+    as_of: date | None = None,
 ) -> pd.DataFrame:
-    """Load classified financial press signals (WSJ & NYT) with filtering."""
+    """Load classified financial press signals (WSJ & NYT) with filtering.
+
+    Pass *as_of* for point-in-time consumers (snapshot briefings): the window
+    then ends on that date instead of at the current time.
+    """
     from arf.news.storage import query_news_signals
 
     conn = _open_conn()
@@ -591,6 +596,7 @@ def load_news_signals(
             days=days,
             min_relevance=min_relevance,
             limit=limit,
+            as_of=as_of,
         )
     except Exception:
         return pd.DataFrame()
@@ -607,9 +613,16 @@ def load_news_layer_summary(days: int = 14) -> pd.DataFrame:
         return pd.DataFrame(columns=["layer", "article_count", "avg_sentiment"])
 
 
-def load_ticker_news_signals(ticker: str, days: int = 30, limit: int = 20) -> pd.DataFrame:
+def load_ticker_news_signals(
+    ticker: str,
+    days: int = 30,
+    limit: int = 20,
+    as_of: date | None = None,
+) -> pd.DataFrame:
     """Load financial press news articles mentioning a specific universe ticker."""
-    return load_news_signals(ticker=ticker, days=days, min_relevance=0.15, limit=limit)
+    return load_news_signals(
+        ticker=ticker, days=days, min_relevance=0.15, limit=limit, as_of=as_of
+    )
 
 
 def load_news_stats(days: int = 14) -> dict[str, object]:

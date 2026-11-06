@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 
 import duckdb
@@ -23,9 +23,14 @@ def sync_financial_press(
     max_items_per_feed: int = 25,
     min_relevance: float = 0.20,
     db_path: Path = Path("data/arf.db"),
+    as_of: date | None = None,
 ) -> int:
     """Fetch recent WSJ and NYT articles, classify them against the ARF universe,
     and persist relevant signals to DuckDB.
+
+    *as_of* bounds what is persisted to articles published on or before that
+    date, so replaying a historical snapshot cannot pull today's headlines into
+    the news pool for that date.
 
     Returns:
         Number of articles inserted/updated.
@@ -38,6 +43,15 @@ def sync_financial_press(
     try:
         log.info("Fetching articles from WSJ, NYT, and syndication feeds...")
         raw_items = fetch_all_active_feeds(max_items_per_feed=max_items_per_feed)
+        if as_of is not None:
+            cutoff = datetime.combine(as_of + timedelta(days=1), time.min, tzinfo=UTC)
+            before = len(raw_items)
+            raw_items = [it for it in raw_items if it["published_at"] <= cutoff]
+            log.info(
+                "Excluded %d items published after as_of=%s.",
+                before - len(raw_items),
+                as_of,
+            )
         log.info("Fetched %d raw candidate items across feeds.", len(raw_items))
 
         classifier = NewsClassifier()

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
 
 import duckdb
@@ -79,6 +79,11 @@ def upsert_news_articles(
     return len(rows)
 
 
+def _escape_like(term: str) -> str:
+    """Escape LIKE metacharacters so a ticker search is a literal match."""
+    return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def query_news_signals(
     conn: duckdb.DuckDBPyConnection,
     ticker: str | None = None,
@@ -88,17 +93,30 @@ def query_news_signals(
     days: int = 14,
     min_relevance: float = 0.20,
     limit: int = 50,
+    as_of: date | None = None,
 ) -> pd.DataFrame:
-    """Query recent news signals with multi-dimensional filtering."""
+    """Query recent news signals with multi-dimensional filtering.
+
+    When *as_of* is given the window is point-in-time: it ends at the close of
+    that date rather than at "now", so a historical snapshot's briefing never
+    cites articles published after it.
+    """
     init_news_table(conn)
 
-    cutoff = datetime.now(UTC) - timedelta(days=days)
-    conditions = ["published_at >= ?", "relevance_score >= ?"]
-    params: list[Any] = [cutoff, min_relevance]
+    upper = (
+        datetime.combine(as_of + timedelta(days=1), time.min, tzinfo=UTC)
+        if as_of is not None
+        else datetime.now(UTC)
+    )
+    cutoff = upper - timedelta(days=days)
+    conditions = ["published_at >= ?", "published_at <= ?", "relevance_score >= ?"]
+    params: list[Any] = [cutoff, upper, min_relevance]
 
     if ticker:
-        conditions.append("tickers LIKE ?")
-        params.append(f'%"{ticker.strip().upper()}"%')
+        # Allow partial symbols: "688256" and "0700" should match the stored
+        # "688256.SH" / "0700.HK" JSON values, not only the exact full code.
+        conditions.append("tickers LIKE ? ESCAPE '\\'")
+        params.append(f'%"{_escape_like(ticker.strip().upper())}%')
 
     if layer:
         conditions.append("layers LIKE ?")
