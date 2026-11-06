@@ -69,8 +69,14 @@ _BEARISH_PATTERNS = [
     r"rout\b",
     r"tumbl\w*",
     r"slump\w*",
+    r"slid(?:e|es|ing)?",
     r"fall(?:s|ing|en)?",
     r"drops?|dropped|dropping",
+    r"eras(?:e|es|ed|ing)",
+    r"threat\w*",
+    r"revolt\w*",
+    r"hits? a wall",
+    r"drag(?:ged)? down",
     r"sink\w*|sank",
     r"selloffs?",
     r"meltdown\w*",
@@ -102,9 +108,24 @@ _GENERIC_NAME_TOKENS = {
     "financial", "fourth", "ge", "global", "group", "holding", "holdings",
     "horizon", "inc", "industries", "industry", "information", "international",
     "labs", "limited", "ltd", "micro", "motors", "network", "networks",
-    "platform", "platforms", "plc", "power", "robotics", "semiconductor",
-    "semiconductors", "serve", "services", "solutions", "super", "system",
-    "systems", "tech", "technologies", "technology", "the",
+    "platform", "platforms", "plc", "power", "research", "robotics",
+    "semiconductor", "semiconductors", "serve", "services", "solutions",
+    "super", "system", "systems", "tech", "technologies", "technology", "the",
+}
+
+# Theme keywords are matched with an optional plural so "data centers",
+# "buybacks", "tariffs" and "export controls" are not missed.
+def _keyword_pattern(keyword: str) -> re.Pattern[str]:
+    if keyword.endswith("y"):
+        return re.compile(rf"\b{re.escape(keyword[:-1])}(?:y|ies)\b")
+    if keyword.endswith("s"):
+        return re.compile(rf"\b{re.escape(keyword)}\b")
+    return re.compile(rf"\b{re.escape(keyword)}(?:s|es)?\b")
+
+
+_THEME_PATTERNS = {
+    theme: [_keyword_pattern(kw) for kw in keywords]
+    for theme, keywords in _THEME_KEYWORDS.items()
 }
 
 
@@ -197,6 +218,9 @@ class NewsClassifier:
             "cohere": ("COHERE", "L4"),
         }
         self._ticker_map.update(custom_aliases)
+        # "now" is ServiceNow's ticker but also an everyday word; matching it
+        # bare tagged unrelated tech headlines. "servicenow" remains an alias.
+        self._ticker_map.pop("now", None)
 
     def classify(self, title: str, summary: str = "", url: str = "") -> dict[str, Any]:
         """Classify article into tickers, layers, themes, and sentiment."""
@@ -228,8 +252,8 @@ class NewsClassifier:
 
         # 2. Theme Tagging
         matched_themes: list[ThemeTag] = []
-        for theme, kw_list in _THEME_KEYWORDS.items():
-            if any(re.search(rf"\b{re.escape(kw)}\b", full_text) for kw in kw_list):
+        for theme, patterns in _THEME_PATTERNS.items():
+            if any(rx.search(full_text) for rx in patterns):
                 matched_themes.append(theme)
 
         # Fallback theme if generic AI news
@@ -271,16 +295,22 @@ class NewsClassifier:
                 full_text,
             )
         )
+        # The General_AI_Tech fallback fires on any AI/tech mention, so it
+        # earns less than a specific theme — otherwise a tangential gadget
+        # review with one ticker reaches 1.0.
+        has_specific_theme = any(t != "General_AI_Tech" for t in matched_themes)
         relevance = 0.0
-        if matched_themes:
+        if has_specific_theme:
             relevance += 0.40
+        elif matched_themes:
+            relevance += 0.15
         if has_ai_context:
-            relevance += 0.30
+            relevance += 0.25
         if matched_tickers:
-            if matched_themes or has_ai_context:
+            if has_specific_theme or has_ai_context:
                 relevance += 0.30
             else:
-                relevance += 0.10
+                relevance += 0.15
         relevance = min(1.0, relevance)
 
         return {

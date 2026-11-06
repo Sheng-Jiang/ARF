@@ -54,6 +54,10 @@ FEED_REGISTRY: list[dict[str, str]] = [
         "url": "https://rss.nytimes.com/services/xml/rss/nyt/Dealbook.xml",
     },
     # WSJ Feeds
+    # NOTE (2026-11): these public endpoints currently serve a frozen snapshot
+    # (Jan 2025; Opinion goes back to Feb 2023), so their items are dropped by
+    # sync's 30-day age filter. Kept registered in case WSJ restores them;
+    # recent WSJ coverage comes from the Google News site:wsj.com queries.
     {
         "name": "WSJ Technology",
         "source": "WSJ",
@@ -164,9 +168,22 @@ def _read_feed(url: str, timeout_sec: int) -> bytes:
         return resp.read()
 
 
-def _generate_article_id(url: str, title: str) -> str:
-    """Generate a deterministic hash ID for deduplication."""
-    clean = f"{_clean_url(url)}::{title.strip().lower()}"
+def _normalize_title(title: str) -> str:
+    """Lower-case and strip punctuation so syndicated copies collide."""
+    normalized = title.lower()
+    normalized = re.sub(r"[^a-z0-9一-鿿]+", " ", normalized)
+    return re.sub(r"\s+", " ", normalized).strip()
+
+
+def _generate_article_id(title: str, published_at: datetime) -> str:
+    """Deterministic story ID: normalized title + publication day.
+
+    Google News copies of an NYT/WSJ story have a different URL from the
+    original, so a URL-based hash stored the same story twice. Including the
+    day keeps recurring columns (e.g. the daily "Market Talk" roundup) as
+    separate articles while collapsing same-day syndication duplicates.
+    """
+    clean = f"{_normalize_title(title)}::{published_at.astimezone(UTC).date().isoformat()}"
     return hashlib.sha256(clean.encode("utf-8")).hexdigest()[:24]
 
 
@@ -209,7 +226,7 @@ def fetch_feed_items(
                 title = re.sub(r"\s*-\s*The New York Times$", "", title).strip()
 
             clean_link = _clean_url(link)
-            art_id = _generate_article_id(clean_link, title)
+            art_id = _generate_article_id(title, published_at)
 
             items_out.append({
                 "article_id": art_id,
