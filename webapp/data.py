@@ -2,7 +2,7 @@
 import logging
 import os
 import tempfile
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import duckdb
@@ -566,4 +566,108 @@ def load_supply_chain_links(supplier_ticker: str | None = None) -> pd.DataFrame:
     return conn.execute(
         "SELECT * FROM supply_chain_links ORDER BY supplier_ticker, revenue_share_pct DESC"
     ).fetchdf()
+
+
+def load_news_signals(
+    ticker: str | None = None,
+    layer: str | None = None,
+    theme: str | None = None,
+    source: str | None = None,
+    days: int = 14,
+    min_relevance: float = 0.20,
+    limit: int = 50,
+    as_of: date | None = None,
+) -> pd.DataFrame:
+    """Load classified financial press signals (WSJ & NYT) with filtering.
+
+    Pass *as_of* for point-in-time consumers (snapshot briefings): the window
+    then ends on that date instead of at the current time.
+    """
+    from arf.news.storage import query_news_signals
+
+    conn = _open_conn()
+    try:
+        return query_news_signals(
+            conn=conn,
+            ticker=ticker,
+            layer=layer,
+            theme=theme,
+            source=source,
+            days=days,
+            min_relevance=min_relevance,
+            limit=limit,
+            as_of=as_of,
+        )
+    except Exception:
+        return pd.DataFrame()
+
+
+def load_news_layer_summary(days: int = 14) -> pd.DataFrame:
+    """Load aggregated news volume and sentiment by AI stack layer."""
+    from arf.news.storage import query_news_summary_by_layer
+
+    conn = _open_conn()
+    try:
+        return query_news_summary_by_layer(conn=conn, days=days)
+    except Exception:
+        return pd.DataFrame(columns=["layer", "article_count", "avg_sentiment"])
+
+
+def load_ticker_news_signals(
+    ticker: str,
+    days: int = 30,
+    limit: int = 20,
+    as_of: date | None = None,
+) -> pd.DataFrame:
+    """Load financial press news articles mentioning a specific universe ticker."""
+    return load_news_signals(
+        ticker=ticker, days=days, min_relevance=0.15, limit=limit, as_of=as_of
+    )
+
+
+def load_news_stats(days: int = 14) -> dict[str, object]:
+    """Load summary telemetry for news coverage across WSJ and NYT."""
+    conn = _open_conn()
+    cutoff = datetime.now(UTC) - timedelta(days=days)
+    try:
+        row = conn.execute(
+            """
+            SELECT
+                count(*) as total_articles,
+                count(CASE WHEN source = 'WSJ' THEN 1 END) as wsj_count,
+                count(CASE WHEN source = 'NYT' THEN 1 END) as nyt_count,
+                count(CASE WHEN sentiment_label = 'Bullish' THEN 1 END) as bullish_count,
+                count(CASE WHEN sentiment_label = 'Bearish' THEN 1 END) as bearish_count,
+                count(CASE WHEN sentiment_label = 'Neutral' THEN 1 END) as neutral_count,
+                avg(sentiment_score) as avg_sentiment,
+                max(published_at) as latest_published_at
+            FROM news_signals
+            WHERE published_at >= ?
+            """,
+            [cutoff],
+        ).fetchone()
+        if row and row[0] > 0:
+            return {
+                "total_articles": row[0],
+                "wsj_count": row[1],
+                "nyt_count": row[2],
+                "bullish_count": row[3],
+                "bearish_count": row[4],
+                "neutral_count": row[5],
+                "avg_sentiment": round(row[6] or 0.0, 2),
+                "latest_published_at": row[7],
+            }
+    except Exception:
+        pass
+    return {
+        "total_articles": 0,
+        "wsj_count": 0,
+        "nyt_count": 0,
+        "bullish_count": 0,
+        "bearish_count": 0,
+        "neutral_count": 0,
+        "avg_sentiment": 0.0,
+        "latest_published_at": None,
+    }
+
 

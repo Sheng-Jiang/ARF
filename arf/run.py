@@ -698,6 +698,15 @@ def run_pipeline(
 
         _maybe_generate_gemini_summaries(conn, df, as_of)
 
+        # WSJ & NYT Financial Press Intelligence Sync
+        try:
+            from arf.news.sync import sync_financial_press
+            console.print("Syncing WSJ & NYT financial press intelligence…")
+            news_count = sync_financial_press(conn=conn, max_items_per_feed=25, as_of=as_of)
+            console.print(f"Synced {news_count} relevant financial press articles")
+        except Exception:
+            log.exception("Financial press sync failed - continuing main pipeline")
+
         # Write parquet
         snap_dir = data_dir / "snapshots"
         snap_dir.mkdir(parents=True, exist_ok=True)

@@ -2,7 +2,7 @@
 import streamlit as st
 
 from arf.health import calibration_check, coverage_report
-from webapp.data import load_snapshot
+from webapp.data import load_news_signals, load_snapshot
 from webapp.mobile import inject_mobile_css, is_mobile
 from webapp.ui import get_current_lang, render_ask_gemini, render_sidebar, tr
 
@@ -161,6 +161,23 @@ else:
         _top5(us, "🇺🇸 US Leg — Top 5 Highest ARF" if is_en else "🇺🇸 美股 — ARF前5名")
     with col_cn:
         _top5(china, "🇨🇳 China Leg — Top 5 Highest ARF" if is_en else "🇨🇳 中股 — ARF前5名")
+
+# ── Real-Time Financial Press Pulse (WSJ & NYT) ──────────────────────────────
+press_news = load_news_signals(days=14, min_relevance=0.25, limit=3)
+if not press_news.empty:
+    st.markdown("---")
+    st.subheader(tr("📰 华尔街日报与纽时实时舆情速递", "📰 Real-Time Financial Press Pulse (WSJ & NYT)"))
+    cols_news = st.columns(len(press_news))
+    for col, (_, art) in zip(cols_news, press_news.iterrows(), strict=False):
+        with col, st.container(border=True):
+            pub_d = art["published_at"].strftime("%m-%d") if hasattr(art["published_at"], "strftime") else str(art["published_at"])[5:10]
+            badge = "🔴 WSJ" if art["source"] == "WSJ" else "⚫ NYT"
+            sent_lbl = art["sentiment_label"]
+            sent_color = "green" if sent_lbl == "Bullish" else ("red" if sent_lbl == "Bearish" else "gray")
+            st.markdown(f"**{badge}** `[{pub_d}]` :{sent_color}[{sent_lbl}]")
+            st.markdown(f"**[{art['title']}]({art['url']})**")
+            if art.get("summary"):
+                st.caption(f"{art['summary'][:110]}...")
 
 st.divider()
 render_ask_gemini(

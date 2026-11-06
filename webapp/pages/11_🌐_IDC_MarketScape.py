@@ -58,6 +58,22 @@ _CATEGORY_ZH = {
     "Participants": "参与者",
 }
 
+_LAYER_ZH = {
+    "L1": "晶圆代工与封装",
+    "L2": "算力芯片与硬件",
+    "L3": "云巨头与电力",
+    "L4": "基础大模型",
+    "L5": "企业应用与智能体",
+}
+
+_LAYER_EN = {
+    "L1": "Silicon & Foundry",
+    "L2": "Compute Chips & Hardware",
+    "L3": "Cloud & Power",
+    "L4": "Foundation Models",
+    "L5": "Enterprise Apps & Agents",
+}
+
 
 def _cat(category: object, is_en: bool) -> str:
     if is_en:
@@ -199,12 +215,13 @@ st.caption(
 
 st.divider()
 
-# ── 5 Core Tabs of the Analyst Research Desk ─────────────────────────────────
-tab_marketscape, tab_deepdive, tab_sandbox, tab_spending, tab_studio = st.tabs([
+# ── 6 Core Tabs of the Analyst Research Desk ─────────────────────────────────
+tab_marketscape, tab_deepdive, tab_sandbox, tab_spending, tab_press, tab_studio = st.tabs([
     tr("🎯 IDC MarketScape™ 厂商竞争矩阵", "🎯 IDC MarketScape™ Quadrant Matrix"),
     tr("🔬 厂商深度调研与对标台", "🔬 Vendor Deep-Dive & Peer Radar"),
     tr("🛠️ 供应链需求与瓶颈沙盘", "🛠️ Supply-Chain Shock Sandbox"),
     tr("📊 全球 AI 产业支出指南", "📊 Worldwide AI Spending Guide"),
+    tr("📰 WSJ & NYT 金融舆情前沿", "📰 WSJ & NYT Financial Press Wire"),
     tr("📝 分析师快报与研报起草台", "📝 Analyst Briefing & Studio"),
 ])
 
@@ -635,6 +652,35 @@ with tab_deepdive:
         else:
             st.info(tr("供应链拓扑数据库就绪中。", "Supply chain database initializing."))
 
+    st.markdown("---")
+    st.markdown(
+        tr(f"#### 📰 华尔街日报与纽时实时舆情速递 ({chosen_ticker} Media Wire)", f"#### 📰 Real-Time WSJ & NYT Press Coverage ({chosen_ticker})")
+    )
+    v_news_df = data.load_ticker_news_signals(
+        chosen_ticker, days=30, limit=6, as_of=as_of
+    )
+    if not v_news_df.empty:
+        st.caption(
+            tr(
+                f"收录近 30 天《华尔街日报》与《纽约时报》提及 {chosen_ticker} 的权威报道（共 {len(v_news_df)} 篇）：",
+                f"Verified WSJ & NYT editorial coverage citing {chosen_ticker} ({len(v_news_df)} articles):",
+            )
+        )
+        for _, art in v_news_df.iterrows():
+            pub_str = art["published_at"].strftime("%Y-%m-%d") if hasattr(art["published_at"], "strftime") else str(art["published_at"])[:10]
+            sent_badge = "🟢 " + tr("偏多", "Bullish") if art["sentiment_label"] == "Bullish" else ("🔴 " + tr("偏空", "Bearish") if art["sentiment_label"] == "Bearish" else "⚪ " + tr("中性", "Neutral"))
+            source_tag = f"**{art['source']}**"
+            st.markdown(f"- {source_tag} `[{pub_str}]` [{art['title']}]({art['url']}) · {sent_badge}")
+            if art.get("summary"):
+                st.caption(f"> {art['summary'][:160]}...")
+    else:
+        st.info(
+            tr(
+                f"近 30 天权威财经媒体（WSJ / NYT）暂无针对 {chosen_ticker} 的专属报道。",
+                f"No targeted WSJ / NYT reports recorded for {chosen_ticker} in the past 30 days.",
+            )
+        )
+
 # ── TAB 3: CapEx & Leontief Scenario Sandbox ─────────────────────────────────
 with tab_sandbox:
     st.subheader(
@@ -862,7 +908,169 @@ with tab_spending:
             hide_index=True,
         )
 
-# ── TAB 5: Analyst Drafting Studio ───────────────────────────────────────────
+# ── TAB 5: WSJ & NYT Financial Press Wire ─────────────────────────────────────
+with tab_press:
+    st.subheader(
+        tr("📰 华尔街日报与纽约时报金融舆情前沿 (WSJ & NYT Financial Press Wire)", "📰 WSJ & NYT Financial Press Wire & Narrative Velocity")
+    )
+    if is_en:
+        st.markdown(
+            """
+            > **IDC Automated Financial Press Wire**: Continuously ingests and classifies live intelligence from **The Wall Street Journal** and **The New York Times** across Jensen Huang's 5-layer AI stack.
+            > 
+            > **Grounding in Institutional Research**:
+            > - **US vs. China Equity Valuation Spread**: Reconciling valuation multiples with corporate capital allocation (share buybacks vs. equity dilution) and cost-of-equity hurdles (*Reference: China vs. US Equity Markets*).
+            > - **CapEx Bottlenecks & Demand Transmission**: Corroborating hyperscaler data center investments with real-world physical constraints in power generation, cooling, and CoWoS advanced packaging (*Reference: China vs. US Asset Management*).
+            """
+        )
+    else:
+        st.markdown(
+            """
+            > **IDC 金融媒体智库前沿**：实时抓取并解析《华尔街日报》(WSJ) 与《纽约时报》(NYT) 权威报道，深度对齐黄仁勋 AI 产业链五层金字塔。
+            > 
+            > **学术与机构研报底座支撑**：
+            > - **中美估值差与股东回报治理**：印证《China vs. US Equity Markets》研究结论，跟踪美股高估值背后的大规模股份回购与股本注销，对比中股在「新国九条」市值管理驱动下的分红与回购破冰。
+            > - **资本开支与物理瓶颈传导**：结合《China vs. US Asset Management》，追踪云厂商 CapEx 动能与电网负荷、CoWoS 封装等硬物理约束的报道。
+            """
+        )
+
+    # Action bar: sync on-demand & stats
+    col_sync, col_stats = st.columns([1, 4])
+    with col_sync:
+        if st.button(tr("⟳ 抓取与同步媒体舆情", "⟳ Sync Press Wire Now"), key="sync_press_wire_btn"):
+            with st.spinner(tr("正在从 WSJ、NYT 及聚合源拉取最新报道并完成分类...", "Fetching & classifying latest articles from WSJ & NYT feeds...")):
+                from arf.news.sync import sync_financial_press
+
+                # Write through the webapp's active connection (in GCS mode
+                # that is the downloaded temp DB, not data/arf.db) and upload
+                # it back so the rows survive the next cold start.
+                synced_cnt = sync_financial_press(
+                    conn=data.get_conn(), max_items_per_feed=25
+                )
+                data.persist_db_to_gcs()
+                st.success(tr(f"同步完成！新增/更新 {synced_cnt} 篇金融报道。", f"Sync complete! Upserted {synced_cnt} news signals."))
+                data.refresh_data()
+                st.rerun()
+
+    news_telemetry = data.load_news_stats(days=30)
+    with col_stats:
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric(tr("已索引报道总数", "Total Articles"), f"{news_telemetry.get('total_articles', 0)}")
+        c2.metric("WSJ / NYT", f"{news_telemetry.get('wsj_count', 0)} / {news_telemetry.get('nyt_count', 0)}")
+        bull_c = news_telemetry.get("bullish_count", 0)
+        bear_c = news_telemetry.get("bearish_count", 0)
+        c3.metric(tr("多空舆情比 (Bull/Bear)", "Bull/Bear Split"), f"🟢 {bull_c} / 🔴 {bear_c}")
+        avg_sent = news_telemetry.get("avg_sentiment", 0.0)
+        c4.metric(
+            tr("全市场叙事偏向", "Average Polarity"),
+            f"{avg_sent:+.2f}",
+            help=tr("-1.0 (极度悲观) ~ +1.0 (极度乐观)", "-1.0 (Very Bearish) to +1.0 (Very Bullish)"),
+        )
+
+    st.markdown("---")
+
+    # Multi-dimensional Filters
+    f_col1, f_col2, f_col3, f_col4 = st.columns([2, 2, 3, 2])
+    with f_col1:
+        outlet_choice = st.selectbox(
+            tr("媒体信源", "News Outlet"),
+            ["All", "WSJ", "NYT"],
+            key="news_outlet_filter",
+        )
+    with f_col2:
+        layer_opts = ["All", "L1", "L2", "L3", "L4", "L5"]
+        layer_choice = st.selectbox(
+            tr("产业链层级", "Stack Layer"),
+            layer_opts,
+            format_func=lambda x: (
+                tr("全部层级", "All Layers")
+                if x == "All"
+                else f"{x}: {_LAYER_ZH.get(x, x) if not is_en else _LAYER_EN.get(x, x)}"
+            ),
+            key="news_layer_filter",
+        )
+    with f_col3:
+        theme_opts = [
+            "All",
+            "CapEx_Infrastructure",
+            "Export_Controls_Policy",
+            "Buybacks_Capital_Allocation",
+            "Valuation_Bubble_Froth",
+            "Model_Breakthrough",
+            "General_AI_Tech",
+        ]
+        _THEME_NAMES = {
+            "All": tr("全部主题", "All Themes"),
+            "CapEx_Infrastructure": tr("⚡ 算力基建与电力/封装瓶颈", "⚡ CapEx & Infrastructure"),
+            "Export_Controls_Policy": tr("🛡️ 出口管制与国产替代", "🛡️ Export Controls & Policy"),
+            "Buybacks_Capital_Allocation": tr("💰 股份回购与资本配置治理", "💰 Buybacks & Capital Allocation"),
+            "Valuation_Bubble_Froth": tr("🌡️ 估值泡沫与业绩重估", "🌡️ Valuation & Froth"),
+            "Model_Breakthrough": tr("🧠 前沿模型与推理突破", "🧠 Model Breakthrough"),
+            "General_AI_Tech": tr("🌐 泛 AI 生态落地", "🌐 General AI Tech"),
+        }
+        theme_choice = st.selectbox(
+            tr("核心研究主题", "Thematic Dimension"),
+            theme_opts,
+            format_func=lambda x: _THEME_NAMES.get(x, x),
+            key="news_theme_filter",
+        )
+    with f_col4:
+        ticker_search = st.text_input(
+            tr("标的代码过滤", "Filter by Ticker"),
+            placeholder="e.g. NVDA, 688256, BABA",
+            key="news_ticker_filter",
+        )
+
+    # Query articles
+    filtered_articles = data.load_news_signals(
+        ticker=ticker_search if ticker_search.strip() else None,
+        layer=layer_choice if layer_choice != "All" else None,
+        theme=theme_choice if theme_choice != "All" else None,
+        source=outlet_choice if outlet_choice != "All" else None,
+        days=30,
+        min_relevance=0.15,
+        limit=60,
+    )
+
+    if filtered_articles.empty:
+        st.info(tr("当前筛选条件下未检索到符合条件的财经新闻报道。可点击上方按钮抓取最新资讯。", "No articles match the current filter criteria. Click 'Sync Press Wire Now' above to pull recent stories."))
+    else:
+        st.caption(tr(f"共检索到 {len(filtered_articles)} 篇符合条件的权威报道（点击标题直达官方原文）：", f"Found {len(filtered_articles)} matching reports (click headline to open verified source):"))
+
+        # Render each article in card style
+        import json
+        for _, art in filtered_articles.iterrows():
+            pub_date = art["published_at"].strftime("%Y-%m-%d %H:%M") if hasattr(art["published_at"], "strftime") else str(art["published_at"])[:16]
+            source_tag = "🔴 WSJ" if art["source"] == "WSJ" else ("⚫ NYT" if art["source"] == "NYT" else "🌐 Syndication")
+            sent_label = art["sentiment_label"]
+            sent_badge = f":green[🟢 {sent_label}]" if sent_label == "Bullish" else (f":red[🔴 {sent_label}]" if sent_label == "Bearish" else f":gray[⚪ {sent_label}]")
+
+            # Tickers list
+            try:
+                t_list = json.loads(art["tickers"]) if isinstance(art["tickers"], str) else (art["tickers"] or [])
+            except Exception:
+                t_list = []
+            t_badges = " ".join([f"`{t}`" for t in t_list[:5]]) if t_list else ""
+
+            # Themes list
+            try:
+                th_list = json.loads(art["themes"]) if isinstance(art["themes"], str) else (art["themes"] or [])
+            except Exception:
+                th_list = []
+            th_tags = " · ".join([_THEME_NAMES.get(th, th) for th in th_list[:2]])
+
+            with st.container(border=True):
+                st.markdown(f"### [{art['title']}]({art['url']})")
+                meta_line = f"**{source_tag}** · `{pub_date} UTC` · {sent_badge}"
+                if t_badges:
+                    meta_line += f" · {tr('标的', 'Tickers')}: {t_badges}"
+                if th_tags:
+                    meta_line += f" · {tr('主题', 'Themes')}: *{th_tags}*"
+                st.markdown(meta_line)
+                if art.get("summary"):
+                    st.markdown(f"> {art['summary']}")
+
+# ── TAB 6: Analyst Drafting Studio ───────────────────────────────────────────
 with tab_studio:
     st.subheader(
         tr("📝 IDC 分析师快报与研报起草台 (Analyst Drafting Studio)", "📝 IDC Analyst Drafting Studio & Research Notes")
@@ -873,6 +1081,10 @@ with tab_studio:
             "Instant 1-click generator for official-format IDC Research Notes: Single-Vendor Profiles and Global MarketScape Briefings.",
         )
     )
+
+    # Point-in-time: a briefing for a historical snapshot must not cite
+    # articles published after that snapshot date.
+    recent_news_df = data.load_news_signals(days=30, limit=100, as_of=as_of)
 
     draft_opts = (
         ["🔬 Single-Vendor Deep Dive Profile (IDC Format)", "🌐 Global AI Industry Overview & MarketScape Briefing"]
@@ -909,6 +1121,7 @@ with tab_studio:
             fc_df=fc_df,
             links_df=links_df,
             analyst_commentary=analyst_notes_input,
+            news_df=recent_news_df,
             lang=curr_lang,
         )
 
@@ -926,7 +1139,13 @@ with tab_studio:
         ):
             st.markdown(vendor_profile_md)
     else:
-        briefing_md = generate_idc_executive_briefing(as_of, snap_df, fc_df, lang=curr_lang)
+        briefing_md = generate_idc_executive_briefing(
+            as_of,
+            snap_df,
+            fc_df,
+            news_df=recent_news_df,
+            lang=curr_lang,
+        )
         st.download_button(
             label=tr("📥 导出完整 IDC 行业全景研报 (Markdown)", "📥 Download Full IDC MarketScape Executive Briefing (Markdown)"),
             data=briefing_md,
