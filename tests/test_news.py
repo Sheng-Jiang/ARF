@@ -144,6 +144,39 @@ class TestNewsClassifier:
         res = classifier.classify("Dairy farm reports record milk output as cows graze")
         assert "CapEx_Infrastructure" not in res["themes"]
 
+    def test_bare_now_does_not_tag_servicenow(self, classifier):
+        res = classifier.classify(
+            "Voters Rejected A.I. in the Midterms. Now Comes an Era of Scrutiny."
+        )
+        assert "NOW" not in res["tickers"]
+
+    def test_research_is_not_a_lam_research_alias(self, classifier):
+        res = classifier.classify(
+            "Reid Hoffman Raises $24.6 Million for AI Cancer-Research Startup"
+        )
+        assert "LRCX" not in res["tickers"]
+
+    def test_plural_theme_keywords_match(self, classifier):
+        res = classifier.classify("Hyperscalers Expand Data Centers as Tariffs Loom")
+        assert "CapEx_Infrastructure" in res["themes"]
+        assert "Export_Controls_Policy" in res["themes"]
+
+    def test_sentiment_handles_slide_and_threat(self, classifier):
+        slide = classifier.classify("U.S. Stocks Slide as AI Rally Hits a Wall")
+        assert slide["sentiment_label"] == "Bearish"
+        threat = classifier.classify(
+            "The Election Day Revolt That Threatens America's AI Boom"
+        )
+        assert threat["sentiment_label"] == "Bearish"
+
+    def test_generic_fallback_cannot_reach_full_relevance(self, classifier):
+        res = classifier.classify(
+            "Amazon Kindle Colorsoft Review",
+            "An e-reader offering respite from artificial intelligence hype.",
+        )
+        assert "AMZN" in res["tickers"]
+        assert res["relevance_score"] < 1.0
+
 
 class TestNewsFeedsHelpers:
     def test_clean_text(self):
@@ -160,14 +193,18 @@ class TestNewsFeedsHelpers:
         assert cleaned == "https://www.wsj.com/articles/ai-boom-123"
 
     def test_generate_article_id(self):
-        url = "https://www.wsj.com/articles/nvidia"
-        title = "Nvidia Soars on Q3 Beat"
-        id1 = _generate_article_id(url, title)
-        id2 = _generate_article_id(url, title)
-        id3 = _generate_article_id(url, "Different Title")
+        day1 = datetime(2026, 11, 3, 14, 30, tzinfo=UTC)
+        day2 = datetime(2026, 11, 4, 14, 30, tzinfo=UTC)
+        id1 = _generate_article_id("Nvidia Soars on Q3 Beat", day1)
+        # Same story, different capitalization/punctuation (syndicated copy)
+        id2 = _generate_article_id("NVIDIA soars on Q3 beat!", day1)
+        # Same recurring title on a different day is a different article
+        id3 = _generate_article_id("Nvidia Soars on Q3 Beat", day2)
+        id4 = _generate_article_id("Different Title", day1)
         assert len(id1) == 24
         assert id1 == id2
         assert id1 != id3
+        assert id1 != id4
 
     def test_parse_pub_date(self):
         rfc822 = "Mon, 03 Nov 2026 14:30:00 GMT"
@@ -450,5 +487,34 @@ class TestSyncFinancialPress:
         count = sync_financial_press(conn=conn, as_of=past_as_of)
         assert count == 0
         assert query_news_signals(conn, days=365).empty
+        conn.close()
+
+    @patch("arf.news.sync.fetch_all_active_feeds")
+    def test_sync_drops_items_older_than_max_age(self, mock_fetch):
+        now = datetime.now(UTC)
+
+        def item(article_id: str, title: str, days_ago: int) -> dict:
+            return {
+                "article_id": article_id,
+                "source": "WSJ",
+                "title": title,
+                "summary": "AI CapEx drives GPU and liquid cooling demand.",
+                "url": f"https://wsj.com/{article_id}",
+                "published_at": now - timedelta(days=days_ago),
+            }
+
+        mock_fetch.return_value = [
+            item("recent", "Nvidia Datacenter Revenue Growth", 5),
+            item("stale", "Nvidia Datacenter Revenue Growth From 2025", 45),
+        ]
+
+        conn = duckdb.connect(":memory:")
+        init_news_table(conn)
+
+        count = sync_financial_press(conn=conn, max_age_days=30)
+        assert count == 1
+        df = query_news_signals(conn, days=365)
+        assert len(df) == 1
+        assert df.iloc[0]["article_id"] == "recent"
         conn.close()
 
