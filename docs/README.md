@@ -27,3 +27,8 @@ This directory houses the authoritative architecture records, product requiremen
 ## 4. Engineering Reviews & Post-Mortems
 * **[Architecture Review (2026-09-13)](file:///Users/sheng/Developer/ARF/docs/REVIEW_2026-09-13.md)**: System review and audit report for core pipeline milestones.
 * **[Architecture Review (2026-10-21)](file:///Users/sheng/Developer/ARF/docs/REVIEW_2026-10-21.md)**: Progress and calibration review for hybrid cloud data integration and Gemini model screener.
+
+---
+
+## 5. Future Integrations & Architecture Proposals
+* **[Proposal: Google Finance vs. WSJ/NYT Multi-Tier Market Intelligence Architecture](file:///Users/sheng/Developer/ARF/docs/PROPOSAL_GOOGLE_FINANCE_INTEGRATION.md)**: Architectural evaluation and future integration design contrasting Google Finance (broad-spectrum market aggregation, cross-leg quote harmonization, and retail attention metrics) with editorial press wires (WSJ & NYT high-SNR qualitative signals for IDC MarketScape).
