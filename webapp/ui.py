@@ -615,9 +615,12 @@ def render_research_synthesis(snapshot_df: pd.DataFrame, as_of: date) -> None:
 
     # On-demand (re)generation when a key is configured.
     curr_lang = get_current_lang()
-    session_slot = f"research_synth_text_{curr_lang}"
-    model_slot = f"research_synth_model_{curr_lang}"
-    citations_slot = f"research_synth_citations_{curr_lang}"
+    # Scope the slot to the snapshot: otherwise a synthesis regenerated for
+    # one date keeps shadowing the DB text after the user picks another date.
+    cache_scope = f"{curr_lang}_{as_of}"
+    session_slot = f"research_synth_text_{cache_scope}"
+    model_slot = f"research_synth_model_{cache_scope}"
+    citations_slot = f"research_synth_citations_{cache_scope}"
     if gemini.is_enabled():
         btn = (
             tr("🔄 重新生成研报综述", "🔄 Regenerate Research Synthesis")

@@ -6,10 +6,14 @@ import streamlit as st
 
 from webapp.data import _open_conn
 from webapp.mobile import inject_mobile_css
-from webapp.ui import get_current_lang, render_sidebar, tr
+from webapp.ui import render_sidebar, tr
 
-is_en = get_current_lang() == "en"
-
+st.set_page_config(
+    page_title=tr("一键研报 — ARF Weekly Report", "1-Click Research Note — ARF Weekly Report"),
+    page_icon="📝",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 inject_mobile_css()
 
 st.title(tr("📝 一键生成综合研报", "📝 Generate Comprehensive Research Report"))

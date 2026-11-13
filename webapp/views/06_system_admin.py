@@ -29,6 +29,10 @@ from webapp.ui import get_current_lang, tr
 
 is_en = get_current_lang() == "en"
 
+st.set_page_config(
+    page_title=tr("ARF — 管理面板", "ARF — System Administration"),
+    layout="wide",
+)
 inject_mobile_css()
 st.title(tr("⚙️ 管理面板", "⚙️ System Administration"))
 st.caption(
@@ -179,7 +183,7 @@ with st.form("trigger_form"):
     )
     if submitted:
         try:
-            execution = jobs.trigger_pipeline(as_of=as_of_input)
+            execution = jobs.trigger_pipeline(as_of=as_of_input, lang=get_current_lang())
             st.success(
                 tr(
                     f"已成功提交管道运行请求。执行ID：`{execution}`",

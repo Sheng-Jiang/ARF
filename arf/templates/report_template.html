@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="{{ s.html_lang }}">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ARF 估值温度计 — {{ as_of }}</title>
+<title>{{ s.page_title }} — {{ as_of }}</title>
 <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -415,14 +415,14 @@
 {%- if d == 1 -%}t-d1{%- elif d == 2 -%}t-d2{%- elif d in [3,4,5] -%}t-d3{%- elif d in [6,7] -%}t-d6{%- elif d is number and d >= 8 -%}t-d8{%- else -%}t-na{%- endif -%}
 {%- endmacro %}
 
-{% macro legtable(rows) %}
+{% macro legtable(rows, s) %}
 <div class="table-wrap">
 <table>
   <thead>
     <tr>
       <th class="lft" style="text-align:center">D</th>
-      <th class="lft">代码 / 公司</th>
-      <th class="lft">层级</th>
+      <th class="lft">{{ s.col_ticker }}</th>
+      <th class="lft">{{ s.col_layer }}</th>
       <th>ARF</th>
       <th>E</th>
       <th>V</th>
@@ -462,11 +462,11 @@
 <div class="mast">
   <div class="wrap">
     <div class="rule tag">
-      <span>AI Relevance Factor · 周度估值温度计</span>
-      <span><span class="reg">●</span> WK {{ as_of }} · 回测窗口 {{ lookback_months }} 个月</span>
+      <span>{{ s.mast_kicker }}</span>
+      <span><span class="reg">●</span> {{ s.week_label }}</span>
     </div>
-    <h1>AI 叙事，把估值<em>烧</em>到了几度？</h1>
-    <p class="dek">ARF 用单一 0–100 分量化每只 AI 产业链个股被叙事“吹高”的程度。下表读数即本周的泡沫温度——美股与中股各成一支温标，从不混合计量。</p>
+    <h1>{{ s.hero_title|safe }}</h1>
+    <p class="dek">{{ s.hero_dek }}</p>
   </div>
 </div>
 
@@ -478,7 +478,7 @@
   <!-- dual mercury thermometer (signature) -->
   <div class="gauge">
     <div class="gauge-head">
-      <span class="tag">泡沫温标 · DUAL CHANNEL</span>
+      <span class="tag">{{ s.gauge_label }}</span>
     </div>
     <div class="columns">
       <span class="scale" aria-hidden="true">
@@ -506,19 +506,19 @@
     <div class="strip">
       <div class="cell">
         <div class="n crit">{{ d1_us }}</div>
-        <div class="l">🇺🇸 美股 D1</div>
+        <div class="l">{{ s.us_d1_label }}</div>
       </div>
       <div class="cell">
         <div class="n crit">{{ froth_us }}</div>
-        <div class="l">🇺🇸 泡沫预警 ★</div>
+        <div class="l">{{ s.us_froth_label }}</div>
       </div>
       <div class="cell">
         <div class="n warm">{{ d1_china }}</div>
-        <div class="l">🇨🇳 中股 D1</div>
+        <div class="l">{{ s.cn_d1_label }}</div>
       </div>
       <div class="cell">
         <div class="n warm">{{ froth_china }}</div>
-        <div class="l">🇨🇳 泡沫预警 ★</div>
+        <div class="l">{{ s.cn_froth_label }}</div>
       </div>
     </div>
 
@@ -526,12 +526,12 @@
     <div class="deltas">
       {% for d in thermo_deltas %}
       <div class="dtile">
-        <div class="dl">{% if d.leg == 'US' %}🇺🇸 US{% else %}🇨🇳 CN{% endif %} · 绝对泡沫数</div>
+        <div class="dl">{% if d.leg == 'US' %}🇺🇸 US{% else %}🇨🇳 CN{% endif %} · {{ s.absolute_froth_label }}</div>
         <div class="dv">{{ d.absolute_froth }}</div>
         <div class="dd {% if '+' in d.absolute_froth_delta %}up{% elif '-' in d.absolute_froth_delta %}down{% else %}flat{% endif %}">{{ d.absolute_froth_delta }} WoW</div>
       </div>
       <div class="dtile">
-        <div class="dl">{% if d.leg == 'US' %}🇺🇸 US{% else %}🇨🇳 CN{% endif %} · EV/S 分位</div>
+        <div class="dl">{% if d.leg == 'US' %}🇺🇸 US{% else %}🇨🇳 CN{% endif %} · {{ s.ev_sales_pct_label }}</div>
         <div class="dv">{{ "%.1f"|format(d.median_ev_sales_pct) }}%</div>
         <div class="dd {% if '+' in d.ev_sales_delta %}up{% elif '-' in d.ev_sales_delta %}down{% else %}flat{% endif %}">{{ d.ev_sales_delta }} WoW</div>
       </div>
@@ -545,17 +545,17 @@
 <div class="sec">
   <div class="sec-head">
     <span class="ch">CH.1</span>
-    <h2>评分阶梯</h2>
+    <h2>{{ s.score_ladder }}</h2>
   </div>
 
   {% if us_rows %}
-  <div class="sub">🇺🇸 美股 · 按 ARF 降序 · 越靠上越热</div>
-  {{ legtable(us_rows) }}
+  <div class="sub">{{ s.us_sorted }}</div>
+  {{ legtable(us_rows, s) }}
   {% endif %}
 
   {% if china_rows %}
-  <div class="sub">🇨🇳 中股 · 按 ARF 降序 · 越靠上越热</div>
-  {{ legtable(china_rows) }}
+  <div class="sub">{{ s.cn_sorted }}</div>
+  {{ legtable(china_rows, s) }}
   {% endif %}
 </div>
 
@@ -563,19 +563,19 @@
 <div class="sec">
   <div class="sec-head">
     <span class="ch">CH.2</span>
-    <h2>温标趋势</h2>
+    <h2>{{ s.thermo_trend }}</h2>
   </div>
 
   {% if thermo_chart %}
   <div class="panel">
-    <div class="cap">泡沫温度计 · 时序读数</div>
+    <div class="cap">{{ s.thermo_chart_caption }}</div>
     <div class="body">{{ thermo_chart|safe }}</div>
   </div>
   {% endif %}
 
   {% if valuation_chart %}
   <div class="panel">
-    <div class="cap">EV/Sales 分位 · 时序读数</div>
+    <div class="cap">{{ s.valuation_chart_caption }}</div>
     <div class="body">{{ valuation_chart|safe }}</div>
   </div>
   {% endif %}
@@ -585,9 +585,9 @@
 <div class="sec">
   <div class="sec-head">
     <span class="ch">CH.3</span>
-    <h2>Top 5 中国 A+H 策略回测</h2>
+    <h2>{{ s.backtest_title }}</h2>
   </div>
-  <div class="sub">回测窗口 {{ lookback_months }} 个月 · 参数寻优后最优组合</div>
+  <div class="sub">{{ s.backtest_sub }}</div>
 
   {% if backtest_cards %}
   <div class="bt-grid">
@@ -599,43 +599,43 @@
           <div class="nm">{{ card.name }}</div>
         </div>
         <div class="badge {% if card.tech_score != 'N/A' and card.tech_score|float >= 70 %}b-hot{% elif card.tech_score != 'N/A' and card.tech_score|float >= 40 %}b-mid{% else %}b-low{% endif %}">
-          技术评分 {{ card.tech_score }}
+          {{ s.tech_score }} {{ card.tech_score }}
         </div>
       </div>
 
       <div class="mini">
         <div><div class="v">{{ card.rsi }}</div><div class="k">RSI</div></div>
-        <div><div class="v">{{ card.ma_bullish }}</div><div class="k">均线多头</div></div>
-        <div><div class="v">{{ card.chip_profit }}</div><div class="k">获利盘</div></div>
+        <div><div class="v">{{ card.ma_bullish }}</div><div class="k">{{ s.ma_bullish }}</div></div>
+        <div><div class="v">{{ card.chip_profit }}</div><div class="k">{{ s.profit_chips }}</div></div>
       </div>
 
       {% if card.strategies %}
       <div class="stbl-wrap">
       <table class="stbl">
         <thead>
-          <tr><th class="lft">策略</th><th class="lft">最优参数</th><th>收益%</th><th>夏普</th><th>回撤%</th></tr>
+          <tr><th class="lft">{{ s.tbl_strategy }}</th><th class="lft">{{ s.tbl_params }}</th><th>{{ s.tbl_return }}</th><th>{{ s.tbl_sharpe }}</th><th>{{ s.tbl_dd }}</th></tr>
         </thead>
         <tbody>
-          {% for s in card.strategies %}
-          <tr class="{% if s.name == card.best_strategy %}best{% endif %}">
-            <td class="lft">{{ s.name.split(' ')[0] }}{% if s.name == card.best_strategy %}<span class="best-tag">最优</span>{% endif %}</td>
-            <td class="lft" style="color: var(--faint)">{{ s.params }}</td>
-            <td class="{% if s.ret|float > 0 %}pos{% else %}neg{% endif %}">{{ s.ret }}</td>
-            <td>{{ s.sharpe }}</td>
-            <td>{{ s.dd }}</td>
+          {% for strat in card.strategies %}
+          <tr class="{% if strat.name == card.best_strategy %}best{% endif %}">
+            <td class="lft">{{ strat.name.split(' ')[0] }}{% if strat.name == card.best_strategy %}<span class="best-tag">{{ s.best_tag }}</span>{% endif %}</td>
+            <td class="lft" style="color: var(--faint)">{{ strat.params }}</td>
+            <td class="{% if strat.ret|float > 0 %}pos{% else %}neg{% endif %}">{{ strat.ret }}</td>
+            <td>{{ strat.sharpe }}</td>
+            <td>{{ strat.dd }}</td>
           </tr>
           {% endfor %}
         </tbody>
       </table>
       </div>
       {% else %}
-      <div class="empty">暂无回测数据</div>
+      <div class="empty">{{ s.no_backtest_data }}</div>
       {% endif %}
     </div>
     {% endfor %}
   </div>
   {% else %}
-  <div class="empty">未找到符合条件的中国 A+H 股进行回测</div>
+  <div class="empty">{{ s.no_candidates }}</div>
   {% endif %}
 </div>
 
@@ -643,7 +643,7 @@
 <div class="sec">
   <div class="sec-head">
     <span class="ch">CH.4</span>
-    <h2>Gemini 综合研判</h2>
+    <h2>{{ s.gemini_title }}</h2>
   </div>
 
   {% if gemini_synthesis %}
@@ -653,7 +653,7 @@
 
     {% if gemini_citations %}
     <div class="cites">
-      <span class="tag">引用来源</span>
+      <span class="tag">{{ s.sources }}</span>
       {% for c in gemini_citations %}
       <a href="{{ c.uri }}" target="_blank" rel="noopener">{{ c.title or c.uri }}</a>
       {% endfor %}
@@ -661,18 +661,17 @@
     {% endif %}
   </div>
   {% else %}
-  <div class="synth empty">未配置 GEMINI_API_KEY 或 AI 综合研判生成失败。请设置 API 密钥后重试。</div>
+  <div class="synth empty">{{ s.gemini_empty }}</div>
   {% endif %}
 </div>
 
 <!-- ═══════════════════════════════════════ LEGEND -->
 <div class="legend">
-  <p><strong>读数说明与免责声明 ——</strong>
-  温标越高代表估值被 AI 叙事吹得越热；★ 为泡沫预警（D1 且 ROE 低于股权成本且 P/S &gt; 25）。本报告由 ARF 量化模型自动生成，所有评分、回测与 AI 研判均基于预设算法与公开数据，仅作量化分析与学术研究的<strong>参考工具</strong>，<strong>不构成任何证券买卖建议</strong>。历史回测不代表未来收益，AI 生成内容可能含不准确信息，请独立核实、自担风险。</p>
+  <p>{{ s.legend_html|safe }}</p>
 </div>
 
 <div class="foot">
-  <div class="tag">ARF · AI Stack Bubble Monitor · 生成于 {{ generated_at }}</div>
+  <div class="tag">ARF · AI Stack Bubble Monitor · {{ s.generated_at_label }} {{ generated_at }}</div>
 </div>
 
 </div><!-- .wrap -->

@@ -16,9 +16,12 @@ from webapp.data import (
     pool_membership_is_archived,
 )
 from webapp.mobile import inject_mobile_css, is_mobile, show_plotly
-from webapp.ui import get_current_lang, render_sidebar, render_table, scatter_plot, tr
+from webapp.ui import render_sidebar, render_table, scatter_plot, tr
 
-is_en = get_current_lang() == "en"
+st.set_page_config(
+    page_title=tr("ARF — 估值榜单", "ARF — Valuation Leaderboard"),
+    layout="wide",
+)
 
 inject_mobile_css()
 

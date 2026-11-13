@@ -16,8 +16,11 @@ def is_enabled() -> bool:
     return bool(os.getenv("GCP_PROJECT") and os.getenv("PIPELINE_JOB", "arf-pipeline"))
 
 
-def trigger_pipeline(as_of: date | None = None) -> str:
+def trigger_pipeline(as_of: date | None = None, lang: str | None = None) -> str:
     """Kick off the Cloud Run Job; return the execution name.
+
+    ``lang`` ("en" or "zh") is forwarded as ARF_LANG so the job's persisted
+    research synthesis and weekly report match the caller's UI language.
 
     Raises RuntimeError if the env isn't configured.
     """
@@ -32,18 +35,17 @@ def trigger_pipeline(as_of: date | None = None) -> str:
     client = run_v2.JobsClient()
     job_name = f"projects/{project}/locations/{region}/jobs/{job}"
 
-    overrides = None
+    env_vars = [run_v2.EnvVar(name="TRIGGER_SOURCE", value="webapp")]
     if as_of is not None:
-        overrides = run_v2.RunJobRequest.Overrides(
-            container_overrides=[
-                run_v2.RunJobRequest.Overrides.ContainerOverride(
-                    env=[
-                        run_v2.EnvVar(name="AS_OF", value=as_of.isoformat()),
-                        run_v2.EnvVar(name="TRIGGER_SOURCE", value="webapp"),
-                    ],
-                )
-            ],
-        )
+        env_vars.append(run_v2.EnvVar(name="AS_OF", value=as_of.isoformat()))
+    if lang is not None:
+        env_vars.append(run_v2.EnvVar(name="ARF_LANG", value=lang))
+
+    overrides = run_v2.RunJobRequest.Overrides(
+        container_overrides=[
+            run_v2.RunJobRequest.Overrides.ContainerOverride(env=env_vars),
+        ],
+    )
 
     request = run_v2.RunJobRequest(name=job_name, overrides=overrides)
     op = client.run_job(request=request)

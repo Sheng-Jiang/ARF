@@ -18,6 +18,7 @@ from webapp.ui import get_current_lang, tr
 
 is_en = get_current_lang() == "en"
 
+st.set_page_config(page_title=tr("ARF — 双价值链", "ARF — Dual Value Chain"), layout="wide")
 inject_mobile_css()
 
 _LEGEND_BELOW = dict(orientation="h", yanchor="top", y=-0.25, xanchor="left", x=0, font=dict(size=11))

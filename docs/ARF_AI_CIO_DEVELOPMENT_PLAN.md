@@ -71,7 +71,7 @@ Over the course of recent architectural reviews and research breakthroughs, the 
 | **Value Chain & Forecasting** | ✅ **Completed (PR #17)**: `arf/forecast.py` implements 4-layer Barometer (`HORIZON_CONVERGENCE=0.30`, `DEFAULT_BOTTLENECK_CLAMP=0.80`, disjoint 14d/30d revision windows, `_local_market_cap` FX alignment). | Need programmatic event-driven shock propagation (`simulate_supply_chain_shock`) so the CIO agent can run stress tests without a human dragging UI sliders. |
 | **Alpha Signals & CIO** | ✅ **Completed (PR #17)**: `ARFForecastModel` in `ai-hedge-fund` (`arf-prod-2026-10-30`) blended with `ARFModel` in `arf/cio.py` using point-in-time `load_forecast_history`. | `arf/cio.py` portfolio replay and `arf/agent/thesis.py` qualitative IDRs are still disconnected; active positions are not monitored against thesis invalidation rules. |
 | **Agent & Autonomous CIO Loop** | Pydantic schemas in `arf/agent/schemas.py`, 5-step IDR persistence in `arf/db.py`, Gemini screener. | **Primary Phase 2 Focus**: Build `arf/agent/cio_loop.py` implementing the 5-Stage Autonomous CIO Workflow: Anomaly Delta Triage, Causal Shock Propagation, G1–G4 Gatekeeper, Executable Thesis Watchdog (`KillCondition`), and Push-First `CIODecisionPacket`. |
-| **Webapp Cockpit & CLI** | 10 Streamlit pages including the new `🔮 预测晴雨表与前瞻 Alpha` tab in `webapp/pages/10_💼_CIO_投资总监.py`. | Expose the Autonomous CIO Decision Packet & Thesis Watchdog alerts both as a headless CLI/Markdown brief and inside the CIO Cockpit Inbox. |
+| **Webapp Cockpit & CLI** | 10 Streamlit pages including the new `🔮 预测晴雨表与前瞻 Alpha` tab in `webapp/views/10_cio_desk.py`. | Expose the Autonomous CIO Decision Packet & Thesis Watchdog alerts both as a headless CLI/Markdown brief and inside the CIO Cockpit Inbox. |
 | **Verification & Loop** | 301 unit tests passing in `ARF` + 8 signal tests in `ai-hedge-fund`. | Add unit tests for `cio_loop.py` (`tests/test_cio_loop.py`) covering executable kill conditions, shock propagation, G1–G4 gates, and decision packet generation. |
 
 ---
@@ -185,10 +185,10 @@ flowchart LR
     * Automatically attaches default quantitative `KillCondition` predicates to every active position or IDR (e.g., `froth_flag == True`, `roe < wacc * 0.5`, `expected_beat_pct < -0.10`, `chip_profit_ratio < 0.20`), and evaluates all held/monitored tickers against latest snapshot + forecast metrics.
     * Also checks for **Harvest Triggers** when price approaches or exceeds `fair_value_p90` (`expected_return_p50 <= -0.05` after rally).
 * **Task 2.5: Headless CLI Entrypoint & CIO Cockpit Inbox Integration**
-  * Target: `arf/agent/cio_loop.py` (`python -m arf.agent.cio_loop --as-of YYYY-MM-DD [--shock TICKER:DELTA ...]`), `webapp/pages/10_💼_CIO_投资总监.py`
+  * Target: `arf/agent/cio_loop.py` (`python -m arf.agent.cio_loop --as-of YYYY-MM-DD [--shock TICKER:DELTA ...]`), `webapp/views/10_cio_desk.py`
   * Deliverable:
     * CLI tool that generates and prints the Markdown `CIODecisionPacket` on demand or in scheduled jobs.
-    * Integration into `webapp/pages/10_💼_CIO_投资总监.py` so the PM can view the pushed **📬 CIO 决策简报与持仓哨兵 (Autonomous CIO Decision Packet & Thesis Watchdog)**, run conversational/preset shock scenarios, and inspect G1–G4 gate verdicts and kill conditions.
+    * Integration into `webapp/views/10_cio_desk.py` so the PM can view the pushed **📬 CIO 决策简报与持仓哨兵 (Autonomous CIO Decision Packet & Thesis Watchdog)**, run conversational/preset shock scenarios, and inspect G1–G4 gate verdicts and kill conditions.
 
 ---
 
@@ -216,10 +216,10 @@ flowchart LR
 **Goal:** Deliver the executive user experience for the portfolio manager and investment committee.
 
 * **Task 4.1: Interactive Value-Chain Shock Simulator**
-  * Target: `webapp/pages/10_💼_CIO_投资总监.py` & `webapp/pages/8_⚖️_双价值链.py`
+  * Target: `webapp/views/10_cio_desk.py` & `webapp/views/08_dual_value_chain.py`
   * Deliverable: Dynamic UI slider (e.g. *"Hyperscaler CapEx Revision: -20%"*) recalculating the Leontief matrix in real time and highlighting vulnerable nodes.
 * **Task 4.2: Opportunity Alpha Pipeline Board**
-  * Target: `webapp/pages/9_🤖_AI_投资雷达.py`
+  * Target: `webapp/views/09_ai_radar.py`
   * Deliverable: Interactive Kanban board tracking theses through the 7 lifecycle stages with one-click CIO approval buttons (`interrupt()` resume).
 * **Task 4.3: 2-Host Investment Committee Podcast**
   * Target: `arf/agent/multimodal/audio.py`

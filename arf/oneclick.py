@@ -461,8 +461,112 @@ def _backtest_summary_for_gemini(stocks: list[StockBacktestResult], lang: str = 
     return "\n".join(lines)
 
 
-def generate_report_html(report: ReportData) -> str:
-    """Render report data into a standalone HTML file."""
+_REPORT_STRINGS: dict[str, dict[str, str]] = {
+    "zh": {
+        "html_lang": "zh-CN",
+        "page_title": "ARF 估值温度计",
+        "mast_kicker": "AI Relevance Factor · 周度估值温度计",
+        "week_label": "WK {as_of} · 回测窗口 {months} 个月",
+        "hero_title": "AI 叙事，把估值<em>烧</em>到了几度？",
+        "hero_dek": "ARF 用单一 0–100 分量化每只 AI 产业链个股被叙事“吹高”的程度。下表读数即本周的泡沫温度——美股与中股各成一支温标，从不混合计量。",
+        "gauge_label": "泡沫温标 · DUAL CHANNEL",
+        "us_d1_label": "🇺🇸 美股 D1",
+        "us_froth_label": "🇺🇸 泡沫预警 ★",
+        "cn_d1_label": "🇨🇳 中股 D1",
+        "cn_froth_label": "🇨🇳 泡沫预警 ★",
+        "absolute_froth_label": "绝对泡沫数",
+        "ev_sales_pct_label": "EV/S 分位",
+        "score_ladder": "评分阶梯",
+        "us_sorted": "🇺🇸 美股 · 按 ARF 降序 · 越靠上越热",
+        "cn_sorted": "🇨🇳 中股 · 按 ARF 降序 · 越靠上越热",
+        "thermo_trend": "温标趋势",
+        "thermo_chart_caption": "泡沫温度计 · 时序读数",
+        "valuation_chart_caption": "EV/Sales 分位 · 时序读数",
+        "backtest_title": "Top 5 中国 A+H 策略回测",
+        "backtest_sub": "回测窗口 {months} 个月 · 参数寻优后最优组合",
+        "tech_score": "技术评分",
+        "ma_bullish": "均线多头",
+        "profit_chips": "获利盘",
+        "tbl_strategy": "策略",
+        "tbl_params": "最优参数",
+        "tbl_return": "收益%",
+        "tbl_sharpe": "夏普",
+        "tbl_dd": "回撤%",
+        "best_tag": "最优",
+        "no_backtest_data": "暂无回测数据",
+        "no_candidates": "未找到符合条件的中国 A+H 股进行回测",
+        "gemini_title": "Gemini 综合研判",
+        "sources": "引用来源",
+        "gemini_empty": "未配置 GEMINI_API_KEY 或 AI 综合研判生成失败。请设置 API 密钥后重试。",
+        "legend_html": (
+            "<strong>读数说明与免责声明 ——</strong> 温标越高代表估值被 AI 叙事吹得越热；"
+            "★ 为泡沫预警（D1 且 ROE 低于股权成本且 P/S &gt; 25）。本报告由 ARF 量化模型自动生成，"
+            "所有评分、回测与 AI 研判均基于预设算法与公开数据，仅作量化分析与学术研究的"
+            "<strong>参考工具</strong>，<strong>不构成任何证券买卖建议</strong>。"
+            "历史回测不代表未来收益，AI 生成内容可能含不准确信息，请独立核实、自担风险。"
+        ),
+        "generated_at_label": "生成于",
+        "col_ticker": "代码 / 公司",
+        "col_layer": "层级",
+        "ma_yes": "✅ 是",
+        "ma_no": "❌ 否",
+    },
+    "en": {
+        "html_lang": "en",
+        "page_title": "ARF Valuation Thermometer",
+        "mast_kicker": "AI Relevance Factor · Weekly Valuation Thermometer",
+        "week_label": "WK {as_of} · Backtest window {months} mo",
+        "hero_title": "How <em>hot</em> has the AI narrative run valuations?",
+        "hero_dek": "ARF scores every AI-stack name 0–100 on how much its valuation is bent by the narrative. The readings below are this week's froth temperature — the US and China legs run on separate thermometers and are never pooled.",
+        "gauge_label": "FROTH SCALE · DUAL CHANNEL",
+        "us_d1_label": "🇺🇸 US Leg D1",
+        "us_froth_label": "🇺🇸 Froth Warning ★",
+        "cn_d1_label": "🇨🇳 China Leg D1",
+        "cn_froth_label": "🇨🇳 Froth Warning ★",
+        "absolute_froth_label": "Absolute Froth",
+        "ev_sales_pct_label": "EV/S Percentile",
+        "score_ladder": "Score Ladder",
+        "us_sorted": "🇺🇸 US Leg · sorted by ARF · hotter at the top",
+        "cn_sorted": "🇨🇳 China Leg · sorted by ARF · hotter at the top",
+        "thermo_trend": "Thermometer Trend",
+        "thermo_chart_caption": "Bubble thermometer · time series",
+        "valuation_chart_caption": "EV/Sales percentile · time series",
+        "backtest_title": "Top 5 China A+H Strategy Backtest",
+        "backtest_sub": "Backtest window {months} mo · best combination after parameter search",
+        "tech_score": "Tech Score",
+        "ma_bullish": "MA Bullish",
+        "profit_chips": "Profit Chips",
+        "tbl_strategy": "Strategy",
+        "tbl_params": "Best Params",
+        "tbl_return": "Return %",
+        "tbl_sharpe": "Sharpe",
+        "tbl_dd": "Drawdown %",
+        "best_tag": "BEST",
+        "no_backtest_data": "No backtest data",
+        "no_candidates": "No eligible China A+H stocks found for backtest",
+        "gemini_title": "Gemini Synthesis",
+        "sources": "Sources",
+        "gemini_empty": "GEMINI_API_KEY is not configured, or AI synthesis failed. Set the API key and retry.",
+        "legend_html": (
+            "<strong>How to read this &amp; disclaimer —</strong> A higher reading means the AI narrative has pushed "
+            "the valuation hotter; ★ marks the froth warning (D1 and ROE below cost of equity and P/S &gt; 25). "
+            "This report is generated automatically by the ARF quantitative model; all scores, backtests and AI "
+            "commentary rest on preset algorithms and public data and are a <strong>reference tool</strong> for "
+            "quantitative analysis and academic research, <strong>not investment advice</strong>. Past backtests do "
+            "not guarantee future returns, and AI-generated content may contain inaccuracies — verify independently "
+            "and bear your own risk."
+        ),
+        "generated_at_label": "Generated",
+        "col_ticker": "Ticker / Company",
+        "col_layer": "Layer",
+        "ma_yes": "✅ Yes",
+        "ma_no": "❌ No",
+    },
+}
+
+
+def generate_report_html(report: ReportData, lang: str = "zh") -> str:
+    """Render report data into a standalone HTML file in the requested language."""
     from jinja2 import Environment, FileSystemLoader
 
     template_dir = Path(__file__).parent / "templates"
@@ -471,6 +575,14 @@ def generate_report_html(report: ReportData) -> str:
         autoescape=True,
     )
     template = env.get_template("report_template.html")
+
+    is_en = lang == "en"
+    strings = dict(_REPORT_STRINGS["en" if is_en else "zh"])
+    months = BACKTEST_LOOKBACK_DAYS // 30
+    strings["week_label"] = strings["week_label"].format(
+        as_of=report.as_of.isoformat(), months=months
+    )
+    strings["backtest_sub"] = strings["backtest_sub"].format(months=months)
 
     # Prepare table rows for US and China
     def _prepare_rows(df: pd.DataFrame) -> list[dict]:
@@ -503,7 +615,7 @@ def generate_report_html(report: ReportData) -> str:
             param_cols = [c for c in top.index if c not in ["return", "dd", "sharpe"]]
             params_str = ", ".join(f"{c}={top[c]}" for c in param_cols)
             strategies.append({
-                "name": name,
+                "name": _STRATEGY_NAME_EN.get(name, name) if is_en else name,
                 "params": params_str,
                 "ret": f"{top.get('return', 0):.1f}",
                 "sharpe": f"{top.get('sharpe', 0):.2f}",
@@ -514,10 +626,13 @@ def generate_report_html(report: ReportData) -> str:
             "name": s.name,
             "tech_score": f"{s.tech_score:.1f}" if s.tech_score else "N/A",
             "rsi": f"{s.rsi:.1f}" if s.rsi else "N/A",
-            "ma_bullish": "✅ 是" if s.ma_bullish else "❌ 否",
+            "ma_bullish": strings["ma_yes"] if s.ma_bullish else strings["ma_no"],
             "chip_profit": f"{s.chip_profit_ratio*100:.1f}%" if s.chip_profit_ratio is not None else "N/A",
             "chip_avg_cost": f"¥{s.chip_avg_cost:.2f}" if s.chip_avg_cost else "N/A",
-            "best_strategy": s.best_strategy,
+            "best_strategy": (
+                _STRATEGY_NAME_EN.get(s.best_strategy, s.best_strategy)
+                if is_en else s.best_strategy
+            ),
             "best_sharpe": f"{s.best_sharpe:.2f}",
             "best_return": f"{s.best_return:.1f}",
             "best_dd": f"{s.best_max_dd:.1f}",
@@ -527,6 +642,7 @@ def generate_report_html(report: ReportData) -> str:
     from datetime import datetime
 
     html = template.render(
+        s=strings,
         as_of=report.as_of.isoformat(),
         generated_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         d1_us=report.d1_us,
@@ -541,7 +657,6 @@ def generate_report_html(report: ReportData) -> str:
         backtest_cards=bt_cards,
         gemini_synthesis=report.gemini_synthesis,
         gemini_citations=report.gemini_citations,
-        lookback_months=BACKTEST_LOOKBACK_DAYS // 30,
     )
     return html
 
@@ -577,7 +692,7 @@ def generate_oneclick_report(
     else:
         log.info("Gemini API key not set — skipping AI synthesis")
 
-    html = generate_report_html(report_data)
+    html = generate_report_html(report_data, lang=lang)
 
     report_dir.mkdir(parents=True, exist_ok=True)
     out_path = report_dir / f"weekly_report_{as_of}.html"

@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import logging
 import math
+import os
 import uuid
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -1133,6 +1134,12 @@ def main() -> None:
         default=8,
         help="Maximum proposal tickets to return.",
     )
+    parser.add_argument(
+        "--lang",
+        choices=["en", "zh"],
+        default=os.getenv("ARF_LANG", "en"),
+        help="Language of the Markdown brief (default: $ARF_LANG, then 'en').",
+    )
 
     args = parser.parse_args()
     conn = init_db(Path(args.db))
@@ -1163,6 +1170,7 @@ def main() -> None:
         held_tickers=held,
         customer_shocks=shocks if shocks else None,
         max_proposals=args.max_proposals,
+        lang=args.lang,
     )
 
     print(packet.markdown_brief)

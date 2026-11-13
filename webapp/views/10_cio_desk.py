@@ -19,7 +19,11 @@ from webapp import data
 from webapp.mobile import inject_mobile_css
 from webapp.ui import get_current_lang, render_sidebar, tr
 
-is_en = get_current_lang() == "en"
+st.set_page_config(
+    page_title=tr("ARF — AI CIO 投资总监驾驶舱", "ARF — AI CIO Executive Desk Cockpit"),
+    page_icon="💼",
+    layout="wide",
+)
 
 inject_mobile_css()
 

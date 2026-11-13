@@ -9,10 +9,13 @@ from webapp import gemini
 # Local imports
 from webapp.data import _open_conn
 from webapp.mobile import inject_mobile_css
-from webapp.ui import get_current_lang, render_sidebar, tr
+from webapp.ui import render_sidebar, tr
 
-is_en = get_current_lang() == "en"
-
+st.set_page_config(
+    page_title=tr("AI 智能选股器", "AI Stock Screener"),
+    page_icon="🔍",
+    layout="wide",
+)
 inject_mobile_css()
 
 st.title(tr("🔍 AI 智能多因子筛选器", "🔍 AI Multi-Factor Stock Screener"))

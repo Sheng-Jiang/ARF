@@ -9,7 +9,7 @@
 
 ## 1. Context and Problem Statement
 
-The ARF system calculates narrative exposure, valuation stretch, and bubble thermometry across 73 companies in Jensen Huang's 5-layer AI stack. To complete the investment workflow, we introduced the **"AI CIO (投资总监)" Cockpit** (`webapp/pages/10_💼_CIO_投资总监.py`), which replays the ARF investment mandate over historical market windows and produces real-time order books, portfolio holdings, factor exposures, and performance scorecards.
+The ARF system calculates narrative exposure, valuation stretch, and bubble thermometry across 73 companies in Jensen Huang's 5-layer AI stack. To complete the investment workflow, we introduced the **"AI CIO (投资总监)" Cockpit** (`webapp/views/10_cio_desk.py`), which replays the ARF investment mandate over historical market windows and produces real-time order books, portfolio holdings, factor exposures, and performance scorecards.
 
 However, the core hedge fund simulation engine, multi-agent evaluation framework, and mandate execution logic reside in a separate open-source repository: [`Sheng-Jiang/ai-hedge-fund`](https://github.com/Sheng-Jiang/ai-hedge-fund) (package `aihf`, root module `hedge_fund`).
 
@@ -55,7 +55,7 @@ We chose **Option 4: Single Docker Container via Git-Pinned Package Dependency w
 |                                                                         |
 |  +-------------------------------------------------------------------+  |
 |  |                     Streamlit UI & Routing                        |  |
-|  |         (webapp/app.py, webapp/pages/10_💼_CIO_投资总监.py)        |  |
+|  |         (webapp/app.py, webapp/views/10_cio_desk.py)              |  |
 |  +---------------------------------+---------------------------------+  |
 |                                    |                                    |
 |                                    v                                    |

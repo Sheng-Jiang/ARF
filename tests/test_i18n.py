@@ -61,11 +61,28 @@ def test_no_legacy_pages_directory_and_views_exist():
 def test_app_navigation_preserves_switcher_across_views():
     from streamlit.util import calc_hash
 
+    # st.navigation identifies each page by calc_hash(url_path), so AppTest's
+    # public switch_page() (which hashes the script path) cannot address pages
+    # that declare a custom url_path. Drive the same hash st.navigation
+    # registers, then assert each view's *own title* so that a Streamlit
+    # upgrade that stops honouring _page_hash fails loudly instead of silently
+    # re-testing the default page.
+    cases = {
+        "valuation-leaderboard": "Valuation Leaderboard",
+        "bubble-thermometer": "Bubble Thermometer",
+        "dual-value-chain": "Dual Value Chain — Market Cap Comparison",
+        "ai-screener": "AI Multi-Factor Stock Screener",
+        "research-note": "Generate Comprehensive Research Report",
+    }
     at = AppTest.from_file("webapp/app.py", default_timeout=30)
-    for slug in ("valuation-leaderboard", "bubble-thermometer", "dual-value-chain", "ai-screener", "research-note"):
+    for slug, marker in cases.items():
         at._page_hash = calc_hash(slug)
         at.run()
         assert not at.exception
+        titles = [t.value for t in at.title]
+        assert any(marker in title for title in titles), (
+            f"Navigation to {slug} did not happen; rendered titles: {titles}"
+        )
         radios = [r.label for r in at.sidebar.radio]
         assert any("Language" in label for label in radios), f"Missing language switcher on {slug}"
 
@@ -89,6 +106,28 @@ def test_jobs_status_messages_respect_lang(monkeypatch):
     res_zh = jobs.get_execution_status("exec-1", lang="zh")
     assert res_en["message"] == "Run succeeded ✓"
     assert res_zh["message"] == "运行成功 ✓"
+
+
+def test_trigger_pipeline_forwards_lang(monkeypatch):
+    from datetime import date
+    from types import SimpleNamespace
+
+    from webapp import jobs
+
+    monkeypatch.setenv("GCP_PROJECT", "demo-project")
+    captured = {}
+
+    class _FakeJobsClient:
+        def run_job(self, request):
+            captured["request"] = request
+            return SimpleNamespace(metadata=SimpleNamespace(name="exec-1"))
+
+    monkeypatch.setattr("google.cloud.run_v2.JobsClient", _FakeJobsClient)
+
+    assert jobs.trigger_pipeline(as_of=date(2026, 6, 26), lang="en") == "exec-1"
+    overrides = captured["request"].overrides.container_overrides[0]
+    env = {e.name: e.value for e in overrides.env}
+    assert env == {"TRIGGER_SOURCE": "webapp", "AS_OF": "2026-06-26", "ARF_LANG": "en"}
 
 
 def test_kline_chart_respects_lang():

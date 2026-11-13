@@ -28,8 +28,12 @@ from webapp.mobile import inject_mobile_css, is_mobile, show_plotly
 from webapp.schemas import BacktraderParams, StrategyBase
 from webapp.ui import get_current_lang, tr
 
-is_en = get_current_lang() == "en"
-
+st.set_page_config(
+    page_title=tr("技术分析与策略回测", "Technical Analysis & Backtest"),
+    page_icon="📈",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 inject_mobile_css()
 
 st.title(tr("📈 技术面多因子评分 & 策略回测仪表盘", "📈 Multi-Factor Technical Scoring & Strategy Backtest Dashboard"))

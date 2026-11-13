@@ -3,7 +3,7 @@
 **文档编号：** `AI-CIO-TECH-002-ZH`  
 **发布日期：** 2026-10-28  
 **架构状态：** 已批准核心规范（Approved Architecture Specification）  
-**适用模块：** `ARF` / `AI-CIO` (`arf/cio.py`, `arf/value_chain.py`, `arf/scoring.py`, `webapp/pages/10_💼_CIO_投资总监.py`)  
+**适用模块：** `ARF` / `AI-CIO` (`arf/cio.py`, `arf/value_chain.py`, `arf/scoring.py`, `webapp/views/10_cio_desk.py`)  
 **关联合同与标准：** [`docs/ADR-001 代码优先本体准则`](file:///Users/sheng/Developer/ARF/docs/ADR-001-Next-Gen-Modeling-and-Lightweight-Ontology-for-Agents.md)，[`docs/ARF 数字投资分析师愿景`](file:///Users/sheng/Developer/ARF/docs/ARF_DIGITAL_INVESTMENT_ANALYST_VISION.md)
 
 ---
@@ -218,7 +218,7 @@ $$\mathbb{E}[\Delta \text{一致预期修正}_{\text{供应商}, t+30d}] = \beta
 │    • 增速一致性逻辑锁：若上游供应商 g* > 2 倍客户群 g*，自动标红进入审查               │
 │    • 泡沫标志（Froth Flag）：估值与盈利能力背离时直接剥夺多头准入资格                  │
 ├────────────────────────────────────────────────────────────────────────────────────────┤
-│ 4. AI-CIO 投资总监驾驶舱 (Streamlit / webapp/pages/10_💼_CIO_投资总监.py)              │
+│ 4. AI-CIO 投资总监驾驶舱 (Streamlit / webapp/views/10_cio_desk.py)              │
 │    • 投资组合再平衡与敞口调优建议                                                      │
 │    • 产业链利润迁移流动图谱可视化                                                      │
 │    • 交互式压力测试推演滑块（例如：“模拟下游云厂商削减 20% CapEx 对全链估值的冲击”）   │
