@@ -10,10 +10,6 @@ from webapp.ui import get_current_lang, render_research_synthesis, render_sideba
 
 is_en = get_current_lang() == "en"
 
-st.set_page_config(
-    page_title="ARF — Bubble Thermometer" if is_en else "ARF — 泡沫温度计",
-    layout="wide",
-)
 inject_mobile_css()
 
 # Legend below the plot so its wrapped rows never collide with the title/toolbar.

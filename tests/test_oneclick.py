@@ -86,6 +86,12 @@ def test_backtest_summary_for_gemini():
     assert "最优策略: MA 策略 (单均线)" in summary
     assert "收益=15.0%" in summary
 
+    en_summary = _backtest_summary_for_gemini([stock_res], lang="en")
+    assert "Technical Score: 75.0" in en_summary
+    assert "Bullish MA Alignment: Yes" in en_summary
+    assert "Best Strategy: MA Strategy (Single MA)" in en_summary
+    assert "Return=15.0%" in en_summary
+
 
 def test_generate_report_html():
     report = ReportData(as_of=date(2026, 6, 26))

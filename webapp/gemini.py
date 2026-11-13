@@ -507,14 +507,42 @@ Output: Chinese markdown, ≤350 words, EXACTLY these sections, no preamble:
 ### 二、与 ARF 估值读数的背离
 ### 三、需要关注的个股"""
 
+_RESEARCH_SYSTEM_PROMPT_EN = """You are a buy-side strategist writing a concise \
+English-language synthesis of SELL-SIDE research coverage, to sit beside a \
+quantitative AI-relevance / valuation-froth model (ARF).
+
+You are GIVEN, as ground truth, a table of recent institutional reports (broker \
+ratings, consensus price targets, EPS forecasts) for a cohort of stocks, plus \
+each stock's ARF froth reading. Treat that table as authoritative — do NOT invent \
+ratings or targets that are not in it.
+
+Your job:
+1. Summarise where the sell-side consensus stands for the cohort (ratings skew, \
+target upside/downside).
+2. Reconcile it against the ARF model: call out DIVERGENCES explicitly — e.g. a \
+name ARF flags as froth (D1, ROE<cost-of-equity, high P/S) that the street still \
+rates Buy with large target upside, or vice versa.
+3. You MAY use Google Search for brief recent context, but every searched fact \
+must cite its source domain in parentheses, e.g. "(reuters.com)". Facts from the \
+provided report table need no citation.
+
+Compliance: objective, rules-based research framing only. No buy/sell advice.
+
+Output: English markdown, ≤350 words, EXACTLY these sections, no preamble:
+### 1. Sell-Side Consensus Overview
+### 2. Divergences vs. ARF Valuation Readings
+### 3. Tickers to Watch"""
+
 
 def _research_digest(
     consensus_df: pd.DataFrame,
     snapshot_df: pd.DataFrame,
     research_df: pd.DataFrame,
     max_titles: int = 3,
+    lang: str = "zh",
 ) -> str:
     """Format the ground-truth report table + ARF readings into a prompt block."""
+    is_en = lang == "en"
     name_lookup = dict(zip(snapshot_df["ticker"], snapshot_df["name"], strict=False))
     cons_lookup = {str(r["ticker"]): r for _, r in consensus_df.iterrows()}
 
@@ -526,17 +554,30 @@ def _research_digest(
             continue
         parts = [f"{ticker} ({name_lookup.get(ticker, '')}) — {_factor_line(row)}"]
 
-        cons_str = (
-            f"机构={int(c['n_institutions'])} 报告={int(c['n_reports'])} "
-            f"评级=[{c['rating_summary']}]"
-        )
-        if pd.notna(c["consensus_target"]):
-            cons_str += f" 目标价={c['consensus_target']:.2f}{c['currency']}"
-        if pd.notna(c["implied_upside_pct"]):
-            cons_str += f" 隐含空间={c['implied_upside_pct']:+.1f}%"
-        if pd.notna(c["eps_forecast"]):
-            cons_str += f" EPS预测={c['eps_forecast']:.2f}"
-        parts.append("  卖方: " + cons_str)
+        if is_en:
+            cons_str = (
+                f"brokers={int(c['n_institutions'])} reports={int(c['n_reports'])} "
+                f"ratings=[{c['rating_summary']}]"
+            )
+            if pd.notna(c["consensus_target"]):
+                cons_str += f" target={c['consensus_target']:.2f}{c['currency']}"
+            if pd.notna(c["implied_upside_pct"]):
+                cons_str += f" upside={c['implied_upside_pct']:+.1f}%"
+            if pd.notna(c["eps_forecast"]):
+                cons_str += f" EPS_est={c['eps_forecast']:.2f}"
+            parts.append("  Sell-side: " + cons_str)
+        else:
+            cons_str = (
+                f"机构={int(c['n_institutions'])} 报告={int(c['n_reports'])} "
+                f"评级=[{c['rating_summary']}]"
+            )
+            if pd.notna(c["consensus_target"]):
+                cons_str += f" 目标价={c['consensus_target']:.2f}{c['currency']}"
+            if pd.notna(c["implied_upside_pct"]):
+                cons_str += f" 隐含空间={c['implied_upside_pct']:+.1f}%"
+            if pd.notna(c["eps_forecast"]):
+                cons_str += f" EPS预测={c['eps_forecast']:.2f}"
+            parts.append("  卖方: " + cons_str)
 
         rep = research_df[
             (research_df["ticker"] == ticker)
@@ -556,6 +597,7 @@ def synthesize_research(
     research_df: pd.DataFrame,
     as_of: date,
     cohort: list[str] | None = None,
+    lang: str = "zh",
 ) -> ResearchSynthesis:
     """One grounded Gemini call synthesising sell-side coverage vs ARF froth.
 
@@ -581,7 +623,7 @@ def synthesize_research(
         if pd.notna(p)
     }
     consensus_df = compute_consensus(research_df, prices)
-    digest = _research_digest(consensus_df, sub, research_df)
+    digest = _research_digest(consensus_df, sub, research_df, lang=lang)
     if not digest.strip():
         return ResearchSynthesis(
             as_of=as_of, cohort=cohort, text="", citations=[], model=MODEL
@@ -596,10 +638,11 @@ def synthesize_research(
     )
 
     client = genai.Client(api_key=os.environ["GEMINI_API_KEY"].strip())
+    sys_prompt = _RESEARCH_SYSTEM_PROMPT_EN if lang == "en" else _RESEARCH_SYSTEM_PROMPT
     config = types.GenerateContentConfig(
         tools=[types.Tool(google_search=types.GoogleSearch())],
         temperature=0.2,
-        system_instruction=_RESEARCH_SYSTEM_PROMPT,
+        system_instruction=sys_prompt,
     )
     response = client.models.generate_content(
         model=MODEL, contents=prompt, config=config
@@ -623,12 +666,26 @@ Hard Rules:
 1. ALWAYS use Google Search. Fire at least 3 distinct queries to find recent news (last 14 days) regarding the company's business developments, earnings, product catalysts, and regulatory context.
 2. Maintain strict COMPLIANCE. Frame all conclusions as objective, rules-based research findings. NEVER provide investment recommendations, buying advice, or financial advisory statements. Focus on explaining narrative-technical alignment.
 3. Every news fact must cite its source domain in parentheses, e.g. "(bloomberg.com)".
-4. Organize your response into exactly these four sections using Markdown:
+4. Write the report in Chinese with bilingual section headers below, organizing your response into exactly these four sections using Markdown:
    - ### 1. 基本面与 AI 叙事剖析 (Fundamental & AI Narrative Analysis)
    - ### 2. 技术面与筹码微观结构 (Technical & Chip Microstructure)
    - ### 3. 历史回测绩效评估 (Historical Backtest Performance Evaluation)
    - ### 4. 综合多因子研究结论 (Integrated Multi-Factor Synthesis)
 """
+
+_ANALYST_SYSTEM_PROMPT_EN = """You are a senior quantitative investment analyst writing a comprehensive Multi-Factor Narrative-Technical Synthesis Report. Your job is to reconcile a stock's quantitative data (ARF score, technical indicators, chip distribution, and backtesting performance) with qualitative recent developments (news, earnings, catalysts) sourced via Google Search.
+
+Hard Rules:
+1. ALWAYS use Google Search. Fire at least 3 distinct queries to find recent news (last 14 days) regarding the company's business developments, earnings, product catalysts, and regulatory context.
+2. Maintain strict COMPLIANCE. Frame all conclusions as objective, rules-based research findings. NEVER provide investment recommendations, buying advice, or financial advisory statements. Focus on explaining narrative-technical alignment.
+3. Every news fact must cite its source domain in parentheses, e.g. "(bloomberg.com)".
+4. Write the entire report strictly in English. Organize your response into exactly these four sections using Markdown:
+   - ### 1. Fundamental & AI Narrative Analysis
+   - ### 2. Technical & Chip Microstructure
+   - ### 3. Historical Backtest Performance Evaluation
+   - ### 4. Integrated Multi-Factor Synthesis
+"""
+
 
 def generate_narrative_technical_report(
     api_key: str,
@@ -637,7 +694,8 @@ def generate_narrative_technical_report(
     arf_row: dict,
     tech_row: dict,
     chip_metrics: tuple,
-    backtest_summary: str
+    backtest_summary: str,
+    lang: str = "zh",
 ) -> dict:
     """Generate a comprehensive narrative-technical synthesis report using grounded Gemini.
     
@@ -693,10 +751,11 @@ def generate_narrative_technical_report(
     
     try:
         client = genai.Client(api_key=api_key.strip())
+        sys_prompt = _ANALYST_SYSTEM_PROMPT_EN if lang == "en" else _ANALYST_SYSTEM_PROMPT
         config = types.GenerateContentConfig(
             tools=[types.Tool(google_search=types.GoogleSearch())],
             temperature=0.2,
-            system_instruction=_ANALYST_SYSTEM_PROMPT,
+            system_instruction=sys_prompt,
         )
         response = client.models.generate_content(
             model=MODEL,
@@ -712,8 +771,13 @@ def generate_narrative_technical_report(
         }
     except Exception as e:
         log.exception(f"AI-Analyst report generation failed for {ticker}")
+        err_prefix = (
+            "⚠️ **Failed to generate research report**: "
+            if lang == "en"
+            else "⚠️ **生成研究报告失败**："
+        )
         return {
-            "report_text": f"⚠️ **生成研究报告失败**：{str(e)}",
+            "report_text": f"{err_prefix}{str(e)}",
             "citations": [],
             "queries": []
         }
@@ -868,11 +932,47 @@ Hard rules:
 """
 
 
-def generate_weekly_synthesis(report_data) -> dict:
+_WEEKLY_SYNTHESIS_SYSTEM_PROMPT_EN = """You are a senior cross-asset strategist at a quantitative research house. You are
+writing the weekly "AI Stack Bubble Monitor" synthesis report. You receive:
+1. Thermometer deltas (froth count changes week-over-week for US and China legs)
+2. Top-5 China A+H stocks by ARF with their backtest performance across 3 strategies
+3. ARF snapshot summary statistics
+
+Your job is to produce an English-language report with EXACTLY these four sections in Markdown:
+
+### 1. Market Temperature Overview
+Interpret the thermometer — are we heating up or cooling down? Reference the absolute and
+relative froth counts, EV/Sales percentile, and implied growth gap changes.
+
+### 2. Stock ARF Trend Interpretation
+For the top-5 stocks, explain why they rank highest. Reference their E_score, V_score,
+decile, and key fundamentals (P/S, ROE, forward P/E).
+
+### 3. Quantitative Backtest Insights
+Summarize the backtest results across the 5 stocks × 3 strategies. Which strategy worked
+best overall? Which stocks showed the strongest alpha signals? Reference specific Sharpe
+ratios, returns, and max drawdowns.
+
+### 4. Synthesis & Risk Warnings
+Tie together the narrative, technical, and backtest layers. Identify the biggest risk
+factors. This section MUST include a compliance disclaimer that this is objective research,
+NOT investment advice.
+
+Hard rules:
+1. ALWAYS use Google Search. Fire at least 3 distinct queries about the latest macro
+   context of China's AI sector, US-China tech decoupling, and any regulatory changes.
+2. Every factual claim from search MUST cite the source domain in parentheses.
+3. Keep the report under 1500 words total.
+4. Write the entire report strictly in English.
+"""
+
+
+def generate_weekly_synthesis(report_data, lang: str = "zh") -> dict:
     """Generate a weekly synthesis report using grounded Gemini.
 
     Args:
         report_data: ReportData from arf.oneclick
+        lang: Target report language ("zh" or "en")
 
     Returns:
         dict with 'report_text', 'citations', 'queries'
@@ -883,38 +983,66 @@ def generate_weekly_synthesis(report_data) -> dict:
     if not is_enabled():
         return {"report_text": "", "citations": [], "queries": []}
 
+    is_en = lang == "en"
     api_key = os.environ["GEMINI_API_KEY"].strip()
 
     # Build the data context for the prompt
     from arf.oneclick import _backtest_summary_for_gemini
 
-    thermo_block = "=== 泡沫温度计周度变化 ===\n"
-    for d in report_data.thermo_deltas:
-        thermo_block += (
-            f"{d.leg}: 绝对泡沫数={d.absolute_froth} ({d.absolute_froth_delta}), "
-            f"相对泡沫数={d.relative_froth} ({d.relative_froth_delta}), "
-            f"EV/Sales分位数={d.median_ev_sales_pct:.1f}% ({d.ev_sales_delta}), "
-            f"隐含增长差值={d.median_growth_gap:.2f}% ({d.growth_gap_delta})\n"
+    if is_en:
+        thermo_block = "=== Bubble Thermometer WoW Deltas ===\n"
+        for d in report_data.thermo_deltas:
+            thermo_block += (
+                f"{d.leg}: absolute_froth={d.absolute_froth} ({d.absolute_froth_delta}), "
+                f"relative_froth={d.relative_froth} ({d.relative_froth_delta}), "
+                f"ev_sales_percentile={d.median_ev_sales_pct:.1f}% ({d.ev_sales_delta}), "
+                f"implied_growth_gap={d.median_growth_gap:.2f}% ({d.growth_gap_delta})\n"
+            )
+        snapshot_block = (
+            f"=== Snapshot Summary ===\n"
+            f"Date: {report_data.as_of}\n"
+            f"US Leg D1 count: {report_data.d1_us}, froth warnings: {report_data.froth_us}\n"
+            f"China Leg D1 count: {report_data.d1_china}, froth warnings: {report_data.froth_china}\n"
         )
-
-    snapshot_block = (
-        f"=== 快照摘要 ===\n"
-        f"日期: {report_data.as_of}\n"
-        f"美股 D1数量: {report_data.d1_us}, 泡沫预警: {report_data.froth_us}\n"
-        f"中股 D1数量: {report_data.d1_china}, 泡沫预警: {report_data.froth_china}\n"
-    )
-
-    backtest_block = "=== Top 5 中国A+H股回测概要 ===\n"
-    backtest_block += _backtest_summary_for_gemini(report_data.backtest_stocks)
+        backtest_block = "=== Top 5 China A+H Backtest Summary ===\n"
+        backtest_block += _backtest_summary_for_gemini(report_data.backtest_stocks, lang="en")
+        instructions = (
+            "=== Instructions ===\n"
+            "Write this week's AI Stack Bubble Monitor synthesis report based on the data above.\n"
+            "Use Google Search for the latest macro and industry developments and cite source domains.\n"
+            "Strictly follow the four-section English Markdown format."
+        )
+        sys_prompt = _WEEKLY_SYNTHESIS_SYSTEM_PROMPT_EN
+    else:
+        thermo_block = "=== 泡沫温度计周度变化 ===\n"
+        for d in report_data.thermo_deltas:
+            thermo_block += (
+                f"{d.leg}: 绝对泡沫数={d.absolute_froth} ({d.absolute_froth_delta}), "
+                f"相对泡沫数={d.relative_froth} ({d.relative_froth_delta}), "
+                f"EV/Sales分位数={d.median_ev_sales_pct:.1f}% ({d.ev_sales_delta}), "
+                f"隐含增长差值={d.median_growth_gap:.2f}% ({d.growth_gap_delta})\n"
+            )
+        snapshot_block = (
+            f"=== 快照摘要 ===\n"
+            f"日期: {report_data.as_of}\n"
+            f"美股 D1数量: {report_data.d1_us}, 泡沫预警: {report_data.froth_us}\n"
+            f"中股 D1数量: {report_data.d1_china}, 泡沫预警: {report_data.froth_china}\n"
+        )
+        backtest_block = "=== Top 5 中国A+H股回测概要 ===\n"
+        backtest_block += _backtest_summary_for_gemini(report_data.backtest_stocks, lang="zh")
+        instructions = (
+            "=== 指令 ===\n"
+            "基于以上数据，撰写本周 AI Stack Bubble Monitor 综合研报。\n"
+            "务必联网检索最新宏观和行业动态，引用来源域名。\n"
+            "严格按照四个章节的格式输出。"
+        )
+        sys_prompt = _WEEKLY_SYNTHESIS_SYSTEM_PROMPT
 
     prompt = (
         f"{snapshot_block}\n"
         f"{thermo_block}\n"
         f"{backtest_block}\n"
-        f"=== 指令 ===\n"
-        f"基于以上数据，撰写本周 AI Stack Bubble Monitor 综合研报。\n"
-        f"务必联网检索最新宏观和行业动态，引用来源域名。\n"
-        f"严格按照四个章节的格式输出。"
+        f"{instructions}"
     )
 
     try:
@@ -922,7 +1050,7 @@ def generate_weekly_synthesis(report_data) -> dict:
         config = types.GenerateContentConfig(
             tools=[types.Tool(google_search=types.GoogleSearch())],
             temperature=0.3,
-            system_instruction=_WEEKLY_SYNTHESIS_SYSTEM_PROMPT,
+            system_instruction=sys_prompt,
         )
         response = client.models.generate_content(
             model=MODEL,
@@ -942,8 +1070,13 @@ def generate_weekly_synthesis(report_data) -> dict:
         }
     except Exception as exc:
         log.exception("Weekly Gemini synthesis failed")
+        err_prefix = (
+            "⚠️ AI synthesis generation failed: "
+            if is_en
+            else "⚠️ AI 综合研判生成失败："
+        )
         return {
-            "report_text": f"⚠️ AI 综合研判生成失败：{exc}",
+            "report_text": f"{err_prefix}{exc}",
             "citations": [],
             "queries": [],
         }

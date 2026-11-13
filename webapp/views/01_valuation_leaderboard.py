@@ -20,10 +20,6 @@ from webapp.ui import get_current_lang, render_sidebar, render_table, scatter_pl
 
 is_en = get_current_lang() == "en"
 
-st.set_page_config(
-    page_title="ARF — Valuation Leaderboard" if is_en else "ARF — 估值榜单",
-    layout="wide",
-)
 inject_mobile_css()
 
 # 每条腿的差异只有三处：显示名、WACC 阈值、数据来源。

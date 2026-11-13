@@ -40,6 +40,14 @@ LAYER_LABELS = {
     "L5": "L5 行业 AI 软件应用",
 }
 
+LAYER_LABELS_EN = {
+    "L1": "L1 Energy & Power",
+    "L2": "L2 Compute Chips & Hardware",
+    "L3": "L3 Networking & Optical Interconnects",
+    "L4": "L4 Cloud & Foundation Models",
+    "L5": "L5 Enterprise AI Applications",
+}
+
 
 def default_mandate_path() -> Path:
     """The ARF mandate shipped with this repository/image."""
@@ -204,8 +212,27 @@ def build_cockpit(
     *,
     snapshot_df: pd.DataFrame,
     spec_path: str | Path,
+    lang: str = "zh",
 ) -> CockpitState:
     """Turn a completed replay into the cockpit's tables and KPI values."""
+    is_en = lang == "en"
+    layer_labels = LAYER_LABELS_EN if is_en else LAYER_LABELS
+    col_ticker = "Ticker" if is_en else "代码"
+    col_company = "Company" if is_en else "公司"
+    col_side = "Side" if is_en else "方向"
+    col_layer = "Layer" if is_en else "层级"
+    col_shares = "Shares" if is_en else "持股数"
+    col_close = "Close" if is_en else "收盘价"
+    col_mkt_val = "Market Value ($)" if is_en else "持仓市值 ($)"
+    col_weight = "Portfolio Weight" if is_en else "组合权重"
+    col_cap = "Single-Name Cap (20%)" if is_en else "单票上限 (20%)"
+
+    col_action = "Side" if is_en else "操作"
+    col_qty = "Quantity" if is_en else "数量"
+    col_fill_px = "Est. Fill Price" if is_en else "预估成交价"
+    col_notional = "Notional ($)" if is_en else "金额 ($)"
+    col_target_w = "Target Weight" if is_en else "目标权重"
+
     spec = load_spec(Path(spec_path))
     last = result.records[-1]
     snapshot = snapshot_df.set_index("ticker", drop=False) if not snapshot_df.empty else None
@@ -220,22 +247,26 @@ def build_cockpit(
         meta = snapshot.loc[ticker] if snapshot is not None and ticker in snapshot.index else None
         layer = str(meta["layer"]) if meta is not None else "—"
         weight = value / last.nav if last.nav else 0.0
+        if abs(weight) > spec.risk.max_position_pct:
+            cap_status = "⚠️ Breach" if is_en else "⚠️ 超限"
+        else:
+            cap_status = "✅ Within Limit" if is_en else "✅ 达标"
         positions_rows.append({
-            "代码": ticker,
-            "公司": meta["name"] if meta is not None else ticker,
-            "方向": "LONG" if shares > 0 else "SHORT",
-            "层级": layer,
-            "持股数": int(shares),
-            "收盘价": round(float(mark), 2),
-            "持仓市值 ($)": round(float(value), 0),
-            "组合权重": weight,
-            "单票上限 (20%)": "⚠️ 超限" if abs(weight) > spec.risk.max_position_pct else "✅ 达标",
+            col_ticker: ticker,
+            col_company: meta["name"] if meta is not None else ticker,
+            col_side: "LONG" if shares > 0 else "SHORT",
+            col_layer: layer,
+            col_shares: int(shares),
+            col_close: round(float(mark), 2),
+            col_mkt_val: round(float(value), 0),
+            col_weight: weight,
+            col_cap: cap_status,
         })
         layer_values[layer] = layer_values.get(layer, 0.0) + value
 
     layer_rows = [
-        {"Layer": LAYER_LABELS.get(layer, layer), "Exposure": layer_values.get(layer, 0.0)}
-        for layer in sorted(LAYER_LABELS)
+        {"Layer": layer_labels.get(layer, layer), "Exposure": layer_values.get(layer, 0.0)}
+        for layer in sorted(layer_labels)
     ]
 
     decision = last.decision
@@ -256,26 +287,28 @@ def build_cockpit(
             if delta == 0:
                 continue
             order_rows.append({
-                "代码": ticker,
-                "操作": "BUY" if delta > 0 else "SELL",
-                "数量": abs(int(delta)),
-                "预估成交价": round(float(mark), 2),
-                "金额 ($)": round(abs(delta) * float(mark), 0),
-                "目标权重": weight,
+                col_ticker: ticker,
+                col_action: "BUY" if delta > 0 else "SELL",
+                col_qty: abs(int(delta)),
+                col_fill_px: round(float(mark), 2),
+                col_notional: round(abs(delta) * float(mark), 0),
+                col_target_w: weight,
             })
-        order_note = f"待执行决策 · {decision.as_of}"
+        prefix = "Pending decision" if is_en else "待执行决策"
+        order_note = f"{prefix} · {decision.as_of}"
     elif last_cycle is not None:
         # The replay window ended between rebalances: show what was last done.
         for order in last_cycle.orders:
             order_rows.append({
-                "代码": order.ticker,
-                "操作": order.side.upper(),
-                "数量": order.quantity,
-                "预估成交价": round(float(order.price), 2),
-                "金额 ($)": round(order.quantity * float(order.price), 0),
-                "目标权重": last_cycle.final_weights.get(order.ticker),
+                col_ticker: order.ticker,
+                col_action: order.side.upper(),
+                col_qty: order.quantity,
+                col_fill_px: round(float(order.price), 2),
+                col_notional: round(order.quantity * float(order.price), 0),
+                col_target_w: last_cycle.final_weights.get(order.ticker),
             })
-        order_note = f"最近一次已执行调仓 · {last_cycle.as_of}"
+        prefix = "Last executed rebalance" if is_en else "最近一次已执行调仓"
+        order_note = f"{prefix} · {last_cycle.as_of}"
 
     clamp_source = decision.clamps if decision is not None else (
         last_cycle.clamps if last_cycle is not None else []
@@ -329,13 +362,17 @@ def build_cockpit(
 
     notes: list[str] = []
     if decision is None:
-        notes.append("回放窗口在两次调仓之间结束；订单表显示最近一次已执行调仓。")
+        notes.append(
+            "The replay window ended between rebalances; the order table shows the last executed rebalance."
+            if is_en
+            else "回放窗口在两次调仓之间结束；订单表显示最近一次已执行调仓。"
+        )
 
     try:
         scorecard = score(result.records)
     except ValueError as exc:
         scorecard = None
-        notes.append(f"计分卡不可用：{exc}")
+        notes.append(f"Scorecard unavailable: {exc}" if is_en else f"计分卡不可用：{exc}")
 
     return CockpitState(
         kpis=kpis,

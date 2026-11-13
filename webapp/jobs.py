@@ -54,7 +54,7 @@ def trigger_pipeline(as_of: date | None = None) -> str:
         return job_name
 
 
-def get_execution_status(execution_name: str) -> dict:
+def get_execution_status(execution_name: str, lang: str = "zh") -> dict:
     """Query the status of a pipeline Cloud Run Job execution.
 
     Returns a dict with:
@@ -62,19 +62,24 @@ def get_execution_status(execution_name: str) -> dict:
         percent: int (0 to 100)
         message: str
     """
+    is_en = lang == "en"
     project = os.getenv("GCP_PROJECT")
     if not project:
-        return {"status": "unknown", "percent": 0, "message": "GCP_PROJECT not configured"}
+        return {
+            "status": "unknown",
+            "percent": 0,
+            "message": "GCP_PROJECT not configured" if is_en else "GCP_PROJECT 未配置",
+        }
 
     from google.cloud import run_v2  # type: ignore[import]
     client = run_v2.ExecutionsClient()
     try:
         execution = client.get_execution(name=execution_name)
-        
+
         # Check conditions
         is_succeeded = False
         is_failed = False
-        
+
         # Check execution conditions
         for cond in getattr(execution, "conditions", []):
             if cond.type == "Succeeded":
@@ -84,12 +89,32 @@ def get_execution_status(execution_name: str) -> dict:
                     is_failed = True
 
         if is_succeeded:
-            return {"status": "succeeded", "percent": 100, "message": "运行成功 ✓"}
+            return {
+                "status": "succeeded",
+                "percent": 100,
+                "message": "Run succeeded ✓" if is_en else "运行成功 ✓",
+            }
         elif is_failed:
-            return {"status": "failed", "percent": 100, "message": "运行失败 ❌"}
+            return {
+                "status": "failed",
+                "percent": 100,
+                "message": "Run failed ❌" if is_en else "运行失败 ❌",
+            }
         elif getattr(execution, "cancelled", False):
-            return {"status": "cancelled", "percent": 100, "message": "运行被取消 🛑"}
-            
-        return {"status": "running", "percent": 50, "message": "正在执行异步管道任务..."}
+            return {
+                "status": "cancelled",
+                "percent": 100,
+                "message": "Run cancelled 🛑" if is_en else "运行被取消 🛑",
+            }
+
+        return {
+            "status": "running",
+            "percent": 50,
+            "message": "Running async pipeline job..." if is_en else "正在执行异步管道任务...",
+        }
     except Exception as exc:
-        return {"status": "unknown", "percent": 0, "message": f"查询状态失败: {exc}"}
+        return {
+            "status": "unknown",
+            "percent": 0,
+            "message": f"Status query failed: {exc}" if is_en else f"查询状态失败: {exc}",
+        }

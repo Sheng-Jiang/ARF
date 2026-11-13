@@ -30,12 +30,6 @@ from webapp.ui import get_current_lang, tr
 
 is_en = get_current_lang() == "en"
 
-st.set_page_config(
-    page_title=tr("技术分析与策略回测", "Technical Analysis & Backtest"),
-    page_icon="📈",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
 inject_mobile_css()
 
 st.title(tr("📈 技术面多因子评分 & 策略回测仪表盘", "📈 Multi-Factor Technical Scoring & Strategy Backtest Dashboard"))
@@ -421,7 +415,7 @@ st.subheader(f"📈 {ticker} " + (
     if _mobile
     else tr("交互式日 K 线与均线系统", "Interactive Daily Candlestick & Moving Averages")
 ))
-kline_chart = draw_pro_kline(df_indicators, static=_mobile)
+kline_chart = draw_pro_kline(df_indicators, static=_mobile, lang=get_current_lang())
 show_plotly(kline_chart, key="tech_kline")
 
 # ── Section 3: Backtesting & Parameter Optimization ──────────────────────────
@@ -702,7 +696,8 @@ else:
                     arf_row=arf_row,
                     tech_row=latest_row.to_dict(),
                     chip_metrics=chip_metrics,
-                    backtest_summary=backtest_summary
+                    backtest_summary=backtest_summary,
+                    lang=get_current_lang(),
                 )
                 
                 st.markdown("---")

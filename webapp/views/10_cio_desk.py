@@ -21,11 +21,6 @@ from webapp.ui import get_current_lang, render_sidebar, tr
 
 is_en = get_current_lang() == "en"
 
-st.set_page_config(
-    page_title=tr("ARF — AI CIO 投资总监驾驶舱", "ARF — AI CIO Executive Desk Cockpit"),
-    page_icon="💼",
-    layout="wide",
-)
 inject_mobile_css()
 
 st.markdown(
@@ -192,7 +187,7 @@ else:
     try:
         benchmark = _cached_benchmark(start_iso, end_iso)
         if benchmark is None or benchmark.empty:
-            raise RuntimeError("SPY 没有返回任何交易日")
+            raise RuntimeError(tr("SPY 没有返回任何交易日", "SPY returned no trading days"))
         prices["SPY"] = benchmark
     except Exception as exc:  # noqa: BLE001 — a missing benchmark blocks the replay
         st.error(tr(f"无法获取 SPY 基准数据，回放暂停：{exc}", f"Unable to fetch SPY benchmark data; replay paused: {exc}"))
@@ -211,7 +206,12 @@ if "SPY" in prices and universe and end_iso >= start_iso:
                 end_iso,
                 forecasts_df=data.load_forecast_history(as_of),
             )
-            cockpit = build_cockpit(replay, snapshot_df=snapshot_df, spec_path=mandate_path)
+            cockpit = build_cockpit(
+                replay,
+                snapshot_df=snapshot_df,
+                spec_path=mandate_path,
+                lang=get_current_lang(),
+            )
     except Exception as exc:  # noqa: BLE001 — surface the real failure
         st.error(tr(f"回放失败：{exc}", f"Replay failed: {exc}"))
 
@@ -476,8 +476,10 @@ with tab_barometer:
     )
 
     held_list = None
-    if cockpit is not None and not cockpit.positions.empty and "代码" in cockpit.positions.columns:
-        held_list = cockpit.positions["代码"].dropna().astype(str).tolist()
+    if cockpit is not None and not cockpit.positions.empty:
+        ticker_col = "Ticker" if "Ticker" in cockpit.positions.columns else "代码"
+        if ticker_col in cockpit.positions.columns:
+            held_list = cockpit.positions[ticker_col].dropna().astype(str).tolist()
 
     try:
         from datetime import date as _date
@@ -497,6 +499,7 @@ with tab_barometer:
             held_tuple: tuple[str, ...] | None,
             shocks_tuple: tuple[tuple[str, float], ...] | None,
             clamp_val: float,
+            lang: str,
         ):
             return build_cio_decision_packet(
                 conn=data.get_conn(),
@@ -505,6 +508,7 @@ with tab_barometer:
                 customer_shocks=dict(shocks_tuple) if shocks_tuple is not None else None,
                 max_proposals=8,
                 bottleneck_clamp=clamp_val,
+                lang=lang,
             )
 
         packet = _cached_decision_packet(
@@ -512,6 +516,7 @@ with tab_barometer:
             held_tuple=tuple(sorted(held_list)) if held_list is not None else None,
             shocks_tuple=tuple(sorted(cust_shocks.items())) if cust_shocks is not None else None,
             clamp_val=clamp_param,
+            lang=get_current_lang(),
         )
 
         # 1. Display Watchdog Alerts
@@ -756,23 +761,8 @@ with tab_book:
     else:
         st.markdown(tr(f"##### 📑 最后交易日持仓 · {cockpit.last_session}", f"##### 📑 Positions as of Last Session · {cockpit.last_session}"))
         shown = cockpit.positions.copy()
-        shown["组合权重"] = shown["组合权重"].map(lambda v: f"{v:+.1%}")
-        if is_en:
-            shown = shown.replace({
-                "⚠️ 超限": "⚠️ Breach",
-                "✅ 达标": "✅ Within Limit",
-            })
-            shown = shown.rename(columns={
-                "代码": "Ticker",
-                "公司": "Company",
-                "方向": "Side",
-                "层级": "Layer",
-                "持股数": "Shares",
-                "收盘价": "Close",
-                "持仓市值 ($)": "Market Value ($)",
-                "组合权重": "Portfolio Weight",
-                "单票上限 (20%)": "Single-Name Cap (20%)",
-            })
+        weight_col = "Portfolio Weight" if "Portfolio Weight" in shown.columns else "组合权重"
+        shown[weight_col] = shown[weight_col].map(lambda v: f"{v:+.1%}")
         st.dataframe(shown, use_container_width=True, hide_index=True)
 
         st.markdown(
@@ -814,26 +804,11 @@ with tab_rebalance:
         with col_orders:
             st.markdown(tr("##### 🎯 报单票据 (Orders)", "##### 🎯 Order Tickets (Orders)"))
             if cockpit.order_note:
-                order_note = cockpit.order_note
-                if is_en:
-                    order_note = order_note.replace("待执行决策", "Pending decision").replace(
-                        "最近一次已执行调仓", "Last executed rebalance"
-                    )
-                st.caption(order_note)
+                st.caption(cockpit.order_note)
             if cockpit.staged_orders.empty:
                 st.info(tr("该交易日没有产生订单。", "No orders were generated on this session."))
             else:
-                orders_display = cockpit.staged_orders
-                if is_en:
-                    orders_display = orders_display.rename(columns={
-                        "代码": "Ticker",
-                        "操作": "Side",
-                        "数量": "Quantity",
-                        "预估成交价": "Est. Fill Price",
-                        "金额 ($)": "Notional ($)",
-                        "目标权重": "Target Weight",
-                    })
-                st.dataframe(orders_display, use_container_width=True, hide_index=True)
+                st.dataframe(cockpit.staged_orders, use_container_width=True, hide_index=True)
         with col_clamps:
             st.markdown(tr("##### 🛡️ 主风控硬阈值触发日志 (Risk Clamps)", "##### 🛡️ Main Risk Hard-Limit Trigger Log (Risk Clamps)"))
             if cockpit.clamps.empty:
@@ -841,13 +816,7 @@ with tab_rebalance:
             else:
                 st.dataframe(cockpit.clamps, use_container_width=True, hide_index=True)
         for note in cockpit.notes:
-            note_text = note
-            if is_en:
-                note_text = note_text.replace(
-                    "回放窗口在两次调仓之间结束；订单表显示最近一次已执行调仓。",
-                    "The replay window ended between rebalances; the order table shows the last executed rebalance.",
-                ).replace("计分卡不可用：", "Scorecard unavailable: ")
-            st.caption(f"ℹ️ {note_text}")
+            st.caption(f"ℹ️ {note}")
 
 # ── TAB 4: 分析师与策略计分卡 ────────────────────────────────────────────────
 with tab_scorecard:

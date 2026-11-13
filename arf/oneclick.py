@@ -280,30 +280,35 @@ def _compute_thermo_deltas(thermo: pd.DataFrame) -> list[ThermometerDelta]:
     return deltas
 
 
-def _render_thermo_chart(thermo: pd.DataFrame) -> str:
+def _render_thermo_chart(thermo: pd.DataFrame, lang: str = "zh") -> str:
     """Render thermometer froth-count trend as an embeddable Plotly HTML div."""
+    is_en = lang == "en"
     fig = go.Figure()
     us = thermo[thermo["leg"] == "US"].sort_values("as_of_date")
     cn = thermo[thermo["leg"] == "China"].sort_values("as_of_date")
 
-    for label, df, color in [("美股", us, "#DE6A2C"), ("中股", cn, "#D8A33E")]:
+    legs = [("US Leg", us, "#DE6A2C"), ("China Leg", cn, "#D8A33E")] if is_en else [("美股", us, "#DE6A2C"), ("中股", cn, "#D8A33E")]
+    for label, df, color in legs:
         if df.empty:
             continue
         if "count_absolute_froth" in df.columns:
             fig.add_trace(go.Scatter(
                 x=df["as_of_date"], y=df["count_absolute_froth"],
-                name=f"{label} — 绝对泡沫数", mode="lines+markers",
+                name=f"{label} — Absolute Froth" if is_en else f"{label} — 绝对泡沫数",
+                mode="lines+markers",
                 line=dict(color=color, width=3), marker=dict(size=8),
             ))
         fig.add_trace(go.Scatter(
             x=df["as_of_date"], y=df["count_froth"],
-            name=f"{label} — 相对泡沫数 (D1)", mode="lines+markers",
+            name=f"{label} — Relative Froth (D1)" if is_en else f"{label} — 相对泡沫数 (D1)",
+            mode="lines+markers",
             line=dict(color=color, width=1.5, dash="dash"), marker=dict(size=6),
         ))
 
     fig.update_layout(
-        title="ARF 泡沫温度计趋势",
-        xaxis_title="日期", yaxis_title="股票数量",
+        title="ARF Bubble Thermometer Trend" if is_en else "ARF 泡沫温度计趋势",
+        xaxis_title="Date" if is_en else "日期",
+        yaxis_title="Ticker Count" if is_en else "股票数量",
         hovermode="x unified", height=380,
         template="plotly_dark",
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(28,24,19,0.7)",
@@ -315,44 +320,50 @@ def _render_thermo_chart(thermo: pd.DataFrame) -> str:
     return fig.to_html(full_html=False, include_plotlyjs=False)
 
 
-def _render_valuation_chart(thermo: pd.DataFrame) -> str:
+def _render_valuation_chart(thermo: pd.DataFrame, lang: str = "zh") -> str:
     """Render valuation stretch + growth gap trend as embeddable Plotly HTML div."""
+    is_en = lang == "en"
     fig = make_subplots(specs=[[{"secondary_y": True}]])
     us = thermo[thermo["leg"] == "US"].sort_values("as_of_date")
     cn = thermo[thermo["leg"] == "China"].sort_values("as_of_date")
 
-    for label, df, color in [("美股", us, "#DE6A2C"), ("中股", cn, "#D8A33E")]:
+    legs = [("US Leg", us, "#DE6A2C"), ("China Leg", cn, "#D8A33E")] if is_en else [("美股", us, "#DE6A2C"), ("中股", cn, "#D8A33E")]
+    for label, df, color in legs:
         if df.empty:
             continue
         fig.add_trace(go.Scatter(
             x=df["as_of_date"], y=df["median_ev_sales_pct"],
-            name=f"{label} — EV/Sales 5年分位数", mode="lines+markers",
+            name=f"{label} — EV/Sales 5Y Percentile" if is_en else f"{label} — EV/Sales 5年分位数",
+            mode="lines+markers",
             line=dict(color=color, width=2), marker=dict(size=6),
         ), secondary_y=False)
         fig.add_trace(go.Scatter(
             x=df["as_of_date"], y=df["median_growth_gap_pct"],
-            name=f"{label} — 隐含增长差值 (%)", mode="lines+markers",
+            name=f"{label} — Implied Growth Gap (%)" if is_en else f"{label} — 隐含增长差值 (%)",
+            mode="lines+markers",
             line=dict(color=color, width=1.5, dash="dash"), marker=dict(size=5),
         ), secondary_y=True)
 
     fig.add_hline(y=50, line_dash="dot", line_color="gray", opacity=0.5)
     fig.update_layout(
-        title="估值热度与隐含增长差值走势",
-        xaxis_title="日期", hovermode="x unified", height=350,
+        title="Valuation Stretch & Implied Growth Gap Trend" if is_en else "估值热度与隐含增长差值走势",
+        xaxis_title="Date" if is_en else "日期",
+        hovermode="x unified", height=350,
         template="plotly_dark",
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(28,24,19,0.7)",
         font=dict(family="IBM Plex Mono, monospace", color="#ECE4D4", size=12),
         xaxis=dict(gridcolor="rgba(236,228,212,0.07)"),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
     )
-    fig.update_yaxes(title_text="EV/Sales 5年分位数 (%)", range=[0, 100], secondary_y=False)
-    fig.update_yaxes(title_text="隐含增长差值 (%)", secondary_y=True)
+    fig.update_yaxes(title_text="EV/Sales 5Y Percentile (%)" if is_en else "EV/Sales 5年分位数 (%)", range=[0, 100], secondary_y=False)
+    fig.update_yaxes(title_text="Implied Growth Gap (%)" if is_en else "隐含增长差值 (%)", secondary_y=True)
     return fig.to_html(full_html=False, include_plotlyjs=False)
 
 
 def build_report_data(
     as_of: date,
     db_path: Path = Path("data/arf.db"),
+    lang: str = "zh",
 ) -> ReportData:
     """Assemble all data needed for the weekly report."""
     from arf.db import init_db, query_snapshot, query_thermometer_series
@@ -376,8 +387,8 @@ def build_report_data(
 
     # Thermometer
     report.thermo_deltas = _compute_thermo_deltas(thermo)
-    report.thermo_chart_html = _render_thermo_chart(thermo)
-    report.valuation_chart_html = _render_valuation_chart(thermo)
+    report.thermo_chart_html = _render_thermo_chart(thermo, lang=lang)
+    report.valuation_chart_html = _render_valuation_chart(thermo, lang=lang)
 
     # Backtests on top-5 China stocks
     top_china = select_top_china_stocks(scored)
@@ -389,31 +400,63 @@ def build_report_data(
     return report
 
 
-def _backtest_summary_for_gemini(stocks: list[StockBacktestResult]) -> str:
+_STRATEGY_NAME_EN = {
+    "MA 策略 (单均线)": "MA Strategy (Single MA)",
+    "MACross 策略 (双均线交叉)": "MACross Strategy (Dual MA Crossover)",
+    "TechnicalScore 策略 (智能技术评分)": "TechnicalScore Strategy",
+}
+
+
+def _backtest_summary_for_gemini(stocks: list[StockBacktestResult], lang: str = "zh") -> str:
     """Format backtest results as a text block for the Gemini prompt."""
+    is_en = lang == "en"
     lines = []
     for s in stocks:
         lines.append(f"### {s.ticker} ({s.name})")
-        lines.append(f"  技术评分: {s.tech_score:.1f}" if s.tech_score else "  技术评分: N/A")
-        lines.append(f"  均线多头: {'是' if s.ma_bullish else '否'}")
-        lines.append(f"  RSI: {s.rsi:.1f}" if s.rsi else "  RSI: N/A")
-        lines.append(
-            f"  获利盘: {s.chip_profit_ratio*100:.1f}%"
-            if s.chip_profit_ratio is not None else "  获利盘: N/A"
-        )
-        if s.strategy_results:
-            lines.append(f"  最优策略: {s.best_strategy}")
-            lines.append(f"  最优夏普: {s.best_sharpe:.2f}, 年化收益: {s.best_return:.1f}%, 最大回撤: {s.best_max_dd:.1f}%")
-            for name, df in s.strategy_results.items():
-                if not df.empty:
-                    top = df.iloc[0]
-                    lines.append(
-                        f"    {name}: 夏普={top.get('sharpe', 0):.2f}, "
-                        f"收益={top.get('return', 0):.1f}%, "
-                        f"回撤={top.get('dd', 0):.1f}%"
-                    )
+        if is_en:
+            lines.append(f"  Technical Score: {s.tech_score:.1f}" if s.tech_score else "  Technical Score: N/A")
+            lines.append(f"  Bullish MA Alignment: {'Yes' if s.ma_bullish else 'No'}")
+            lines.append(f"  RSI: {s.rsi:.1f}" if s.rsi else "  RSI: N/A")
+            lines.append(
+                f"  Profit Chips Ratio: {s.chip_profit_ratio*100:.1f}%"
+                if s.chip_profit_ratio is not None else "  Profit Chips Ratio: N/A"
+            )
+            if s.strategy_results:
+                best_name = _STRATEGY_NAME_EN.get(s.best_strategy, s.best_strategy)
+                lines.append(f"  Best Strategy: {best_name}")
+                lines.append(f"  Best Sharpe: {s.best_sharpe:.2f}, Annual Return: {s.best_return:.1f}%, Max Drawdown: {s.best_max_dd:.1f}%")
+                for name, df in s.strategy_results.items():
+                    if not df.empty:
+                        top = df.iloc[0]
+                        disp = _STRATEGY_NAME_EN.get(name, name)
+                        lines.append(
+                            f"    {disp}: Sharpe={top.get('sharpe', 0):.2f}, "
+                            f"Return={top.get('return', 0):.1f}%, "
+                            f"MaxDD={top.get('dd', 0):.1f}%"
+                        )
+            else:
+                lines.append("  No backtest data")
         else:
-            lines.append("  无回测数据")
+            lines.append(f"  技术评分: {s.tech_score:.1f}" if s.tech_score else "  技术评分: N/A")
+            lines.append(f"  均线多头: {'是' if s.ma_bullish else '否'}")
+            lines.append(f"  RSI: {s.rsi:.1f}" if s.rsi else "  RSI: N/A")
+            lines.append(
+                f"  获利盘: {s.chip_profit_ratio*100:.1f}%"
+                if s.chip_profit_ratio is not None else "  获利盘: N/A"
+            )
+            if s.strategy_results:
+                lines.append(f"  最优策略: {s.best_strategy}")
+                lines.append(f"  最优夏普: {s.best_sharpe:.2f}, 年化收益: {s.best_return:.1f}%, 最大回撤: {s.best_max_dd:.1f}%")
+                for name, df in s.strategy_results.items():
+                    if not df.empty:
+                        top = df.iloc[0]
+                        lines.append(
+                            f"    {name}: 夏普={top.get('sharpe', 0):.2f}, "
+                            f"收益={top.get('return', 0):.1f}%, "
+                            f"回撤={top.get('dd', 0):.1f}%"
+                        )
+            else:
+                lines.append("  无回测数据")
         lines.append("")
     return "\n".join(lines)
 
@@ -509,6 +552,7 @@ def generate_oneclick_report(
     report_dir: Path = Path("reports"),
     trigger_source: str = "manual",
     enable_gemini: bool = True,
+    lang: str = "zh",
 ) -> Path:
     """End-to-end: build data, call Gemini, render HTML, save, record in DB.
 
@@ -516,13 +560,13 @@ def generate_oneclick_report(
     """
     log.info("Generating one-click report for %s (trigger: %s)", as_of, trigger_source)
 
-    report_data = build_report_data(as_of, db_path)
+    report_data = build_report_data(as_of, db_path, lang=lang)
 
     # Gemini synthesis
     if enable_gemini and os.getenv("GEMINI_API_KEY"):
         try:
             from webapp.gemini import generate_weekly_synthesis
-            synthesis_result = generate_weekly_synthesis(report_data)
+            synthesis_result = generate_weekly_synthesis(report_data, lang=lang)
             report_data.gemini_synthesis = synthesis_result.get("report_text", "")
             report_data.gemini_citations = [
                 {"title": c.title, "uri": c.uri}

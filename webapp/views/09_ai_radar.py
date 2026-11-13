@@ -34,11 +34,6 @@ _RADAR_COL_LABELS = {
     "v_score": tr("V分 (估值偏离)", "V-Score"),
 }
 
-st.set_page_config(
-    page_title=tr("ARF — AI 投资雷达", "ARF — AI Opportunity Radar"),
-    page_icon="🤖",
-    layout="wide",
-)
 inject_mobile_css()
 
 st.title(tr("🤖 AI 投资机会与产业链雷达", "🤖 AI Opportunity & Supply-Chain Radar"))
