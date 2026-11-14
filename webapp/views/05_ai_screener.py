@@ -9,9 +9,7 @@ from webapp import gemini
 # Local imports
 from webapp.data import _open_conn
 from webapp.mobile import inject_mobile_css
-from webapp.ui import get_current_lang, render_sidebar, tr
-
-is_en = get_current_lang() == "en"
+from webapp.ui import render_sidebar, tr
 
 st.set_page_config(
     page_title=tr("AI 智能选股器", "AI Stock Screener"),
@@ -41,27 +39,27 @@ log = logging.getLogger(__name__)
 try:
     conn = _open_conn()
     pool_df = conn.execute("""
-        SELECT 
-            s.ticker AS "代码", 
-            s.name AS "公司名称", 
-            s.leg AS "板块", 
-            s.layer AS "层级",
-            CASE WHEN t.technical_score IS NOT NULL THEN '已覆盖 ✅' ELSE '暂无技术面 ❌' END AS "技术与筹码数据"
+        SELECT
+            s.ticker AS ticker,
+            s.name AS name,
+            s.leg AS leg,
+            s.layer AS layer,
+            CASE WHEN t.technical_score IS NOT NULL THEN 1 ELSE 0 END AS tech_covered
         FROM snapshots s
         LEFT JOIN (
-            SELECT ticker, technical_score 
-            FROM technical_metrics 
+            SELECT ticker, technical_score
+            FROM technical_metrics
             WHERE as_of_date = ?
         ) t ON s.ticker = t.ticker
         WHERE s.as_of_date = ? AND s.leg IN ('US', 'China')
         ORDER BY s.leg DESC, s.ticker
     """, [as_of, as_of]).fetchdf()
-    
+
     if not pool_df.empty:
         total_count = len(pool_df)
-        us_count = len(pool_df[pool_df["板块"] == "US"])
-        cn_count = len(pool_df[pool_df["板块"] == "China"])
-        covered_count = len(pool_df[pool_df["技术与筹码数据"] == "已覆盖 ✅"])
+        us_count = len(pool_df[pool_df["leg"] == "US"])
+        cn_count = len(pool_df[pool_df["leg"] == "China"])
+        covered_count = int(pool_df["tech_covered"].sum())
         
         with st.expander(
             tr(
@@ -89,16 +87,15 @@ try:
             """,
             ))
             pool_view = pool_df.copy()
-            if is_en:
-                pool_view["技术与筹码数据"] = pool_view["技术与筹码数据"].replace(
-                    {"已覆盖 ✅": "Covered ✅", "暂无技术面 ❌": "No technicals ❌"}
-                )
+            pool_view["tech_covered"] = pool_view["tech_covered"].map(
+                {1: tr("已覆盖 ✅", "Covered ✅"), 0: tr("暂无技术面 ❌", "No technicals ❌")}
+            )
             pool_view = pool_view.rename(columns={
-                "代码": tr("代码", "Ticker"),
-                "公司名称": tr("公司名称", "Company"),
-                "板块": tr("板块", "Leg"),
-                "层级": tr("层级", "Layer"),
-                "技术与筹码数据": tr("技术与筹码数据", "Technical & Chip Data"),
+                "ticker": tr("代码", "Ticker"),
+                "name": tr("公司名称", "Company"),
+                "leg": tr("板块", "Leg"),
+                "layer": tr("层级", "Layer"),
+                "tech_covered": tr("技术与筹码数据", "Technical & Chip Data"),
             })
             st.dataframe(pool_view, use_container_width=True, hide_index=True)
 except Exception as e:

@@ -51,7 +51,7 @@ def calculate_ma(day_count: int, df_close: pd.Series) -> list[float | None]:
     return [None if pd.isna(v) else float(v) for v in df_ma.values]
 
 
-def draw_pro_kline(df: pd.DataFrame, static: bool = False) -> go.Figure:
+def draw_pro_kline(df: pd.DataFrame, static: bool = False, lang: str = "zh") -> go.Figure:
     """Candlestick chart with MA5/10/20/30 and a volume panel.
 
     ``static`` (used on phones) keeps only the most recent ~90 bars and turns
@@ -89,7 +89,7 @@ def draw_pro_kline(df: pd.DataFrame, static: bool = False) -> go.Figure:
             high=highs,
             low=lows,
             close=closes,
-            name="Daily K" if static else "日K",
+            name="Daily K" if (static or lang == "en") else "日K",
             increasing_line_color=_UP_COLOR,
             increasing_fillcolor=_UP_COLOR,
             decreasing_line_color=_DOWN_COLOR,

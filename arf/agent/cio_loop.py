@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import logging
 import math
+import os
 import uuid
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -691,8 +692,10 @@ def build_cio_decision_packet(
     customer_shocks: dict[str, float] | None = None,
     max_proposals: int = 8,
     bottleneck_clamp: float | None = 0.80,
+    lang: str = "zh",
 ) -> CIODecisionPacket:
     """Build the autonomous 5-stage CIO Decision Packet end-to-end."""
+    is_en = lang == "en"
     packet_id = f"CIO-PKT-{as_of.isoformat()}-{uuid.uuid4().hex[:6].upper()}"
 
     # Load supply chain links, snapshots, forecasts, and technicals once
@@ -704,11 +707,19 @@ def build_cio_decision_packet(
         return CIODecisionPacket(
             packet_id=packet_id,
             as_of_date=as_of.isoformat(),
-            regime_summary="No snapshot data available on or before as-of date.",
+            regime_summary=(
+                "No snapshot data available on or before as-of date."
+                if is_en
+                else "截至指定快照日期暂无可用数据。"
+            ),
             shock_scenario=customer_shocks or {},
             watchdog_alerts=[],
             proposals=[],
-            markdown_brief="# 💼 AI-CIO Decision Packet\n\nNo snapshot data available.",
+            markdown_brief=(
+                "# 💼 AI-CIO Decision Packet\n\nNo snapshot data available."
+                if is_en
+                else "# 💼 AI-CIO 自主投资决策简报\n\n暂无可用快照数据。"
+            ),
         )
 
     fc_df = _ensure_and_load_forecasts(conn, as_of, horizon_days=90)
@@ -959,26 +970,42 @@ def build_cio_decision_packet(
     )
 
     # Render Markdown briefing
-    brief_lines = [
-        "# 💼 AI-CIO 自主投资决策简报 (Autonomous Decision Packet)",
-        f"**Packet ID:** `{packet_id}` | **As Of Date:** `{as_of.isoformat()}` | **Generated At:** `{datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC')}`",
-        "",
-        "---",
-        "",
-        "## 1. 宏观与 AI 价值链全局状态 (Macro & Value Chain Regime)",
-        f"> {regime_summary}",
-        "",
-    ]
+    if is_en:
+        brief_lines = [
+            "# 💼 AI-CIO Autonomous Decision Packet",
+            f"**Packet ID:** `{packet_id}` | **As Of Date:** `{as_of.isoformat()}` | **Generated At:** `{datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC')}`",
+            "",
+            "---",
+            "",
+            "## 1. Macro & AI Value Chain Regime",
+            f"> {regime_summary}",
+            "",
+        ]
+    else:
+        brief_lines = [
+            "# 💼 AI-CIO 自主投资决策简报 (Autonomous Decision Packet)",
+            f"**Packet ID:** `{packet_id}` | **As Of Date:** `{as_of.isoformat()}` | **Generated At:** `{datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC')}`",
+            "",
+            "---",
+            "",
+            "## 1. 宏观与 AI 价值链全局状态 (Macro & Value Chain Regime)",
+            f"> {regime_summary}",
+            "",
+        ]
 
     if customer_shocks:
         brief_lines.extend([
-            "## 2. 下游需求冲击传导模拟 (Causal Supply-Chain Shock Propagation)",
+            "## 2. Causal Supply-Chain Shock Propagation" if is_en else "## 2. 下游需求冲击传导模拟 (Causal Supply-Chain Shock Propagation)",
             f"**Hyperscaler Shocks:** {', '.join(f'`{k}: {v:+.1%}`' for k, v in customer_shocks.items())}",
             "",
         ])
         if not shock_df.empty:
             top_shocks = shock_df.head(6)
-            brief_lines.append("| 标的代码 | 名称 | 区域 | 层级 | 基准预测 | 冲击后预测 | 弹性增量 (Δ) | P50 空间 |")
+            brief_lines.append(
+                "| Ticker | Name | Leg | Layer | Base Forecast | Post-Shock Forecast | Shock Δ | P50 Upside |"
+                if is_en
+                else "| 标的代码 | 名称 | 区域 | 层级 | 基准预测 | 冲击后预测 | 弹性增量 (Δ) | P50 空间 |"
+            )
             brief_lines.append("| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |")
             for _, sr in top_shocks.iterrows():
                 ret_val = _num(sr.get("expected_return_p50"))
@@ -991,10 +1018,14 @@ def build_cio_decision_packet(
             brief_lines.append("")
 
     brief_lines.extend([
-        "## 3. 活跃持仓哨兵与触发告警 (Active Thesis Watchdog Alerts)",
+        "## 3. Active Thesis Watchdog Alerts" if is_en else "## 3. 活跃持仓哨兵与触发告警 (Active Thesis Watchdog Alerts)",
     ])
     if watchdog_alerts:
-        brief_lines.append("| 严重性 | 标的 | 告警类型 | 触发规则 | 当前指标值 | 建议动作 |")
+        brief_lines.append(
+            "| Severity | Ticker | Alert Type | Triggered Rule | Current Metric | Recommended Action |"
+            if is_en
+            else "| 严重性 | 标的 | 告警类型 | 触发规则 | 当前指标值 | 建议动作 |"
+        )
         brief_lines.append("| :--- | :--- | :--- | :--- | :--- | :--- |")
         for alert in watchdog_alerts:
             sev_badge = (
@@ -1008,13 +1039,21 @@ def build_cio_decision_packet(
             )
         brief_lines.append("")
     else:
-        brief_lines.append("✅ 哨兵监测正常：当前无持仓触及定量证伪 (Kill Conditions) 或估值泡沫熔断。\n")
+        brief_lines.append(
+            "✅ Watchdog clear: no active positions breached quantitative kill conditions or froth circuit breakers.\n"
+            if is_en
+            else "✅ 哨兵监测正常：当前无持仓触及定量证伪 (Kill Conditions) 或估值泡沫熔断。\n"
+        )
 
     brief_lines.extend([
-        "## 4. 推荐执行交易提案与风控门禁 (Actionable Proposal Tickets & Risk Gates)",
+        "## 4. Actionable Proposal Tickets & Risk Gates" if is_en else "## 4. 推荐执行交易提案与风控门禁 (Actionable Proposal Tickets & Risk Gates)",
     ])
     if proposals:
-        brief_lines.append("| 标的 | 动作 | 置信度 | 超额差 (Beat) | 12M P50空间 | 门禁裁决 | 论证逻辑与核心证伪条件 |")
+        brief_lines.append(
+            "| Ticker | Action | Conviction | Expected Beat | 12M P50 Upside | Gate Verdict | Rationale & Kill Conditions |"
+            if is_en
+            else "| 标的 | 动作 | 置信度 | 超额差 (Beat) | 12M P50空间 | 门禁裁决 | 论证逻辑与核心证伪条件 |"
+        )
         brief_lines.append("| :--- | :--- | :--- | :--- | :--- | :--- | :--- |")
         for p in proposals:
             act_badge = (
@@ -1034,7 +1073,11 @@ def build_cio_decision_packet(
             )
         brief_lines.append("")
     else:
-        brief_lines.append("当前无满足 G1–G4 准入标准的高置信度提案。\n")
+        brief_lines.append(
+            "No high-conviction proposals currently pass G1–G4 admission criteria.\n"
+            if is_en
+            else "当前无满足 G1–G4 准入标准的高置信度提案。\n"
+        )
 
     brief_lines.extend([
         "---",
@@ -1091,6 +1134,12 @@ def main() -> None:
         default=8,
         help="Maximum proposal tickets to return.",
     )
+    parser.add_argument(
+        "--lang",
+        choices=["en", "zh"],
+        default=os.getenv("ARF_LANG", "en"),
+        help="Language of the Markdown brief (default: $ARF_LANG, then 'en').",
+    )
 
     args = parser.parse_args()
     conn = init_db(Path(args.db))
@@ -1121,6 +1170,7 @@ def main() -> None:
         held_tickers=held,
         customer_shocks=shocks if shocks else None,
         max_proposals=args.max_proposals,
+        lang=args.lang,
     )
 
     print(packet.markdown_brief)

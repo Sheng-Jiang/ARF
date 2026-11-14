@@ -165,6 +165,6 @@ Beijing, China
 
 * **Master Strategy Document:** `Jobs/IDC_VP_APPLICATION_STRATEGY_AND_DECISION.md`
 * **Underlying Engine:** [`arf/idc.py`](file:///Users/sheng/Developer/ARF/arf/idc.py)
-* **Interactive UI:** [`webapp/pages/11_🌐_IDC_MarketScape.py`](file:///Users/sheng/Developer/ARF/webapp/pages/11_%F0%9F%8C%90_IDC_MarketScape.py)
+* **Interactive UI:** [`webapp/views/11_idc_marketscape.py`](file:///Users/sheng/Developer/ARF/webapp/views/11_idc_marketscape.py)
 * **Live English URL:** `https://stock.thekingfilter.com/IDC_MarketScape`
 * **Unit Tests:** [`tests/test_idc.py`](file:///Users/sheng/Developer/ARF/tests/test_idc.py) (`10 passed`, full suite `317 passed`)

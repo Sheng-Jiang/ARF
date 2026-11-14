@@ -11,11 +11,15 @@ from arf.agent.thesis import generate_opportunity_card
 from arf.db import init_db, query_candidates, query_theses
 from webapp import data, gemini
 from webapp.mobile import inject_mobile_css
-from webapp.ui import get_current_lang, render_sidebar, tr
+from webapp.ui import render_sidebar, tr
 
 log = logging.getLogger(__name__)
 
-is_en = get_current_lang() == "en"
+st.set_page_config(
+    page_title=tr("ARF — AI 投资雷达", "ARF — AI Opportunity Radar"),
+    page_icon="🤖",
+    layout="wide",
+)
 
 _RADAR_COL_LABELS = {
     "ticker": tr("代码", "Ticker"),
@@ -34,11 +38,6 @@ _RADAR_COL_LABELS = {
     "v_score": tr("V分 (估值偏离)", "V-Score"),
 }
 
-st.set_page_config(
-    page_title=tr("ARF — AI 投资雷达", "ARF — AI Opportunity Radar"),
-    page_icon="🤖",
-    layout="wide",
-)
 inject_mobile_css()
 
 st.title(tr("🤖 AI 投资机会与产业链雷达", "🤖 AI Opportunity & Supply-Chain Radar"))

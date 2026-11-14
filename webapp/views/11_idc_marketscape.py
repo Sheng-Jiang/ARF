@@ -24,11 +24,15 @@ from webapp.ui import get_current_lang, render_sidebar, tr
 is_en = get_current_lang() == "en"
 
 st.set_page_config(
-    page_title="IDC Quanta™ Analyst Research Desk — ARF MarketScape™" if is_en else "IDC Quanta™ 分析师工作台 — ARF MarketScape™",
+    page_title=(
+        "IDC Quanta™ Analyst Research Desk — ARF MarketScape™" if is_en
+        else "IDC Quanta™ 分析师工作台 — ARF MarketScape™"
+    ),
     page_icon="🌐",
     layout="wide",
     initial_sidebar_state="auto",
 )
+
 inject_mobile_css()
 
 

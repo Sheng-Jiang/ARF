@@ -280,30 +280,35 @@ def _compute_thermo_deltas(thermo: pd.DataFrame) -> list[ThermometerDelta]:
     return deltas
 
 
-def _render_thermo_chart(thermo: pd.DataFrame) -> str:
+def _render_thermo_chart(thermo: pd.DataFrame, lang: str = "zh") -> str:
     """Render thermometer froth-count trend as an embeddable Plotly HTML div."""
+    is_en = lang == "en"
     fig = go.Figure()
     us = thermo[thermo["leg"] == "US"].sort_values("as_of_date")
     cn = thermo[thermo["leg"] == "China"].sort_values("as_of_date")
 
-    for label, df, color in [("美股", us, "#DE6A2C"), ("中股", cn, "#D8A33E")]:
+    legs = [("US Leg", us, "#DE6A2C"), ("China Leg", cn, "#D8A33E")] if is_en else [("美股", us, "#DE6A2C"), ("中股", cn, "#D8A33E")]
+    for label, df, color in legs:
         if df.empty:
             continue
         if "count_absolute_froth" in df.columns:
             fig.add_trace(go.Scatter(
                 x=df["as_of_date"], y=df["count_absolute_froth"],
-                name=f"{label} — 绝对泡沫数", mode="lines+markers",
+                name=f"{label} — Absolute Froth" if is_en else f"{label} — 绝对泡沫数",
+                mode="lines+markers",
                 line=dict(color=color, width=3), marker=dict(size=8),
             ))
         fig.add_trace(go.Scatter(
             x=df["as_of_date"], y=df["count_froth"],
-            name=f"{label} — 相对泡沫数 (D1)", mode="lines+markers",
+            name=f"{label} — Relative Froth (D1)" if is_en else f"{label} — 相对泡沫数 (D1)",
+            mode="lines+markers",
             line=dict(color=color, width=1.5, dash="dash"), marker=dict(size=6),
         ))
 
     fig.update_layout(
-        title="ARF 泡沫温度计趋势",
-        xaxis_title="日期", yaxis_title="股票数量",
+        title="ARF Bubble Thermometer Trend" if is_en else "ARF 泡沫温度计趋势",
+        xaxis_title="Date" if is_en else "日期",
+        yaxis_title="Ticker Count" if is_en else "股票数量",
         hovermode="x unified", height=380,
         template="plotly_dark",
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(28,24,19,0.7)",
@@ -315,44 +320,50 @@ def _render_thermo_chart(thermo: pd.DataFrame) -> str:
     return fig.to_html(full_html=False, include_plotlyjs=False)
 
 
-def _render_valuation_chart(thermo: pd.DataFrame) -> str:
+def _render_valuation_chart(thermo: pd.DataFrame, lang: str = "zh") -> str:
     """Render valuation stretch + growth gap trend as embeddable Plotly HTML div."""
+    is_en = lang == "en"
     fig = make_subplots(specs=[[{"secondary_y": True}]])
     us = thermo[thermo["leg"] == "US"].sort_values("as_of_date")
     cn = thermo[thermo["leg"] == "China"].sort_values("as_of_date")
 
-    for label, df, color in [("美股", us, "#DE6A2C"), ("中股", cn, "#D8A33E")]:
+    legs = [("US Leg", us, "#DE6A2C"), ("China Leg", cn, "#D8A33E")] if is_en else [("美股", us, "#DE6A2C"), ("中股", cn, "#D8A33E")]
+    for label, df, color in legs:
         if df.empty:
             continue
         fig.add_trace(go.Scatter(
             x=df["as_of_date"], y=df["median_ev_sales_pct"],
-            name=f"{label} — EV/Sales 5年分位数", mode="lines+markers",
+            name=f"{label} — EV/Sales 5Y Percentile" if is_en else f"{label} — EV/Sales 5年分位数",
+            mode="lines+markers",
             line=dict(color=color, width=2), marker=dict(size=6),
         ), secondary_y=False)
         fig.add_trace(go.Scatter(
             x=df["as_of_date"], y=df["median_growth_gap_pct"],
-            name=f"{label} — 隐含增长差值 (%)", mode="lines+markers",
+            name=f"{label} — Implied Growth Gap (%)" if is_en else f"{label} — 隐含增长差值 (%)",
+            mode="lines+markers",
             line=dict(color=color, width=1.5, dash="dash"), marker=dict(size=5),
         ), secondary_y=True)
 
     fig.add_hline(y=50, line_dash="dot", line_color="gray", opacity=0.5)
     fig.update_layout(
-        title="估值热度与隐含增长差值走势",
-        xaxis_title="日期", hovermode="x unified", height=350,
+        title="Valuation Stretch & Implied Growth Gap Trend" if is_en else "估值热度与隐含增长差值走势",
+        xaxis_title="Date" if is_en else "日期",
+        hovermode="x unified", height=350,
         template="plotly_dark",
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(28,24,19,0.7)",
         font=dict(family="IBM Plex Mono, monospace", color="#ECE4D4", size=12),
         xaxis=dict(gridcolor="rgba(236,228,212,0.07)"),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
     )
-    fig.update_yaxes(title_text="EV/Sales 5年分位数 (%)", range=[0, 100], secondary_y=False)
-    fig.update_yaxes(title_text="隐含增长差值 (%)", secondary_y=True)
+    fig.update_yaxes(title_text="EV/Sales 5Y Percentile (%)" if is_en else "EV/Sales 5年分位数 (%)", range=[0, 100], secondary_y=False)
+    fig.update_yaxes(title_text="Implied Growth Gap (%)" if is_en else "隐含增长差值 (%)", secondary_y=True)
     return fig.to_html(full_html=False, include_plotlyjs=False)
 
 
 def build_report_data(
     as_of: date,
     db_path: Path = Path("data/arf.db"),
+    lang: str = "zh",
 ) -> ReportData:
     """Assemble all data needed for the weekly report."""
     from arf.db import init_db, query_snapshot, query_thermometer_series
@@ -376,8 +387,8 @@ def build_report_data(
 
     # Thermometer
     report.thermo_deltas = _compute_thermo_deltas(thermo)
-    report.thermo_chart_html = _render_thermo_chart(thermo)
-    report.valuation_chart_html = _render_valuation_chart(thermo)
+    report.thermo_chart_html = _render_thermo_chart(thermo, lang=lang)
+    report.valuation_chart_html = _render_valuation_chart(thermo, lang=lang)
 
     # Backtests on top-5 China stocks
     top_china = select_top_china_stocks(scored)
@@ -389,37 +400,173 @@ def build_report_data(
     return report
 
 
-def _backtest_summary_for_gemini(stocks: list[StockBacktestResult]) -> str:
+_STRATEGY_NAME_EN = {
+    "MA 策略 (单均线)": "MA Strategy (Single MA)",
+    "MACross 策略 (双均线交叉)": "MACross Strategy (Dual MA Crossover)",
+    "TechnicalScore 策略 (智能技术评分)": "TechnicalScore Strategy",
+}
+
+
+def _backtest_summary_for_gemini(stocks: list[StockBacktestResult], lang: str = "zh") -> str:
     """Format backtest results as a text block for the Gemini prompt."""
+    is_en = lang == "en"
     lines = []
     for s in stocks:
         lines.append(f"### {s.ticker} ({s.name})")
-        lines.append(f"  技术评分: {s.tech_score:.1f}" if s.tech_score else "  技术评分: N/A")
-        lines.append(f"  均线多头: {'是' if s.ma_bullish else '否'}")
-        lines.append(f"  RSI: {s.rsi:.1f}" if s.rsi else "  RSI: N/A")
-        lines.append(
-            f"  获利盘: {s.chip_profit_ratio*100:.1f}%"
-            if s.chip_profit_ratio is not None else "  获利盘: N/A"
-        )
-        if s.strategy_results:
-            lines.append(f"  最优策略: {s.best_strategy}")
-            lines.append(f"  最优夏普: {s.best_sharpe:.2f}, 年化收益: {s.best_return:.1f}%, 最大回撤: {s.best_max_dd:.1f}%")
-            for name, df in s.strategy_results.items():
-                if not df.empty:
-                    top = df.iloc[0]
-                    lines.append(
-                        f"    {name}: 夏普={top.get('sharpe', 0):.2f}, "
-                        f"收益={top.get('return', 0):.1f}%, "
-                        f"回撤={top.get('dd', 0):.1f}%"
-                    )
+        if is_en:
+            lines.append(f"  Technical Score: {s.tech_score:.1f}" if s.tech_score else "  Technical Score: N/A")
+            lines.append(f"  Bullish MA Alignment: {'Yes' if s.ma_bullish else 'No'}")
+            lines.append(f"  RSI: {s.rsi:.1f}" if s.rsi else "  RSI: N/A")
+            lines.append(
+                f"  Profit Chips Ratio: {s.chip_profit_ratio*100:.1f}%"
+                if s.chip_profit_ratio is not None else "  Profit Chips Ratio: N/A"
+            )
+            if s.strategy_results:
+                best_name = _STRATEGY_NAME_EN.get(s.best_strategy, s.best_strategy)
+                lines.append(f"  Best Strategy: {best_name}")
+                lines.append(f"  Best Sharpe: {s.best_sharpe:.2f}, Annual Return: {s.best_return:.1f}%, Max Drawdown: {s.best_max_dd:.1f}%")
+                for name, df in s.strategy_results.items():
+                    if not df.empty:
+                        top = df.iloc[0]
+                        disp = _STRATEGY_NAME_EN.get(name, name)
+                        lines.append(
+                            f"    {disp}: Sharpe={top.get('sharpe', 0):.2f}, "
+                            f"Return={top.get('return', 0):.1f}%, "
+                            f"MaxDD={top.get('dd', 0):.1f}%"
+                        )
+            else:
+                lines.append("  No backtest data")
         else:
-            lines.append("  无回测数据")
+            lines.append(f"  技术评分: {s.tech_score:.1f}" if s.tech_score else "  技术评分: N/A")
+            lines.append(f"  均线多头: {'是' if s.ma_bullish else '否'}")
+            lines.append(f"  RSI: {s.rsi:.1f}" if s.rsi else "  RSI: N/A")
+            lines.append(
+                f"  获利盘: {s.chip_profit_ratio*100:.1f}%"
+                if s.chip_profit_ratio is not None else "  获利盘: N/A"
+            )
+            if s.strategy_results:
+                lines.append(f"  最优策略: {s.best_strategy}")
+                lines.append(f"  最优夏普: {s.best_sharpe:.2f}, 年化收益: {s.best_return:.1f}%, 最大回撤: {s.best_max_dd:.1f}%")
+                for name, df in s.strategy_results.items():
+                    if not df.empty:
+                        top = df.iloc[0]
+                        lines.append(
+                            f"    {name}: 夏普={top.get('sharpe', 0):.2f}, "
+                            f"收益={top.get('return', 0):.1f}%, "
+                            f"回撤={top.get('dd', 0):.1f}%"
+                        )
+            else:
+                lines.append("  无回测数据")
         lines.append("")
     return "\n".join(lines)
 
 
-def generate_report_html(report: ReportData) -> str:
-    """Render report data into a standalone HTML file."""
+_REPORT_STRINGS: dict[str, dict[str, str]] = {
+    "zh": {
+        "html_lang": "zh-CN",
+        "page_title": "ARF 估值温度计",
+        "mast_kicker": "AI Relevance Factor · 周度估值温度计",
+        "week_label": "WK {as_of} · 回测窗口 {months} 个月",
+        "hero_title": "AI 叙事，把估值<em>烧</em>到了几度？",
+        "hero_dek": "ARF 用单一 0–100 分量化每只 AI 产业链个股被叙事“吹高”的程度。下表读数即本周的泡沫温度——美股与中股各成一支温标，从不混合计量。",
+        "gauge_label": "泡沫温标 · DUAL CHANNEL",
+        "us_d1_label": "🇺🇸 美股 D1",
+        "us_froth_label": "🇺🇸 泡沫预警 ★",
+        "cn_d1_label": "🇨🇳 中股 D1",
+        "cn_froth_label": "🇨🇳 泡沫预警 ★",
+        "absolute_froth_label": "绝对泡沫数",
+        "ev_sales_pct_label": "EV/S 分位",
+        "score_ladder": "评分阶梯",
+        "us_sorted": "🇺🇸 美股 · 按 ARF 降序 · 越靠上越热",
+        "cn_sorted": "🇨🇳 中股 · 按 ARF 降序 · 越靠上越热",
+        "thermo_trend": "温标趋势",
+        "thermo_chart_caption": "泡沫温度计 · 时序读数",
+        "valuation_chart_caption": "EV/Sales 分位 · 时序读数",
+        "backtest_title": "Top 5 中国 A+H 策略回测",
+        "backtest_sub": "回测窗口 {months} 个月 · 参数寻优后最优组合",
+        "tech_score": "技术评分",
+        "ma_bullish": "均线多头",
+        "profit_chips": "获利盘",
+        "tbl_strategy": "策略",
+        "tbl_params": "最优参数",
+        "tbl_return": "收益%",
+        "tbl_sharpe": "夏普",
+        "tbl_dd": "回撤%",
+        "best_tag": "最优",
+        "no_backtest_data": "暂无回测数据",
+        "no_candidates": "未找到符合条件的中国 A+H 股进行回测",
+        "gemini_title": "Gemini 综合研判",
+        "sources": "引用来源",
+        "gemini_empty": "未配置 GEMINI_API_KEY 或 AI 综合研判生成失败。请设置 API 密钥后重试。",
+        "legend_html": (
+            "<strong>读数说明与免责声明 ——</strong> 温标越高代表估值被 AI 叙事吹得越热；"
+            "★ 为泡沫预警（D1 且 ROE 低于股权成本且 P/S &gt; 25）。本报告由 ARF 量化模型自动生成，"
+            "所有评分、回测与 AI 研判均基于预设算法与公开数据，仅作量化分析与学术研究的"
+            "<strong>参考工具</strong>，<strong>不构成任何证券买卖建议</strong>。"
+            "历史回测不代表未来收益，AI 生成内容可能含不准确信息，请独立核实、自担风险。"
+        ),
+        "generated_at_label": "生成于",
+        "col_ticker": "代码 / 公司",
+        "col_layer": "层级",
+        "ma_yes": "✅ 是",
+        "ma_no": "❌ 否",
+    },
+    "en": {
+        "html_lang": "en",
+        "page_title": "ARF Valuation Thermometer",
+        "mast_kicker": "AI Relevance Factor · Weekly Valuation Thermometer",
+        "week_label": "WK {as_of} · Backtest window {months} mo",
+        "hero_title": "How <em>hot</em> has the AI narrative run valuations?",
+        "hero_dek": "ARF scores every AI-stack name 0–100 on how much its valuation is bent by the narrative. The readings below are this week's froth temperature — the US and China legs run on separate thermometers and are never pooled.",
+        "gauge_label": "FROTH SCALE · DUAL CHANNEL",
+        "us_d1_label": "🇺🇸 US Leg D1",
+        "us_froth_label": "🇺🇸 Froth Warning ★",
+        "cn_d1_label": "🇨🇳 China Leg D1",
+        "cn_froth_label": "🇨🇳 Froth Warning ★",
+        "absolute_froth_label": "Absolute Froth",
+        "ev_sales_pct_label": "EV/S Percentile",
+        "score_ladder": "Score Ladder",
+        "us_sorted": "🇺🇸 US Leg · sorted by ARF · hotter at the top",
+        "cn_sorted": "🇨🇳 China Leg · sorted by ARF · hotter at the top",
+        "thermo_trend": "Thermometer Trend",
+        "thermo_chart_caption": "Bubble thermometer · time series",
+        "valuation_chart_caption": "EV/Sales percentile · time series",
+        "backtest_title": "Top 5 China A+H Strategy Backtest",
+        "backtest_sub": "Backtest window {months} mo · best combination after parameter search",
+        "tech_score": "Tech Score",
+        "ma_bullish": "MA Bullish",
+        "profit_chips": "Profit Chips",
+        "tbl_strategy": "Strategy",
+        "tbl_params": "Best Params",
+        "tbl_return": "Return %",
+        "tbl_sharpe": "Sharpe",
+        "tbl_dd": "Drawdown %",
+        "best_tag": "BEST",
+        "no_backtest_data": "No backtest data",
+        "no_candidates": "No eligible China A+H stocks found for backtest",
+        "gemini_title": "Gemini Synthesis",
+        "sources": "Sources",
+        "gemini_empty": "GEMINI_API_KEY is not configured, or AI synthesis failed. Set the API key and retry.",
+        "legend_html": (
+            "<strong>How to read this &amp; disclaimer —</strong> A higher reading means the AI narrative has pushed "
+            "the valuation hotter; ★ marks the froth warning (D1 and ROE below cost of equity and P/S &gt; 25). "
+            "This report is generated automatically by the ARF quantitative model; all scores, backtests and AI "
+            "commentary rest on preset algorithms and public data and are a <strong>reference tool</strong> for "
+            "quantitative analysis and academic research, <strong>not investment advice</strong>. Past backtests do "
+            "not guarantee future returns, and AI-generated content may contain inaccuracies — verify independently "
+            "and bear your own risk."
+        ),
+        "generated_at_label": "Generated",
+        "col_ticker": "Ticker / Company",
+        "col_layer": "Layer",
+        "ma_yes": "✅ Yes",
+        "ma_no": "❌ No",
+    },
+}
+
+
+def generate_report_html(report: ReportData, lang: str = "zh") -> str:
+    """Render report data into a standalone HTML file in the requested language."""
     from jinja2 import Environment, FileSystemLoader
 
     template_dir = Path(__file__).parent / "templates"
@@ -428,6 +575,14 @@ def generate_report_html(report: ReportData) -> str:
         autoescape=True,
     )
     template = env.get_template("report_template.html")
+
+    is_en = lang == "en"
+    strings = dict(_REPORT_STRINGS["en" if is_en else "zh"])
+    months = BACKTEST_LOOKBACK_DAYS // 30
+    strings["week_label"] = strings["week_label"].format(
+        as_of=report.as_of.isoformat(), months=months
+    )
+    strings["backtest_sub"] = strings["backtest_sub"].format(months=months)
 
     # Prepare table rows for US and China
     def _prepare_rows(df: pd.DataFrame) -> list[dict]:
@@ -460,7 +615,7 @@ def generate_report_html(report: ReportData) -> str:
             param_cols = [c for c in top.index if c not in ["return", "dd", "sharpe"]]
             params_str = ", ".join(f"{c}={top[c]}" for c in param_cols)
             strategies.append({
-                "name": name,
+                "name": _STRATEGY_NAME_EN.get(name, name) if is_en else name,
                 "params": params_str,
                 "ret": f"{top.get('return', 0):.1f}",
                 "sharpe": f"{top.get('sharpe', 0):.2f}",
@@ -471,10 +626,13 @@ def generate_report_html(report: ReportData) -> str:
             "name": s.name,
             "tech_score": f"{s.tech_score:.1f}" if s.tech_score else "N/A",
             "rsi": f"{s.rsi:.1f}" if s.rsi else "N/A",
-            "ma_bullish": "✅ 是" if s.ma_bullish else "❌ 否",
+            "ma_bullish": strings["ma_yes"] if s.ma_bullish else strings["ma_no"],
             "chip_profit": f"{s.chip_profit_ratio*100:.1f}%" if s.chip_profit_ratio is not None else "N/A",
             "chip_avg_cost": f"¥{s.chip_avg_cost:.2f}" if s.chip_avg_cost else "N/A",
-            "best_strategy": s.best_strategy,
+            "best_strategy": (
+                _STRATEGY_NAME_EN.get(s.best_strategy, s.best_strategy)
+                if is_en else s.best_strategy
+            ),
             "best_sharpe": f"{s.best_sharpe:.2f}",
             "best_return": f"{s.best_return:.1f}",
             "best_dd": f"{s.best_max_dd:.1f}",
@@ -484,6 +642,7 @@ def generate_report_html(report: ReportData) -> str:
     from datetime import datetime
 
     html = template.render(
+        s=strings,
         as_of=report.as_of.isoformat(),
         generated_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         d1_us=report.d1_us,
@@ -498,7 +657,6 @@ def generate_report_html(report: ReportData) -> str:
         backtest_cards=bt_cards,
         gemini_synthesis=report.gemini_synthesis,
         gemini_citations=report.gemini_citations,
-        lookback_months=BACKTEST_LOOKBACK_DAYS // 30,
     )
     return html
 
@@ -509,6 +667,7 @@ def generate_oneclick_report(
     report_dir: Path = Path("reports"),
     trigger_source: str = "manual",
     enable_gemini: bool = True,
+    lang: str = "zh",
 ) -> Path:
     """End-to-end: build data, call Gemini, render HTML, save, record in DB.
 
@@ -516,13 +675,13 @@ def generate_oneclick_report(
     """
     log.info("Generating one-click report for %s (trigger: %s)", as_of, trigger_source)
 
-    report_data = build_report_data(as_of, db_path)
+    report_data = build_report_data(as_of, db_path, lang=lang)
 
     # Gemini synthesis
     if enable_gemini and os.getenv("GEMINI_API_KEY"):
         try:
             from webapp.gemini import generate_weekly_synthesis
-            synthesis_result = generate_weekly_synthesis(report_data)
+            synthesis_result = generate_weekly_synthesis(report_data, lang=lang)
             report_data.gemini_synthesis = synthesis_result.get("report_text", "")
             report_data.gemini_citations = [
                 {"title": c.title, "uri": c.uri}
@@ -533,7 +692,7 @@ def generate_oneclick_report(
     else:
         log.info("Gemini API key not set — skipping AI synthesis")
 
-    html = generate_report_html(report_data)
+    html = generate_report_html(report_data, lang=lang)
 
     report_dir.mkdir(parents=True, exist_ok=True)
     out_path = report_dir / f"weekly_report_{as_of}.html"

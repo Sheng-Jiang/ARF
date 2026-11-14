@@ -151,6 +151,27 @@ class TestBuildCockpit:
         assert layers.loc["L2 芯片与硬件系统", "Exposure"] == 10_000.0
         assert layers.loc["L4 云计算与基础模型", "Exposure"] == -10_000.0
 
+    def test_english_cockpit_has_no_cjk_labels(self, snapshot_df):
+        cockpit = build_cockpit(
+            _synthetic_result(),
+            snapshot_df=snapshot_df,
+            spec_path=default_mandate_path(),
+            lang="en",
+        )
+        book = cockpit.positions.set_index("Ticker")
+        assert book.loc["NVDA", "Side"] == "LONG"
+        assert book.loc["MSFT", "Side"] == "SHORT"
+        assert book.loc["NVDA", "Layer"] == "L2"
+
+        orders = cockpit.staged_orders.set_index("Ticker")
+        assert orders.loc["NVDA", "Side"] == "BUY"
+        assert orders.loc["NVDA", "Quantity"] == 100
+
+        layers = cockpit.layer_exposure.set_index("Layer")
+        assert layers.loc["L2 Compute Chips & Hardware", "Exposure"] == 10_000.0
+        assert layers.loc["L4 Cloud & Foundation Models", "Exposure"] == -10_000.0
+        assert cockpit.order_note.startswith("Pending decision")
+
     def test_replay_window_ends_on_as_of(self):
         start, end = replay_window(date(2026, 10, 18), days=30)
         assert end == "2026-10-18"

@@ -29,7 +29,10 @@ from webapp.ui import get_current_lang, tr
 
 is_en = get_current_lang() == "en"
 
-st.set_page_config(page_title=tr("ARF — 管理面板", "ARF — System Administration"), layout="wide")
+st.set_page_config(
+    page_title=tr("ARF — 管理面板", "ARF — System Administration"),
+    layout="wide",
+)
 inject_mobile_css()
 st.title(tr("⚙️ 管理面板", "⚙️ System Administration"))
 st.caption(
@@ -128,24 +131,6 @@ def _leg_label(leg: str) -> str:
     return {"US": "US Leg", "China": "China Leg"}.get(leg, leg)
 
 
-def _job_message(msg: str) -> str:
-    """Localise the fixed status messages returned by webapp.jobs."""
-    if not is_en:
-        return msg
-    mapping = {
-        "运行成功 ✓": "Run succeeded ✓",
-        "运行失败 ❌": "Run failed ❌",
-        "运行被取消 🛑": "Run cancelled 🛑",
-        "正在执行异步管道任务...": "Running async pipeline job...",
-    }
-    if msg in mapping:
-        return mapping[msg]
-    prefix = "查询状态失败: "
-    if msg.startswith(prefix):
-        return "Status query failed: " + msg[len(prefix):]
-    return msg
-
-
 # ---------- Last run summary ----------
 latest = load_latest_run()
 col1, col2, col3, col4 = st.columns(4)
@@ -198,7 +183,7 @@ with st.form("trigger_form"):
     )
     if submitted:
         try:
-            execution = jobs.trigger_pipeline(as_of=as_of_input)
+            execution = jobs.trigger_pipeline(as_of=as_of_input, lang=get_current_lang())
             st.success(
                 tr(
                     f"已成功提交管道运行请求。执行ID：`{execution}`",
@@ -215,10 +200,10 @@ with st.form("trigger_form"):
             max_duration = 300  # 5 minutes timeout
 
             while time.time() - start_time < max_duration:
-                status_dict = jobs.get_execution_status(execution)
+                status_dict = jobs.get_execution_status(execution, lang=get_current_lang())
                 status = status_dict.get("status", "running")
                 percent = status_dict.get("percent", 50)
-                msg = _job_message(status_dict.get("message", tr("正在运行...", "Running...")))
+                msg = status_dict.get("message", tr("正在运行...", "Running..."))
 
                 # Estimate percent based on elapsed time to make the progress bar look alive
                 elapsed = int(time.time() - start_time)

@@ -265,6 +265,7 @@ def _maybe_generate_research_synthesis(
     conn,
     df: pd.DataFrame,
     as_of: date,
+    lang: str = "en",
 ) -> None:
     """Generate the sell-side-research synthesis for the thermometer and persist it.
 
@@ -298,7 +299,7 @@ def _maybe_generate_research_synthesis(
     scored = df[df["leg"].isin(["US", "China"])]
     console.print("Generating institutional-research synthesis…")
     try:
-        synth = gemini.synthesize_research(scored, research_df, as_of)
+        synth = gemini.synthesize_research(scored, research_df, as_of, lang=lang)
     except Exception:
         log.exception("Research synthesis failed — continuing pipeline")
         return
@@ -339,6 +340,7 @@ def _maybe_generate_weekly_report(
     data_dir: Path,
     report_dir: Path,
     trigger_source: str,
+    lang: str = "en",
 ) -> None:
     """Auto-generate the one-click weekly report if enabled.
 
@@ -365,6 +367,7 @@ def _maybe_generate_weekly_report(
             report_dir=report_dir,
             trigger_source=trigger_source,
             enable_gemini=bool(os.getenv("GEMINI_API_KEY")),
+            lang=lang,
         )
         console.print(f"Weekly report written: {out_path}")
 
@@ -611,13 +614,23 @@ def run_pipeline(
     universe_path: Path = Path("config/universe.yaml"),
     trigger_source: str = "manual",
     leg: str | None = None,
+    lang: str | None = None,
 ) -> pd.DataFrame:
     """Run the full ARF pipeline for a given as-of date.
+
+    ``lang`` selects the language of the persisted research synthesis and the
+    one-click weekly report (``"en"`` or ``"zh"``). Defaults to ``$ARF_LANG``,
+    then English, so scheduled runs no longer silently emit Chinese artifacts
+    while the webapp is English-first.
 
     If env OUTPUT_TARGET=gcs, downloads the existing arf.db from
     `gs://$GCS_BUCKET/$GCS_DB_OBJECT` before running, and uploads the updated DB
     plus the snapshot parquet + markdown report when finished.
     """
+    lang = (lang or os.getenv("ARF_LANG") or "en").lower()
+    if lang not in ("en", "zh"):
+        log.warning("Unsupported ARF_LANG=%r — falling back to 'en'", lang)
+        lang = "en"
     leg_str = f" [leg: {leg}]" if leg else ""
     console.print(f"[bold]ARF pipeline[/bold] — as of {as_of}{leg_str} (trigger: {trigger_source})")
 
@@ -680,7 +693,7 @@ def run_pipeline(
 
         # Synthesise sell-side research vs ARF froth for the thermometer (layer-2)
         try:
-            _maybe_generate_research_synthesis(conn, df, as_of)
+            _maybe_generate_research_synthesis(conn, df, as_of, lang=lang)
         except Exception:
             log.exception("Research synthesis failed - continuing main pipeline")
 
@@ -721,7 +734,7 @@ def run_pipeline(
         console.print(f"Reports written to {report_dir}/")
 
         # One-click weekly report auto-generation
-        _maybe_generate_weekly_report(as_of, data_dir, report_dir, trigger_source)
+        _maybe_generate_weekly_report(as_of, data_dir, report_dir, trigger_source, lang=lang)
 
         status = "partial" if failed > 0 else "success"
         finish_run(
@@ -817,6 +830,9 @@ def main() -> None:
                         help="Filter pipeline to a specific leg (US or China).")
     parser.add_argument("--trigger-source", default=os.getenv("TRIGGER_SOURCE", "manual"),
                         help="Tag for the run record: manual|scheduler|webapp|lighthouse")
+    parser.add_argument("--lang", choices=["en", "zh"], default=None,
+                        help="Language for generated research synthesis and weekly report. "
+                             "Defaults to env ARF_LANG, then 'en'.")
     args = parser.parse_args()
 
     as_of = args.as_of
@@ -831,6 +847,7 @@ def main() -> None:
         universe_path=args.universe,
         trigger_source=args.trigger_source,
         leg=args.leg,
+        lang=args.lang,
     )
 
 

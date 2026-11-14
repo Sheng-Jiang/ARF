@@ -6,14 +6,13 @@ from plotly.subplots import make_subplots
 
 from webapp.data import load_snapshot, load_thermometer_series
 from webapp.mobile import inject_mobile_css, show_plotly
-from webapp.ui import get_current_lang, render_research_synthesis, render_sidebar, tr
-
-is_en = get_current_lang() == "en"
+from webapp.ui import render_research_synthesis, render_sidebar, tr
 
 st.set_page_config(
-    page_title="ARF — Bubble Thermometer" if is_en else "ARF — 泡沫温度计",
+    page_title=tr("ARF — 泡沫温度计", "ARF — Bubble Thermometer"),
     layout="wide",
 )
+
 inject_mobile_css()
 
 # Legend below the plot so its wrapped rows never collide with the title/toolbar.

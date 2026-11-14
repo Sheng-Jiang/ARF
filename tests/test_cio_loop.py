@@ -424,13 +424,29 @@ def test_build_cio_decision_packet_end_to_end(cio_test_db):
     assert nvda_prop[0].conviction > 0
     assert len(nvda_prop[0].kill_conditions) > 0
 
-    # Markdown brief validation
+    # Markdown brief validation (ZH default + EN mode)
     brief = packet.markdown_brief
     assert "# 💼 AI-CIO 自主投资决策简报" in brief
     assert "1. 宏观与 AI 价值链全局状态" in brief
     assert "2. 下游需求冲击传导模拟" in brief
     assert "3. 活跃持仓哨兵与触发告警" in brief
     assert "4. 推荐执行交易提案与风控门禁" in brief
+
+    en_packet = build_cio_decision_packet(
+        conn=cio_test_db,
+        as_of=as_of,
+        held_tickers=["NVDA", "FROTH_CO"],
+        customer_shocks={"NVDA": 0.15},
+        max_proposals=6,
+        lang="en",
+    )
+    en_brief = en_packet.markdown_brief
+    assert "# 💼 AI-CIO Autonomous Decision Packet" in en_brief
+    assert "## 1. Macro & AI Value Chain Regime" in en_brief
+    assert "## 2. Causal Supply-Chain Shock Propagation" in en_brief
+    assert "## 3. Active Thesis Watchdog Alerts" in en_brief
+    assert "## 4. Actionable Proposal Tickets & Risk Gates" in en_brief
+    assert not any("\u4e00" <= ch <= "\u9fff" for ch in en_brief)
 
 
 def test_on_demand_forecast_fallback_persists_and_returns_proposals(cio_test_db):

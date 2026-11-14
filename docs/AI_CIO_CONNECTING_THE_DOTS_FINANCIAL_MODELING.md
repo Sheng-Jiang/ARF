@@ -3,7 +3,7 @@ se an# Connecting the Dots: Value Chain Financial Modeling, Supply Chain Transmi
 **Document ID:** `AI-CIO-TECH-002`  
 **Date:** 2026-10-28  
 **Status:** Approved Strategic Architectural Specification  
-**Target:** `ARF` / `AI-CIO` (`arf/cio.py`, `arf/value_chain.py`, `arf/scoring.py`, `webapp/pages/10_💼_CIO_投资总监.py`)  
+**Target:** `ARF` / `AI-CIO` (`arf/cio.py`, `arf/value_chain.py`, `arf/scoring.py`, `webapp/views/10_cio_desk.py`)  
 **Cross-References:** [`docs/ADR-001`](file:///Users/sheng/Developer/ARF/docs/ADR-001-Next-Gen-Modeling-and-Lightweight-Ontology-for-Agents.md), [`docs/ARF_DIGITAL_INVESTMENT_ANALYST_VISION.md`](file:///Users/sheng/Developer/ARF/docs/ARF_DIGITAL_INVESTMENT_ANALYST_VISION.md)
 
 ---
@@ -226,7 +226,7 @@ Building upon [`docs/ADR-001`](file:///Users/sheng/Developer/ARF/docs/ADR-001-Ne
 │    • Mathematical consistency check: flags when supplier g* > 2x customer g*          │
 │    • Froth Flag: automatically triggers on valuation-profitability divergence          │
 ├────────────────────────────────────────────────────────────────────────────────────────┤
-│ 4. AI-CIO EXECUTIVE COCKPIT (Streamlit / webapp/pages/10_💼_CIO_投资总监.py)          │
+│ 4. AI-CIO EXECUTIVE COCKPIT (Streamlit / webapp/views/10_cio_desk.py)          │
 │    • Portfolio rebalancing recommendations based on supply-chain bottlenecks           │
 │    • Value-chain margin transfer visualization                                         │
 │    • Interactive counterfactual shock simulator (e.g. "Simulate 20% Hyperscaler CapEx Cut")│

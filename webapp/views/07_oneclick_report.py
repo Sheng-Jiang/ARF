@@ -6,9 +6,7 @@ import streamlit as st
 
 from webapp.data import _open_conn
 from webapp.mobile import inject_mobile_css
-from webapp.ui import get_current_lang, render_sidebar, tr
-
-is_en = get_current_lang() == "en"
+from webapp.ui import render_sidebar, tr
 
 st.set_page_config(
     page_title=tr("一键研报 — ARF Weekly Report", "1-Click Research Note — ARF Weekly Report"),
@@ -45,12 +43,12 @@ st.info(
         "💡 **关于研报生成：**\n\n"
         "完整的周度研报包含全量数据抓取、中股 Top 5 策略回测以及 Gemini AI 的跨维度深度研判，计算耗时通常为 2–5 分钟。\n\n"
         "为了确保执行稳定、避免页面请求超时，**研报生成已迁移至后台异步任务**。\n\n"
-        "👉 请前往 **[⚙️ 系统管理](⚙️_系统管理)** 页面触发管道运行。系统将通过 Cloud Run 异步作业自动完成计算并保存结果。运行过程中您可以在该页面实时查看看板与进度条。任务完成后，本页面将自动刷新并加载最新生成的研报。",
+        "👉 请前往 **[⚙️ 系统管理](system-admin)** 页面触发管道运行。系统将通过 Cloud Run 异步作业自动完成计算并保存结果。运行过程中您可以在该页面实时查看看板与进度条。任务完成后，本页面将自动刷新并加载最新生成的研报。",
         "💡 **About report generation:**\n\n"
         "A full weekly report includes comprehensive data fetching, the Top 5 China-leg strategy backtest, "
         "and a cross-dimensional Gemini AI synthesis; computation typically takes 2–5 minutes.\n\n"
         "To ensure stable execution and avoid page request timeouts, **report generation has moved to a background async job**.\n\n"
-        "👉 Go to the **[⚙️ System Administration](⚙️_系统管理)** page to trigger the pipeline. The system runs the "
+        "👉 Go to the **[⚙️ System Administration](system-admin)** page to trigger the pipeline. The system runs the "
         "computation automatically via a Cloud Run async job and saves the result. While it runs you can watch the "
         "dashboard and progress bar there. When the job finishes, this page reloads automatically and loads the latest report.",
     )

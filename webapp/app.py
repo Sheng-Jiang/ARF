@@ -20,33 +20,33 @@ _PAGES = {
     "valuation": (
         {"zh": "估值", "en": "Valuation"},
         [
-            {"path": "pages/0_📊_核心概览.py", "zh": "核心指标概览", "en": "Executive Overview", "icon": "📊", "default": True},
-            {"path": "pages/1_🧮_估值榜单.py", "zh": "估值榜单", "en": "Valuation Leaderboard", "icon": "🧮"},
-            {"path": "pages/3_🌡️_泡沫温度计.py", "zh": "泡沫温度计", "en": "Bubble Thermometer", "icon": "🌡️"},
-            {"path": "pages/8_⚖️_双价值链.py", "zh": "双价值链", "en": "Dual Value Chain", "icon": "⚖️"},
+            {"path": "views/00_executive_overview.py", "zh": "核心指标概览", "en": "Executive Overview", "icon": "📊", "default": True},
+            {"path": "views/01_valuation_leaderboard.py", "zh": "估值榜单", "en": "Valuation Leaderboard", "icon": "🧮", "url_path": "valuation-leaderboard"},
+            {"path": "views/03_bubble_thermometer.py", "zh": "泡沫温度计", "en": "Bubble Thermometer", "icon": "🌡️", "url_path": "bubble-thermometer"},
+            {"path": "views/08_dual_value_chain.py", "zh": "双价值链", "en": "Dual Value Chain", "icon": "⚖️", "url_path": "dual-value-chain"},
         ],
     ),
     "research": (
         {"zh": "研究", "en": "Research"},
         [
-            {"path": "pages/9_🤖_AI_投资雷达.py", "zh": "AI 投资雷达", "en": "AI Opportunity Radar", "icon": "🤖"},
-            {"path": "pages/5_🔍_AI_智能选股.py", "zh": "AI 智能选股", "en": "AI Stock Screener", "icon": "🔍"},
-            {"path": "pages/7_📝_一键研报.py", "zh": "一键研报", "en": "1-Click Research Note", "icon": "📝"},
-            {"path": "pages/4_📈_技术指标与回测.py", "zh": "技术指标与回测", "en": "Technical Analysis & Backtest", "icon": "📈"},
+            {"path": "views/09_ai_radar.py", "zh": "AI 投资雷达", "en": "AI Opportunity Radar", "icon": "🤖", "url_path": "ai-radar"},
+            {"path": "views/05_ai_screener.py", "zh": "AI 智能选股", "en": "AI Stock Screener", "icon": "🔍", "url_path": "ai-screener"},
+            {"path": "views/07_oneclick_report.py", "zh": "一键研报", "en": "1-Click Research Note", "icon": "📝", "url_path": "research-note"},
+            {"path": "views/04_technical_backtest.py", "zh": "技术指标与回测", "en": "Technical Analysis & Backtest", "icon": "📈", "url_path": "technical-backtest"},
         ],
     ),
     "idc": (
         {"zh": "IDC 研究", "en": "IDC Intelligence"},
         [
             {
-                "path": "pages/11_🌐_IDC_MarketScape.py",
+                "path": "views/11_idc_marketscape.py",
                 "zh": "IDC 智库与厂商全景",
                 "en": "IDC MarketScape™ Research Desk",
                 "icon": "🌐",
                 "url_path": "IDC_MarketScape",
             },
             {
-                "path": "pages/11_🌐_IDC_MarketScape.py",
+                "path": "views/11_idc_marketscape.py",
                 "zh": "IDC 智库与厂商全景 (别名)",
                 "en": "IDC MarketScape (alias)",
                 "icon": "🌐",
@@ -54,7 +54,7 @@ _PAGES = {
                 "visibility": "hidden",
             },
             {
-                "path": "pages/11_🌐_IDC_MarketScape.py",
+                "path": "views/11_idc_marketscape.py",
                 "zh": "IDC MarketScape (alias)",
                 "en": "IDC MarketScape (alias 2)",
                 "icon": "🌐",
@@ -66,13 +66,13 @@ _PAGES = {
     "execution": (
         {"zh": "执行与模拟", "en": "Execution & Simulation"},
         [
-            {"path": "pages/10_💼_CIO_投资总监.py", "zh": "AI CIO 投资总监", "en": "AI CIO Executive Desk", "icon": "💼"},
+            {"path": "views/10_cio_desk.py", "zh": "AI CIO 投资总监", "en": "AI CIO Executive Desk", "icon": "💼", "url_path": "cio-desk"},
         ],
     ),
     "system": (
         {"zh": "系统", "en": "System"},
         [
-            {"path": "pages/6_⚙️_系统管理.py", "zh": "系统管理", "en": "System Administration", "icon": "⚙️"},
+            {"path": "views/06_system_admin.py", "zh": "系统管理", "en": "System Administration", "icon": "⚙️", "url_path": "system-admin"},
         ],
     ),
 }

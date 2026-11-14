@@ -614,7 +614,13 @@ def render_research_synthesis(snapshot_df: pd.DataFrame, as_of: date) -> None:
             synth_citations = []
 
     # On-demand (re)generation when a key is configured.
-    session_slot = "research_synth_text"
+    curr_lang = get_current_lang()
+    # Scope the slot to the snapshot: otherwise a synthesis regenerated for
+    # one date keeps shadowing the DB text after the user picks another date.
+    cache_scope = f"{curr_lang}_{as_of}"
+    session_slot = f"research_synth_text_{cache_scope}"
+    model_slot = f"research_synth_model_{cache_scope}"
+    citations_slot = f"research_synth_citations_{cache_scope}"
     if gemini.is_enabled():
         btn = (
             tr("🔄 重新生成研报综述", "🔄 Regenerate Research Synthesis")
@@ -624,18 +630,20 @@ def render_research_synthesis(snapshot_df: pd.DataFrame, as_of: date) -> None:
         if st.button(btn, key="research_synth_btn"):
             with st.spinner(tr("Gemini 正在综合各机构研报……（约20–40秒）", "Gemini is synthesizing sell-side research… (~20–40s)")):
                 try:
-                    synth = gemini.synthesize_research(snapshot_df, research_df, as_of, cohort)
+                    synth = gemini.synthesize_research(
+                        snapshot_df, research_df, as_of, cohort, lang=curr_lang
+                    )
                     st.session_state[session_slot] = synth.text
-                    st.session_state["research_synth_model"] = synth.model
-                    st.session_state["research_synth_citations"] = [
+                    st.session_state[model_slot] = synth.model
+                    st.session_state[citations_slot] = [
                         {"title": c.title, "uri": c.uri} for c in synth.citations
                     ]
                 except Exception as exc:  # noqa: BLE001
                     st.error(tr(f"调用 Gemini 失败：{exc}", f"Gemini call failed: {exc}"))
         if st.session_state.get(session_slot):
             synth_text = st.session_state[session_slot]
-            synth_model = st.session_state.get("research_synth_model", synth_model)
-            synth_citations = st.session_state.get("research_synth_citations", synth_citations)
+            synth_model = st.session_state.get(model_slot, synth_model)
+            synth_citations = st.session_state.get(citations_slot, synth_citations)
     elif not synth_text:
         st.info(
             tr(

@@ -86,6 +86,12 @@ def test_backtest_summary_for_gemini():
     assert "最优策略: MA 策略 (单均线)" in summary
     assert "收益=15.0%" in summary
 
+    en_summary = _backtest_summary_for_gemini([stock_res], lang="en")
+    assert "Technical Score: 75.0" in en_summary
+    assert "Bullish MA Alignment: Yes" in en_summary
+    assert "Best Strategy: MA Strategy (Single MA)" in en_summary
+    assert "Return=15.0%" in en_summary
+
 
 def test_generate_report_html():
     report = ReportData(as_of=date(2026, 6, 26))
@@ -96,10 +102,43 @@ def test_generate_report_html():
     ]
     report.thermo_chart_html = "<div>Thermo Chart</div>"
     report.valuation_chart_html = "<div>Valuation Chart</div>"
-    
+
     html = generate_report_html(report)
     assert "AI Stack Bubble Monitor" in html
     assert "NVDA" in html
     assert "688256.SH" in html
     assert "Thermo Chart" in html
     assert "Valuation Chart" in html
+
+
+def test_generate_report_html_english_is_fully_localized():
+    """lang="en" must localize the template chrome, not just the Plotly charts."""
+    report = ReportData(as_of=date(2026, 6, 26))
+    report.us_df = pd.DataFrame([{"ticker": "NVDA", "name": "NVIDIA", "leg": "US", "arf": 85.0, "decile": 2, "e_score": 90.0, "v_score": 80.0}])
+    report.backtest_stocks = [
+        StockBacktestResult(
+            ticker="300308.SZ",
+            name="Innolight",
+            tech_score=75.0,
+            rsi=60.0,
+            ma_bullish=True,
+            chip_profit_ratio=0.85,
+            chip_avg_cost=300.0,
+            strategy_results={"MA 策略 (单均线)": pd.DataFrame([{"sharpe": 1.5, "return": 15.0, "dd": 5.0, "maperiod": 20}])},
+            best_strategy="MA 策略 (单均线)",
+            best_sharpe=1.5,
+            best_return=15.0,
+            best_max_dd=5.0,
+        )
+    ]
+
+    html = generate_report_html(report, lang="en")
+
+    assert '<html lang="en">' in html
+    assert "ARF Valuation Thermometer" in html
+    assert "Score Ladder" in html
+    assert "Top 5 China A+H Strategy Backtest" in html
+    assert "BEST" in html
+    assert "maperiod=20" in html
+    assert "✅ Yes" in html
+    assert not any("一" <= ch <= "鿿" for ch in html), "English report still contains Chinese text"
