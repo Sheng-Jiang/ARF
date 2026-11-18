@@ -1,13 +1,17 @@
-"""IDC Market Intelligence & MarketScape Engine.
+"""ARF Analyst Desk — vendor quadrant, spending tracker and research briefing engine.
 
-This module bridges ARF quantitative factors into IDC's industry-standard
-technology market research methodologies:
-1. IDC MarketScape Vendor Analysis: Evaluates AI vendors across Capabilities
-   (execution quality, ROE, margins) and Strategies (AI exposure, forward growth, R&D momentum).
-2. Worldwide AI Spending & Bubble Gap Tracker: Sizes real economic revenue vs.
+This module maps ARF quantitative factors onto a public dual-axis vendor-
+assessment methodology, and generates our own research notes from it:
+1. ARF Vendor Quadrant: evaluates AI vendors across Capabilities (execution
+   quality, ROE, margins) and Strategies (AI exposure, forward growth, R&D momentum).
+2. Global AI Spending & Bubble Gap Tracker: sizes real economic revenue against
    narrative market capitalization across Jensen Huang's 5 layers.
-3. Automated IDC Executive Briefing: Synthesizes authoritative research notes
-   with 'IDC Opinion', 'Market Outlook', and 'Essential Guidance for Tech Buyers'.
+3. Automated Research Briefing: synthesizes the desk's notes into an executive
+   briefing with an 'Analyst View', 'Market Outlook', and buyer/vendor guidance.
+
+The methodology is modelled on the widely published capabilities/strategies
+quadrant format. It is ARF's own implementation, uses only public market data,
+and is not affiliated with or endorsed by any research firm.
 """
 
 from __future__ import annotations
@@ -23,15 +27,15 @@ from arf.forecast import _num
 
 log = logging.getLogger(__name__)
 
-# IDC MarketScape Quadrant Thresholds (on a 0-100 standardized scale).
+# ARF Vendor Quadrant Quadrant Thresholds (on a 0-100 standardized scale).
 # Public so the chart's quadrant boxes and the data/report classification
 # cannot drift apart.
 STRATEGY_LEADER_THRESHOLD = 55.0
 CAPABILITY_LEADER_THRESHOLD = 52.0
 
-_MARKETSCAPE_COLUMNS = [
+_QUADRANT_COLUMNS = [
     "ticker", "name", "leg", "layer", "price",
-    "capabilities_score", "strategies_score", "marketscape_category",
+    "capabilities_score", "strategies_score", "quadrant_category",
     "market_cap_b", "ai_revenue_est_b", "arf", "e_score", "v_score",
     "roe", "gross_margin", "ps_ratio", "ev_sales", "implied_growth",
     "predicted_growth", "expected_beat_pct", "revision_velocity_14d",
@@ -63,11 +67,11 @@ def _fmt_num(value: object, decimals: int = 1) -> str:
         return "N/A"
 
 
-def compute_idc_marketscape(
+def compute_vendor_quadrant(
     snap_df: pd.DataFrame,
     fc_df: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
-    """Compute IDC MarketScape Capabilities and Strategies scores for universe vendors.
+    """Compute ARF Vendor Quadrant Capabilities and Strategies scores for universe vendors.
 
     Axes:
     - Capabilities (Y-Axis): Current offering strength, financial viability, ROE quality,
@@ -78,10 +82,10 @@ def compute_idc_marketscape(
     Returns:
         DataFrame with columns:
         [ticker, name, leg, layer, capabilities_score, strategies_score,
-         marketscape_category, market_cap_b, ai_revenue_est_b, arf, froth_flag]
+         quadrant_category, market_cap_b, ai_revenue_est_b, arf, froth_flag]
     """
     if snap_df.empty:
-        return pd.DataFrame(columns=_MARKETSCAPE_COLUMNS)
+        return pd.DataFrame(columns=_QUADRANT_COLUMNS)
 
     fc_map: dict[str, dict[str, Any]] = {}
     if fc_df is not None and not fc_df.empty:
@@ -112,7 +116,7 @@ def compute_idc_marketscape(
 
         # ARF inputs. A vendor without a computed E/V/ARF has not been scored
         # (partial snapshot write, or a display-only Pre-IPO row) and cannot be
-        # positioned on the MarketScape honestly. Substituting a mid-point
+        # positioned on the Vendor Quadrant honestly. Substituting a mid-point
         # would fabricate a ranking, so drop the row instead.
         e_score = _num(d.get("e_score"))
         v_score = _num(d.get("v_score"))
@@ -181,7 +185,7 @@ def compute_idc_marketscape(
             1,
         )
 
-        # ── 3. Categorization into IDC MarketScape Quadrants
+        # ── 3. Categorization into ARF Vendor Quadrant Quadrants
         if strat_score >= STRATEGY_LEADER_THRESHOLD and cap_score >= CAPABILITY_LEADER_THRESHOLD:
             category = "Leaders"
         elif cap_score >= CAPABILITY_LEADER_THRESHOLD:
@@ -199,7 +203,7 @@ def compute_idc_marketscape(
             "price": _num(d.get("price")),
             "capabilities_score": cap_score,
             "strategies_score": strat_score,
-            "marketscape_category": category,
+            "quadrant_category": category,
             "market_cap_b": round(mcap_b, 1),
             "ai_revenue_est_b": None if ai_rev_b is None else round(ai_rev_b, 2),
             "arf": round(arf, 1),
@@ -217,11 +221,11 @@ def compute_idc_marketscape(
         })
 
     if unscored:
-        log.info("MarketScape: skipped %d unscored vendor(s) with no ARF", unscored)
+        log.info("Vendor Quadrant: skipped %d unscored vendor(s) with no ARF", unscored)
     if not rows:
         # Typed empty frame: callers index by column, and a column-less frame
         # is what turned "no scored vendors" into a KeyError downstream.
-        return pd.DataFrame(columns=_MARKETSCAPE_COLUMNS)
+        return pd.DataFrame(columns=_QUADRANT_COLUMNS)
     df = pd.DataFrame(rows)
     return df.sort_values(["capabilities_score", "strategies_score"], ascending=False).reset_index(drop=True)
 
@@ -329,14 +333,14 @@ def compute_ai_spending_tracker(snap_df: pd.DataFrame, lang: str = "zh") -> dict
     }
 
 
-def generate_idc_executive_briefing(
+def generate_research_briefing(
     as_of: date,
     snap_df: pd.DataFrame,
     fc_df: pd.DataFrame | None = None,
     news_df: pd.DataFrame | None = None,
     lang: str = "zh",
 ) -> str:
-    """Generate an authoritative IDC Executive Market Briefing in official IDC research format.
+    """Generate an ARF executive market briefing in house research format.
     
     Args:
         as_of: Snapshot date.
@@ -345,27 +349,27 @@ def generate_idc_executive_briefing(
         news_df: Optional recent WSJ & NYT news intelligence DataFrame.
         lang: 'zh' for Chinese or 'en' for English.
     """
-    ms_df = compute_idc_marketscape(snap_df, fc_df)
+    ms_df = compute_vendor_quadrant(snap_df, fc_df)
     spending = compute_ai_spending_tracker(snap_df, lang=lang)
 
-    doc_id = f"IDC-MR-{as_of.strftime('%Y%m')}-{as_of.strftime('%d')}"
+    doc_id = f"ARF-RB-{as_of.strftime('%Y%m')}-{as_of.strftime('%d')}"
     if ms_df.empty:
         if lang == "en":
             return (
-                "# 🌐 IDC MarketScape & Worldwide AI Spending Guide\n"
+                "# 🌐 ARF Vendor Quadrant & Global AI Spending Tracker\n"
                 f"**Document ID:** `{doc_id}`\n\n"
                 "> No scored vendors found for this snapshot date. "
                 "Please select a fully scored snapshot and retry."
             )
         return (
-            "# 🌐 IDC MarketScape & Worldwide AI Spending Guide\n"
+            "# 🌐 ARF Vendor Quadrant & Global AI Spending Tracker\n"
             f"**Document ID:** `{doc_id}`\n\n"
-            "> 该快照尚无已完成评分的厂商，无法生成 MarketScape 简报。"
+            "> 该快照尚无已完成评分的厂商，无法生成 Vendor Quadrant 简报。"
             "请选择已完成评分的快照日期后重试。"
         )
 
-    leaders = ms_df[ms_df["marketscape_category"] == "Leaders"].head(5)
-    contenders = ms_df[ms_df["marketscape_category"] == "Contenders"].head(4)
+    leaders = ms_df[ms_df["quadrant_category"] == "Leaders"].head(5)
+    contenders = ms_df[ms_df["quadrant_category"] == "Contenders"].head(4)
     froth_list = ms_df[ms_df["froth_flag"] == True]["ticker"].tolist()  # noqa: E712
     covered_count = int(spending.get("covered_count", len(ms_df)))
 
@@ -373,13 +377,13 @@ def generate_idc_executive_briefing(
 
     if lang == "en":
         lines = [
-            "# 🌐 IDC MarketScape & Worldwide AI Spending Guide",
+            "# 🌐 ARF Vendor Quadrant & Global AI Spending Tracker",
             f"**Document ID:** `{doc_id}` | **Published:** `{timestamp}` | **Program:** *AI, Software & Infrastructure Strategies*",
             "**Author:** *Sheng Jiang, Vice President, AI Market Research & Strategy*",
             "",
             "---",
             "",
-            "## 1. IDC Opinion (Executive Summary & Key Theses)",
+            "## 1. Analyst View (Executive Summary & Key Theses)",
             f"> **Market Perspective**: As of {as_of.isoformat()}, the aggregate market capitalization of the {covered_count} scored global AI leaders stands at **${spending.get('total_universe_mcap_t', 0.0)} Trillion USD**, "
             f"supported by **${spending.get('total_ai_revenue_b', 0.0)} Billion USD** in purity-adjusted annualized economic AI revenue, "
             f"yielding an overall narrative valuation multiple of **{spending.get('overall_bubble_multiple', 0.0)}x**.",
@@ -390,8 +394,8 @@ def generate_idc_executive_briefing(
             "",
             "---",
             "",
-            "## 2. IDC MarketScape: Global AI Vendors Assessment",
-            "The IDC MarketScape employs a quantitative dual-axis evaluation model, assessing vendors along **Capabilities (Execution Quality & Financial Moat)** and **Strategies (Forward Growth & AI Exposure)**:",
+            "## 2. ARF Vendor Quadrant: Global AI Vendors Assessment",
+            "The ARF Vendor Quadrant employs a quantitative dual-axis evaluation model, assessing vendors along **Capabilities (Execution Quality & Financial Moat)** and **Strategies (Forward Growth & AI Exposure)**:",
             "",
             "### 🏆 Leaders Quadrant",
             "Leaders demonstrate superior returns on equity (ROE > 25%), robust free cash flows, and defensible architectural moats:",
@@ -478,18 +482,18 @@ def generate_idc_executive_briefing(
             "2. **Establish Counter-Cyclical Valuation Defenses**: Vendors in the high-ARF froth territory (Decile 1) face severe multiple de-rating risks. Take advantage of high-valuation windows to accelerate strategic acquisitions, reinforce balance-sheet cash reserves, and strengthen ROE fundamentals.",
             "",
             "---",
-            "*Report compiled by IDC AI & Software Research Practice using ARF Quantitative Methodology. Copyright © 2026 IDC. All rights reserved.*",
+            "*Report generated by the ARF Analyst Desk using the ARF Quantitative Methodology. © 2026 ARF. Independent research exercise: modelled on a public vendor-quadrant format, built on public market data, and not affiliated with or endorsed by any research firm.*",
         ])
         return "\n".join(lines)
 
     lines = [
-        "# 🌐 IDC MarketScape & Worldwide AI Spending Guide",
+        "# 🌐 ARF Vendor Quadrant & Global AI Spending Tracker",
         f"**Document ID:** `{doc_id}` | **Published:** `{timestamp}` | **Program:** *AI, Software & Infrastructure Strategies*",
         "**Author:** *Sheng Jiang, Vice President, AI Market Research & Strategy*",
         "",
         "---",
         "",
-        "## 1. IDC Opinion (执行摘要与核心论点)",
+        "## 1. Analyst View (执行摘要与核心论点)",
         f"> **市场整体定调**：截至 {as_of.isoformat()}，全球核心 {covered_count} 家已评分 AI 标的的总市值为 **${spending.get('total_universe_mcap_t', 0.0)} 万亿美元**，"
         f"对应本研究测算的经纯度折算后的年化实质 AI 收入为 **${spending.get('total_ai_revenue_b', 0.0)} 十亿美元**，"
         f"全行业整体「叙事市值 / 实质收入」估值倍数达到 **{spending.get('overall_bubble_multiple', 0.0)}x**。",
@@ -500,8 +504,8 @@ def generate_idc_executive_briefing(
         "",
         "---",
         "",
-        "## 2. IDC MarketScape: 全球 AI 核心厂商竞争全景矩阵",
-        "IDC MarketScape 采用严密的定量双轴评价体系，从 **Capabilities (现行交付与财务质量)** 和 **Strategies (未来战略与增长弹性)** 两个维度对厂商进行定位：",
+        "## 2. ARF 厂商象限: 全球 AI 核心厂商竞争全景矩阵",
+        "ARF Vendor Quadrant 采用严密的定量双轴评价体系，从 **Capabilities (现行交付与财务质量)** 和 **Strategies (未来战略与增长弹性)** 两个维度对厂商进行定位：",
         "",
     ]
 
@@ -593,7 +597,7 @@ def generate_idc_executive_briefing(
         "2. **建立逆向估值防线**：高度警惕高 ARF 泡沫区（D1 分位）带来的估值重估风险，应利用高估值窗口期加快战略性 M&A 与技术资产沉淀，提升 ROE 底色以夯实 Capabilities 护城河。",
         "",
         "---",
-        "*Report compiled by IDC AI & Software Research Practice using ARF Quantitative Methodology. Copyright © 2026 IDC. All rights reserved.*",
+        "*Report generated by the ARF Analyst Desk using the ARF Quantitative Methodology. © 2026 ARF. Independent research exercise: modelled on a public vendor-quadrant format, built on public market data, and not affiliated with or endorsed by any research firm.*",
     ])
 
     return "\n".join(lines)
@@ -608,7 +612,7 @@ def generate_analyst_vendor_profile(
     news_df: pd.DataFrame | None = None,
     lang: str = "zh",
 ) -> str:
-    """Generate a high-density 1-page IDC Vendor Profile & Flash Note for research analysts.
+    """Generate a high-density 1-page ARF Vendor Profile & Flash Note for research analysts.
     
     Args:
         ticker: Ticker symbol.
@@ -618,7 +622,7 @@ def generate_analyst_vendor_profile(
         analyst_commentary: Custom analyst notes.
         lang: 'zh' for Chinese or 'en' for English.
     """
-    ms_df = compute_idc_marketscape(snap_df, fc_df)
+    ms_df = compute_vendor_quadrant(snap_df, fc_df)
     target = str(ticker).strip().upper()
     if ms_df.empty or "ticker" not in ms_df.columns:
         return f"# ❌ Vendor {target} not found in current coverage universe."
@@ -629,7 +633,7 @@ def generate_analyst_vendor_profile(
 
     v = v_rows.iloc[0].to_dict()
     as_of_val = snap_df["as_of_date"].iloc[0] if "as_of_date" in snap_df.columns else date.today()
-    doc_id = f"IDC-VP-{target}-{datetime.now(UTC).strftime('%Y%m%d')}"
+    doc_id = f"ARF-VP-{target}-{datetime.now(UTC).strftime('%Y%m%d')}"
 
     # Extract supply chain links if available
     cust_links = []
@@ -662,14 +666,14 @@ def generate_analyst_vendor_profile(
 
     if lang == "en":
         lines = [
-            f"# 🔬 IDC Vendor Profile & Flash Note: {v['name']} ({target})",
+            f"# 🔬 ARF Vendor Profile & Flash Note: {v['name']} ({target})",
             f"**Document ID:** `{doc_id}` | **Coverage Desk:** *AI Hardware, Software & Infrastructure*",
             f"**Analyst:** *Sheng Jiang, VP, AI Market Research & Strategy* | **As-Of:** `{as_of_val}`",
-            f"**MarketScape Positioning:** 🏅 **{v['marketscape_category']}** | **Froth Circuit:** {'🔴 BREACHED' if v['froth_flag'] else '🟢 NORMAL'}",
+            f"**Vendor Quadrant Positioning:** 🏅 **{v['quadrant_category']}** | **Froth Circuit:** {'🔴 BREACHED' if v['froth_flag'] else '🟢 NORMAL'}",
             "",
             "---",
             "",
-            "## 1. IDC MarketScape™ Quantitative Breakdown",
+            "## 1. ARF Vendor Quadrant — Quantitative Breakdown",
             f"- **Capabilities Score (Execution Quality & Margins):** `{v['capabilities_score']:.1f} / 100`",
             f"- **Strategies Score (Forward Growth & AI Exposure):** `{v['strategies_score']:.1f} / 100`",
             f"- **Ecosystem Affiliation:** `{v['leg']} Value Chain / {v['layer']} Layer` | **Market Cap:** `${v['market_cap_b']:.1f}B USD`",
@@ -720,30 +724,30 @@ def generate_analyst_vendor_profile(
 
         if analyst_commentary.strip():
             lines.extend([
-                f"## {comm_num}. IDC Analyst Custom Commentary",
+                f"## {comm_num}. Analyst Custom Commentary",
                 f"> {analyst_commentary.strip()}",
                 "",
             ])
 
         lines.extend([
-            f"## {guide_num}. IDC Essential Guidance for Technology Buyers",
-            f"- For enterprise CIOs/CTOs evaluating solutions from **{v['name']}**: Given their current positioning in the `{v['marketscape_category']}` quadrant, "
+            f"## {guide_num}. Guidance for Technology Buyers",
+            f"- For enterprise CIOs/CTOs evaluating solutions from **{v['name']}**: Given their current positioning in the `{v['quadrant_category']}` quadrant, "
             f"if market-implied growth rates substantially outpace your internal IT budget expansion rate, prioritize locking in multi-year price caps and performance SLAs during contract renewal.",
             "",
             "---",
-            "*IDC Quanta™ Research Desk Platform. Confident decision-making backed by quantitative data.*",
+            "*ARF Analyst Desk Research Desk Platform. Confident decision-making backed by quantitative data.*",
         ])
         return "\n".join(lines)
 
     lines = [
-        f"# 🔬 IDC Vendor Profile & Flash Note: {v['name']} ({target})",
+        f"# 🔬 ARF Vendor Profile & Flash Note: {v['name']} ({target})",
         f"**Document ID:** `{doc_id}` | **Coverage Desk:** *AI Hardware, Software & Infrastructure*",
         f"**Analyst:** *Sheng Jiang, VP, AI Market Research & Strategy* | **As-Of:** `{as_of_val}`",
-        f"**MarketScape Positioning:** 🏅 **{v['marketscape_category']}** | **Froth Circuit:** {'🔴 BREACHED' if v['froth_flag'] else '🟢 NORMAL'}",
+        f"**Vendor Quadrant Positioning:** 🏅 **{v['quadrant_category']}** | **Froth Circuit:** {'🔴 BREACHED' if v['froth_flag'] else '🟢 NORMAL'}",
         "",
         "---",
         "",
-        "## 1. IDC MarketScape™ Quantitative Breakdown",
+        "## 1. ARF Vendor Quadrant — Quantitative Breakdown",
         f"- **Capabilities Score (当前交付与财务质量):** `{v['capabilities_score']:.1f} / 100`",
         f"- **Strategies Score (未来战略与增长动能):** `{v['strategies_score']:.1f} / 100`",
         f"- **产业链归属:** `{v['leg']} 价值链 / {v['layer']} 层级` | **总市值:** `${v['market_cap_b']:.1f}B USD`",
@@ -794,18 +798,18 @@ def generate_analyst_vendor_profile(
 
     if analyst_commentary.strip():
         lines.extend([
-            f"## {comm_num}. IDC Analyst Custom Commentary (分析师独家洞察)",
+            f"## {comm_num}. Analyst Custom Commentary (分析师独家洞察)",
             f"> {analyst_commentary.strip()}",
             "",
         ])
 
     lines.extend([
-        f"## {guide_num}. IDC Essential Guidance for Buyers (企业买方采购指南)",
-        f"- 对采购 **{v['name']}** 解决方案的企业 CIO/CTO：结合其当前处于 `{v['marketscape_category']}` 的竞争站位，"
+        f"## {guide_num}. Guidance for Buyers (企业买方采购指南)",
+        f"- 对采购 **{v['name']}** 解决方案的企业 CIO/CTO：结合其当前处于 `{v['quadrant_category']}` 的竞争站位，"
         f"若其隐含增长率高于业务实际 IT 预算扩张节奏，应在合同续约中重点锁定价格上限与交付服务等级协议 (SLA)。",
         "",
         "---",
-        "*IDC Quanta™ Research Desk Platform. Confident decision-making backed by quantitative data.*",
+        "*ARF Analyst Desk Research Desk Platform. Confident decision-making backed by quantitative data.*",
     ])
 
     return "\n".join(lines)
