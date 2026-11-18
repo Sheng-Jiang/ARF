@@ -31,4 +31,4 @@ This directory houses the authoritative architecture records, product requiremen
 ---
 
 ## 5. Future Integrations & Architecture Proposals
-* **[Proposal: Google Finance vs. WSJ/NYT Multi-Tier Market Intelligence Architecture](file:///Users/sheng/Developer/ARF/docs/PROPOSAL_GOOGLE_FINANCE_INTEGRATION.md)**: Architectural evaluation and future integration design contrasting Google Finance (broad-spectrum market aggregation, cross-leg quote harmonization, and retail attention metrics) with editorial press wires (WSJ & NYT high-SNR qualitative signals for IDC MarketScape).
+* **[Proposal: Google Finance vs. WSJ/NYT Multi-Tier Market Intelligence Architecture](file:///Users/sheng/Developer/ARF/docs/PROPOSAL_GOOGLE_FINANCE_INTEGRATION.md)**: Architectural evaluation and future integration design contrasting Google Finance (broad-spectrum market aggregation, cross-leg quote harmonization, and retail attention metrics) with editorial press wires (WSJ & NYT high-SNR qualitative signals for the ARF Analyst Desk).

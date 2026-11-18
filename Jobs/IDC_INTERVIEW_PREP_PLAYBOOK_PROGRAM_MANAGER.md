@@ -6,8 +6,10 @@
 **Interview Slot:** Saturday Morning Beijing Time (Friday Evening US Time) with US-based Stakeholder  
 **Prepared:** November 17, 2026  
 **Live Demo Verification (Pre-Interview Check):**
-- `https://stock.thekingfilter.com/IDC_MarketScape` — verified `HTTP 200`
+- `https://stock.thekingfilter.com/analyst-desk` — verified `HTTP 200`
 - `https://ciso.thekingfilter.com/ui/jpmc-cockpit` — verified `HTTP 200`
+
+> **Companion document:** `Jobs/IDC_QUANTA_RESEARCH_AND_ARF_COMPARISON.md` — a fact-checked dossier on IDC Quanta (product, architecture, stack, toolchain), a side-by-side against what we built in ARF, and 12 prepared Q&A answers. Read §6 of that document before the call: it flags a branding issue on the live demo page that should be fixed first.
 
 ---
 
@@ -26,7 +28,9 @@ Based directly on the role specification (`What You'll Own`), your US interviewe
    - *Core anxieties:* Will a local Beijing contractor disappear into WeCom/Feishu and give me green statuses right up until a catastrophic surprise? Will CAC regulatory filings stall for months after we already burned cloud budget? Does this person truly understand *US HQ* governance expectations (Jira/Asana/Monday/M365) *and* on-the-ground China reality?
 
 > **Terminology Discipline ("Quanta" Guardrail):**  
-> IDC's parallel Beijing VP job description (*Vice President, Technology & AI Enablement*) references the **Quanta** platform internally, whereas this Program Manager JD uses **"Enterprise AI Platform – China"** and **"the core platform"**. **Do not drop the word "Quanta" first.** Mirror the interviewer's exact terminology (`"the Enterprise AI Platform"`, `"the China deployment"`, `"the core platform"`); only adopt *"Quanta"* if they introduce it first.
+> IDC's parallel Beijing VP job description (*Vice President, Technology & AI Enablement*) references **Quanta** explicitly — it names a **"Quanta China Implementation Plan"** and a "Quanta China Implementation" workstream, and it names the domestic models (DeepSeek, Ernie, Qwen). This PM JD, by contrast, says **"Enterprise AI Platform – China"** and **"the core platform"**. **Do not drop the word "Quanta" first.** Mirror the interviewer's exact terminology (`"the Enterprise AI Platform"`, `"the China deployment"`, `"the core platform"`); only adopt *"Quanta"* if they introduce it first.
+>
+> **But be ready to go deep the moment they do.** If they ask "what do you know about Quanta," you should out-detail a generic candidate: the two-layer MCP-server + plugin/skill architecture, the multi-agent validation and citation contract, the security posture (tenant isolation via token-derived identity and SQL scoping, prompt-injection screening, no training, 90-day deletion, SOC 2 Type I, BitSight 800/900), and the surfaces (portal, `brief@quanta.idc.com`, Claude plugin, Copilot federated connector, REST/SFTP). See the companion dossier §7 for verbatim answers.
 
 ---
 
@@ -155,10 +159,12 @@ Use this framework when asked *"How would you structure the phased program plan 
 > **Rule of Thumb:** Do **NOT** interrupt the flow to pitch a demo unprompted. Only offer it if the conversation naturally touches **LLM evaluation harnesses**, **hybrid US-China cloud isolation**, or **cross-border regulatory auditing**—for example, toward the end of technical Q&A:  
 > *"If it's helpful and we have two minutes, I actually built a live dual-cloud AI evaluation platform and a cross-border regulatory audit cockpit running right now—happy to share my screen briefly to show the exact hybrid architecture and deterministic evaluation gates in practice."*
 
+> **✅ Branding fixed (Nov 18, 2026):** the demo is now the **"ARF Analyst Desk — Vendor Quadrant & AI Spending"** page at `https://stock.thekingfilter.com/analyst-desk`. All IDC Quanta™ / MarketScape™ / "Copyright © IDC" strings were removed from the page, generated reports, and file names; reported methodology is now described as ARF's own, modelled on the public quadrant format. Legacy `/IDC_MarketScape` links still resolve to the renamed page.
+
 ### If They Say Yes — Tight 2-Minute Walkthrough Script
 1. **Tab 1 — Cross-Border Compliance Cockpit (`https://ciso.thekingfilter.com/ui/jpmc-cockpit`) [45 sec]:**
    - Show how multinational Western cloud/security standards map cleanly against China regulatory controls (CAC cross-border export rules, PIPL, MLPS Level 3), proving hands-on fluency with audit evidence and compliance gap tracking.
-2. **Tab 2 — Hybrid US/China AI Platform & Evaluation Gates (`https://stock.thekingfilter.com/IDC_MarketScape`) [60 sec]:**
+2. **Tab 2 — Hybrid US/China AI Platform & Evaluation Gates (`https://stock.thekingfilter.com/analyst-desk`) [60 sec]:**
    - Explain the **production architecture** behind the live screen: **global GCP compute + Western Secret Manager** isolated from **domestic China Tencent Cloud infrastructure**, with **local DuckDB/Python computing sensitive data cleanly on-box** so zero raw financial datasets leak to model APIs, and **deterministic G1–G4 evaluation gates** checking model outputs against hard quality thresholds before acceptance.
    - *(Notice this also subtly signals deep familiarity with IDC's core MarketScape domain without overclaiming or dropping internal codenames!)*
 
@@ -179,7 +185,7 @@ Ask **2 to 3** of these at the end—prioritize based on whether your interviewe
 ## 7. Quick Pre-Call Checklist (Friday Night / Saturday Morning BJT)
 - [ ] Join 5 minutes early; quiet room, strong wired/fiber connection, clean lighting (US Friday evening calls appreciate crisp audio/video).
 - [ ] Open in two pinned browser tabs (ready only if invited):
-  - `https://stock.thekingfilter.com/IDC_MarketScape` (check English toggle active)
+  - `https://stock.thekingfilter.com/analyst-desk` (check English toggle active)
   - `https://ciso.thekingfilter.com/ui/jpmc-cockpit`
 - [ ] Keep this playbook and the LinkedIn JD PDF open on a second monitor / side pane for rapid bullet reference.
 - [ ] Core posture to hold throughout: **Calm, concise, US-engineering fluent, Beijing-street smart, zero-surprise execution.**

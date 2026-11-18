@@ -1,4 +1,4 @@
-"""Unit tests for IDC Market Intelligence & MarketScape Engine."""
+"""Unit tests for the ARF Analyst Desk engine."""
 
 import re
 from datetime import date
@@ -6,10 +6,10 @@ from datetime import date
 import pandas as pd
 import pytest
 
-from arf.idc import (
+from arf.analyst_desk import (
     compute_ai_spending_tracker,
-    compute_idc_marketscape,
-    generate_idc_executive_briefing,
+    compute_vendor_quadrant,
+    generate_research_briefing,
 )
 
 
@@ -71,21 +71,21 @@ def sample_forecast_df():
     ])
 
 
-def test_compute_idc_marketscape_empty():
+def test_compute_vendor_quadrant_empty():
     """Verify empty snapshot returns empty DataFrame."""
-    empty_res = compute_idc_marketscape(pd.DataFrame())
+    empty_res = compute_vendor_quadrant(pd.DataFrame())
     assert empty_res.empty
 
 
-def test_compute_idc_marketscape(sample_snapshot_df, sample_forecast_df):
+def test_compute_vendor_quadrant(sample_snapshot_df, sample_forecast_df):
     """Verify capabilities and strategies scoring and categorization."""
-    ms_df = compute_idc_marketscape(sample_snapshot_df, sample_forecast_df)
+    ms_df = compute_vendor_quadrant(sample_snapshot_df, sample_forecast_df)
     assert not ms_df.empty
     assert len(ms_df) == 4
 
     expected_cols = [
         "ticker", "name", "leg", "layer", "capabilities_score",
-        "strategies_score", "marketscape_category", "market_cap_b",
+        "strategies_score", "quadrant_category", "market_cap_b",
         "ai_revenue_est_b", "arf", "froth_flag",
     ]
     for col in expected_cols:
@@ -93,7 +93,7 @@ def test_compute_idc_marketscape(sample_snapshot_df, sample_forecast_df):
 
     # NVDA should be in Leaders quadrant (high ROE, high E_score, high growth)
     nvda_row = ms_df[ms_df["ticker"] == "NVDA"].iloc[0]
-    assert nvda_row["marketscape_category"] == "Leaders"
+    assert nvda_row["quadrant_category"] == "Leaders"
     assert nvda_row["capabilities_score"] >= 52.0
     assert nvda_row["strategies_score"] >= 55.0
 
@@ -120,31 +120,31 @@ def test_compute_ai_spending_tracker(sample_snapshot_df):
     assert "China" in tracker["legs"]
 
 
-def test_generate_idc_executive_briefing(sample_snapshot_df, sample_forecast_df):
-    """Verify executive briefing generation in official IDC format (Chinese and English)."""
+def test_generate_research_briefing(sample_snapshot_df, sample_forecast_df):
+    """Verify executive briefing generation in ARF format (Chinese and English)."""
     as_of = date(2026, 6, 1)
-    briefing = generate_idc_executive_briefing(as_of, sample_snapshot_df, sample_forecast_df, lang="zh")
+    briefing = generate_research_briefing(as_of, sample_snapshot_df, sample_forecast_df, lang="zh")
 
-    assert "IDC MarketScape" in briefing
-    assert "Worldwide AI Spending Guide" in briefing
-    assert "IDC Opinion" in briefing
-    assert "Essential Guidance for Technology Buyers" in briefing
-    assert "Essential Guidance for Technology Vendors" in briefing
+    assert "ARF Vendor Quadrant" in briefing
+    assert "Global AI Spending Tracker" in briefing
+    assert "Analyst View" in briefing
+    assert "Guidance for Technology Buyers" in briefing
+    assert "Guidance for Technology Vendors" in briefing
     assert "Sheng Jiang" in briefing
 
     # Test English version
-    briefing_en = generate_idc_executive_briefing(as_of, sample_snapshot_df, sample_forecast_df, lang="en")
-    assert "IDC MarketScape" in briefing_en
-    assert "Worldwide AI Spending Guide" in briefing_en
+    briefing_en = generate_research_briefing(as_of, sample_snapshot_df, sample_forecast_df, lang="en")
+    assert "ARF Vendor Quadrant" in briefing_en
+    assert "Global AI Spending Tracker" in briefing_en
     assert "Leaders Quadrant" in briefing_en
     assert "Market Perspective" in briefing_en
-    assert "Essential Guidance for Technology Buyers" in briefing_en
+    assert "Guidance for Technology Buyers" in briefing_en
     assert "Sheng Jiang" in briefing_en
 
 
 def test_generate_analyst_vendor_profile(sample_snapshot_df, sample_forecast_df):
-    """Verify analyst vendor profile generation with IDC MarketScape scores (Chinese and English)."""
-    from arf.idc import generate_analyst_vendor_profile
+    """Verify analyst vendor profile generation with ARF Vendor Quadrant scores (Chinese and English)."""
+    from arf.analyst_desk import generate_analyst_vendor_profile
 
     links_df = pd.DataFrame([
         {
@@ -164,7 +164,7 @@ def test_generate_analyst_vendor_profile(sample_snapshot_df, sample_forecast_df)
         lang="zh",
     )
 
-    assert "IDC Vendor Profile" in profile
+    assert "ARF Vendor Profile" in profile
     assert "NVIDIA" in profile
     assert "Capabilities Score" in profile
     assert "Strategies Score" in profile
@@ -179,7 +179,7 @@ def test_generate_analyst_vendor_profile(sample_snapshot_df, sample_forecast_df)
         analyst_commentary="Strong supplier pricing power in 1.6T transceivers.",
         lang="en",
     )
-    assert "IDC Vendor Profile" in profile_en
+    assert "ARF Vendor Profile" in profile_en
     assert "Execution Quality & Margins" in profile_en
     assert "Supply Chain Topology" in profile_en
     assert "Key Direct Customers" in profile_en
@@ -189,12 +189,12 @@ def test_generate_analyst_vendor_profile(sample_snapshot_df, sample_forecast_df)
     assert "not found" in unknown
 
 
-def test_marketscape_drops_unscored_rows(sample_snapshot_df):
+def test_quadrant_drops_unscored_rows(sample_snapshot_df):
     """A vendor without a computed ARF must not receive invented scores."""
     df = sample_snapshot_df.copy()
     df.loc[df["ticker"] == "MSFT", ["e_score", "v_score", "arf"]] = None
 
-    ms_df = compute_idc_marketscape(df)
+    ms_df = compute_vendor_quadrant(df)
 
     assert "MSFT" not in set(ms_df["ticker"])
     assert len(ms_df) == 3
@@ -202,12 +202,12 @@ def test_marketscape_drops_unscored_rows(sample_snapshot_df):
     assert (ms_df["e_score"] != 50.0).all()
 
 
-def test_marketscape_preserves_zero_forecast(sample_snapshot_df):
+def test_quadrant_preserves_zero_forecast(sample_snapshot_df):
     """A genuine 0% forecast must not fall through to trailing growth."""
     fc_df = pd.DataFrame([
         {"ticker": "NVDA", "predicted_rev_growth": 0.0, "expected_beat_pct": 0.0},
     ])
-    ms_df = compute_idc_marketscape(sample_snapshot_df, fc_df)
+    ms_df = compute_vendor_quadrant(sample_snapshot_df, fc_df)
     nvda = ms_df[ms_df["ticker"] == "NVDA"].iloc[0]
     assert nvda["predicted_growth"] == 0.0
 
@@ -215,10 +215,10 @@ def test_marketscape_preserves_zero_forecast(sample_snapshot_df):
 def test_generators_handle_empty_snapshot():
     """CLI/automation callers get a readable result instead of a KeyError."""
     empty = pd.DataFrame()
-    briefing = generate_idc_executive_briefing(date(2026, 6, 1), empty)
+    briefing = generate_research_briefing(date(2026, 6, 1), empty)
     assert "尚无已完成评分" in briefing
 
-    from arf.idc import generate_analyst_vendor_profile
+    from arf.analyst_desk import generate_analyst_vendor_profile
 
     profile = generate_analyst_vendor_profile("NVDA", empty)
     assert "not found" in profile
@@ -230,7 +230,7 @@ def test_vendor_profile_renders_null_metrics_as_na(sample_snapshot_df, sample_fo
     df.loc[df["ticker"] == "NVDA", ["roe", "ps_ratio"]] = None
     df["implied_growth"] = None
 
-    from arf.idc import generate_analyst_vendor_profile
+    from arf.analyst_desk import generate_analyst_vendor_profile
 
     profile = generate_analyst_vendor_profile("NVDA", df, sample_forecast_df)
 
@@ -266,7 +266,7 @@ def test_spending_tracker_localizes_layer_names(sample_snapshot_df):
 
 def test_english_briefing_has_no_chinese(sample_snapshot_df, sample_forecast_df):
     """Regression: the English briefing previously emitted Chinese layer labels."""
-    briefing = generate_idc_executive_briefing(
+    briefing = generate_research_briefing(
         date(2026, 6, 1), sample_snapshot_df, sample_forecast_df, lang="en"
     )
 
@@ -274,10 +274,10 @@ def test_english_briefing_has_no_chinese(sample_snapshot_df, sample_forecast_df)
 
 
 def test_briefing_and_vendor_profile_with_news_df(sample_snapshot_df, sample_forecast_df):
-    """Ensure WSJ & NYT news intelligence seamlessly integrates into IDC briefing and vendor profile."""
+    """Ensure WSJ & NYT news intelligence seamlessly integrates into the briefing and vendor profile."""
     from datetime import UTC, datetime
 
-    from arf.idc import generate_analyst_vendor_profile
+    from arf.analyst_desk import generate_analyst_vendor_profile
 
     sample_news = pd.DataFrame([
         {
@@ -303,7 +303,7 @@ def test_briefing_and_vendor_profile_with_news_df(sample_snapshot_df, sample_for
     ])
 
     # 1. Executive briefing with news
-    en_briefing = generate_idc_executive_briefing(
+    en_briefing = generate_research_briefing(
         date(2026, 6, 1),
         sample_snapshot_df,
         sample_forecast_df,
@@ -313,7 +313,7 @@ def test_briefing_and_vendor_profile_with_news_df(sample_snapshot_df, sample_for
     assert "Financial Press Wire & Narrative Velocity" in en_briefing
     assert "https://wsj.com/nvidia-cowos" in en_briefing
 
-    zh_briefing = generate_idc_executive_briefing(
+    zh_briefing = generate_research_briefing(
         date(2026, 6, 1),
         sample_snapshot_df,
         sample_forecast_df,

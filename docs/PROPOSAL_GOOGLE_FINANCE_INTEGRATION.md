@@ -4,7 +4,7 @@
 **Status**: Proposed / Under Evaluation (Future Roadmap)  
 **Date**: 2026-11-06  
 **Authors**: Lead Architect & Antigravity AI  
-**Target Systems**: `arf/news/`, `arf/scoring.py` (V-score & Froth Flags), `arf/idc.py` (IDC MarketScape Desk)
+**Target Systems**: `arf/news/`, `arf/scoring.py` (V-score & Froth Flags), `arf/analyst_desk.py` (ARF Analyst Desk)
 
 ---
 
@@ -39,7 +39,7 @@ This proposal formalizes:
     policy leaks (BIS export curbs), CEO                syndication (Reuters, PR Newswire),
     interviews, capex revisions                         earnings dates, search interest
   • SNR: Very High (human editorial filtering)        • SNR: Moderate (algorithmic volume)
-  • ARF Usage: IDC MarketScape drafting,              • ARF Usage: Ticker sanity check, long-
+  • ARF Usage: analyst-desk drafting,              • ARF Usage: Ticker sanity check, long-
     executive qualitative briefings                     tail news radar, retail froth proxy
 ```
 
@@ -52,7 +52,7 @@ This proposal formalizes:
 | **Signal-to-Noise Ratio (SNR)** | **Very High**: Strict journalistic standards; negligible clickbait or robo-generated content. | **Moderate**: Includes corporate press releases, SEO algorithmic articles, and broker notes. |
 | **Coverage Breadth** | Focused on tier-1 macro entities (Nvidia, Apple, Microsoft, TSMC, OpenAI, ByteDance). | Exhaustive global coverage spanning US, HKEX, Shanghai, Shenzhen, and Europe. |
 | **Update Cadence** | Batch / daily editorial cycle (slower, deep context). | Real-time / streaming intraday price & headline updates. |
-| **Primary ARF Consumer** | `arf/idc.py` (IDC MarketScape Desk), Gemini Executive Briefing, Qualitative Narrative Validation. | `arf/scoring.py` (V-score sentiment, Froth Flag), `arf/news/` (Secondary supplier radar). |
+| **Primary ARF Consumer** | `arf/analyst_desk.py` (ARF Analyst Desk), Gemini Executive Briefing, Qualitative Narrative Validation. | `arf/scoring.py` (V-score sentiment, Froth Flag), `arf/news/` (Secondary supplier radar). |
 
 ---
 
@@ -104,7 +104,7 @@ When implemented, the news and intelligence pipeline will follow this layered wo
        ├─► Tier 1: Editorial Wires (WSJ / NYT via arf/news/)
        │      │
        │      └─► Filter: High-impact macro AI themes & executive scoops
-       │      └─► Destination: IDC MarketScape Briefings & Gemini CIO Narrative
+       │      └─► Destination: ARF Analyst Desk Briefings & Gemini CIO Narrative
        │
        ├─► Tier 2: Curated Aggregation (Google Finance / Google News RSS)
        │      │

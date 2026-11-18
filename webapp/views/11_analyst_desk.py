@@ -1,4 +1,4 @@
-"""IDC Quanta™ AI Analyst Research Desk — MarketScape™, Spending Guide & Research Studio."""
+"""ARF Analyst Desk — vendor quadrant, AI spending tracker and research studio."""
 
 import contextlib
 
@@ -8,15 +8,15 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-from arf.forecast import capex_to_customer_shocks
-from arf.idc import (
+from arf.analyst_desk import (
     CAPABILITY_LEADER_THRESHOLD,
     STRATEGY_LEADER_THRESHOLD,
     compute_ai_spending_tracker,
-    compute_idc_marketscape,
+    compute_vendor_quadrant,
     generate_analyst_vendor_profile,
-    generate_idc_executive_briefing,
+    generate_research_briefing,
 )
+from arf.forecast import capex_to_customer_shocks
 from webapp import data
 from webapp.mobile import inject_mobile_css, show_plotly
 from webapp.ui import get_current_lang, render_sidebar, tr
@@ -25,8 +25,8 @@ is_en = get_current_lang() == "en"
 
 st.set_page_config(
     page_title=(
-        "IDC Quanta™ Analyst Research Desk — ARF MarketScape™" if is_en
-        else "IDC Quanta™ 分析师工作台 — ARF MarketScape™"
+        "ARF Analyst Desk — Vendor Quadrant & AI Spending" if is_en
+        else "ARF 分析师工作台 — 厂商象限与 AI 支出追踪"
     ),
     page_icon="🌐",
     layout="wide",
@@ -87,16 +87,16 @@ def _cat(category: object, is_en: bool) -> str:
 
 # ── Analyst Desk Header ──────────────────────────────────────────────────────
 st.title(
-    "🌐 IDC Quanta™ AI Analyst Research Desk (MarketScape™)"
+    "🌐 ARF Analyst Desk (Vendor Quadrant & AI Spending)"
     if is_en
-    else "🌐 IDC Quanta™ AI 分析师研报工作台 (Research Desk)"
+    else "🌐 ARF 分析师工作台 (厂商象限与 AI 支出)"
 )
 st.caption(
     tr(
-        "IDC 官方标准 AI 产业链全景智库：集成 IDC MarketScape™ 厂商战略能力双轴评估、全球 AI 产业支出指南 (Worldwide AI Spending Guide)、"
+        "独立 AI 产业链全景智库：集成 ARF 厂商象限双轴评估、全球 AI 产业支出追踪 (Global AI Spending Tracker)、"
         "供应链 Leontief 瓶颈压力沙盘与 1-Click 分析师快报起草台。",
-        "IDC Official AI Ecosystem Intelligence: Integrating IDC MarketScape™ Dual-Axis Capabilities & Strategies Evaluation, "
-        "Worldwide AI Spending Guide, Leontief Supply-Chain Bottleneck Sandbox, and 1-Click Analyst Briefing Studio.",
+        "Independent AI Ecosystem Intelligence: Integrating ARF Vendor Quadrant Dual-Axis Capabilities & Strategies Evaluation, "
+        "Global AI Spending Tracker, Leontief Supply-Chain Bottleneck Sandbox, and 1-Click Analyst Briefing Studio.",
     )
 )
 
@@ -146,15 +146,15 @@ links_df = pd.DataFrame()
 with contextlib.suppress(Exception):
     links_df = data.load_supply_chain_links()
 
-# Compute IDC intelligence datasets
-ms_df = compute_idc_marketscape(snap_df, fc_df)
+# Compute analyst-desk datasets
+ms_df = compute_vendor_quadrant(snap_df, fc_df)
 spending = compute_ai_spending_tracker(snap_df, lang="en" if is_en else "zh")
 
 if ms_df.empty:
     st.warning(
         tr(
-            "该快照没有可用的评分数据，无法生成 MarketScape 分析。",
-            "No scored vendor data available in this snapshot to generate MarketScape analysis.",
+            "该快照没有可用的评分数据，无法生成 Vendor Quadrant 分析。",
+            "No scored vendor data available in this snapshot to generate Vendor Quadrant analysis.",
         )
     )
     st.stop()
@@ -220,24 +220,24 @@ st.caption(
 st.divider()
 
 # ── 6 Core Tabs of the Analyst Research Desk ─────────────────────────────────
-tab_marketscape, tab_deepdive, tab_sandbox, tab_spending, tab_press, tab_studio = st.tabs([
-    tr("🎯 IDC MarketScape™ 厂商竞争矩阵", "🎯 IDC MarketScape™ Quadrant Matrix"),
+tab_quadrant, tab_deepdive, tab_sandbox, tab_spending, tab_press, tab_studio = st.tabs([
+    tr("🎯 ARF 厂商象限", "🎯 ARF Vendor Quadrant"),
     tr("🔬 厂商深度调研与对标台", "🔬 Vendor Deep-Dive & Peer Radar"),
     tr("🛠️ 供应链需求与瓶颈沙盘", "🛠️ Supply-Chain Shock Sandbox"),
-    tr("📊 全球 AI 产业支出指南", "📊 Worldwide AI Spending Guide"),
+    tr("📊 全球 AI 产业支出追踪", "📊 Global AI Spending Tracker"),
     tr("📰 WSJ & NYT 金融舆情前沿", "📰 WSJ & NYT Financial Press Wire"),
     tr("📝 分析师快报与研报起草台", "📝 Analyst Briefing & Studio"),
 ])
 
-# ── TAB 1: IDC MarketScape ───────────────────────────────────────────────────
-with tab_marketscape:
+# ── TAB 1: ARF Vendor Quadrant ───────────────────────────────────────────────────
+with tab_quadrant:
     st.subheader(
-        tr("🎯 IDC MarketScape: 全球 AI 价值链厂商定位", "🎯 IDC MarketScape: Global AI Value Chain Positioning")
+        tr("🎯 ARF 厂商象限: 全球 AI 价值链厂商定位", "🎯 ARF Vendor Quadrant: Global AI Value Chain Positioning")
     )
     if is_en:
         st.markdown(
             """
-            > **Evaluation Framework**: The IDC MarketScape employs a quantitative dual-axis model:
+            > **Evaluation Framework**: The ARF Vendor Quadrant employs a quantitative dual-axis model:
             > - **Y-Axis Capabilities (Execution Quality & Margins)**: Assesses ROE, gross margins, supply-chain criticality, and valuation quality.
             > - **X-Axis Strategies (Forward Growth Trajectory)**: Assesses quantitative AI exposure (E-score), 12M forward revenue forecast, and consensus revision velocity.
             > - **Bubble Size**: Equity Market Capitalization (USD). **Bubble Color**: US Leg (Cyan) vs Greater China Leg (Rose).
@@ -246,7 +246,7 @@ with tab_marketscape:
     else:
         st.markdown(
             """
-            > **评估体系**：IDC MarketScape 采用行业金标准双轴模型。
+            > **评估体系**：ARF Vendor Quadrant 采用行业金标准双轴模型。
             > - **纵轴 Capabilities (当前交付与财务质量)**：评估 ROE 资产收益率、毛利率、AI 供应链关键度与估值质量；
             > - **横轴 Strategies (未来战略与增长动能)**：评估 AI 暴露度 (E-score)、前瞻 12 个月预测营收复合增速与一致预期修正动能；
             > - **气泡大小**：代表厂商当前美元总市值；**气泡颜色**：代表中美双轨价值链归属。
@@ -318,7 +318,7 @@ with tab_marketscape:
             | plot_df["name"].str.upper().str.contains(q, regex=False)
         ]
 
-    # Create Plotly MarketScape Quadrant
+    # Create Plotly Vendor Quadrant Quadrant
     if not plot_df.empty:
         fig = go.Figure()
 
@@ -381,7 +381,7 @@ with tab_marketscape:
             hover_texts = [
                 f"<b>{r['name']}</b> ({r['ticker']})<br>"
                 f"Region: {r['leg']} | Layer: {r['layer']}<br>"
-                f"Quadrant: <b>{_cat(r['marketscape_category'], True)}</b><br>"
+                f"Quadrant: <b>{_cat(r['quadrant_category'], True)}</b><br>"
                 f"Capabilities Score: <b>{r['capabilities_score']:.1f}</b><br>"
                 f"Strategies Score: <b>{r['strategies_score']:.1f}</b><br>"
                 f"Market Cap: {_usd_b(r['market_cap_b'])} | Real AI Rev: {_usd_b(r['ai_revenue_est_b'])}<br>"
@@ -393,7 +393,7 @@ with tab_marketscape:
             hover_texts = [
                 f"<b>{r['name']}</b> ({r['ticker']})<br>"
                 f"区域: {r['leg']} | 层级: {r['layer']}<br>"
-                f"阵营: <b>{_cat(r['marketscape_category'], False)}</b><br>"
+                f"阵营: <b>{_cat(r['quadrant_category'], False)}</b><br>"
                 f"交付质量 (Capabilities): <b>{r['capabilities_score']:.1f}</b><br>"
                 f"战略动能 (Strategies): <b>{r['strategies_score']:.1f}</b><br>"
                 f"市值: {_usd_b(r['market_cap_b'])} | 实质AI收入: {_usd_b(r['ai_revenue_est_b'])}<br>"
@@ -425,8 +425,8 @@ with tab_marketscape:
         fig.update_layout(
             title=dict(
                 text=tr(
-                    f"<b>IDC MarketScape：全球 AI 厂商评估 ({as_of})</b>",
-                    f"<b>IDC MarketScape: Global AI Vendors Assessment ({as_of})</b>",
+                    f"<b>ARF Vendor Quadrant：全球 AI 厂商评估 ({as_of})</b>",
+                    f"<b>ARF Vendor Quadrant: Global AI Vendors Assessment ({as_of})</b>",
                 ),
                 font=dict(size=17, color="#0f172a"),
             ),
@@ -455,10 +455,10 @@ with tab_marketscape:
 
     # Vendor Detail Table
     st.markdown(
-        tr("#### 📋 厂商全景明细表 (IDC MarketScape Vendor Scorecard)", "#### 📋 IDC MarketScape Vendor Scorecard")
+        tr("#### 📋 厂商全景明细表 (ARF Vendor Quadrant Scorecard)", "#### 📋 ARF Vendor Quadrant Scorecard")
     )
     display_cols = [
-        "ticker", "name", "leg", "layer", "marketscape_category",
+        "ticker", "name", "leg", "layer", "quadrant_category",
         "capabilities_score", "strategies_score", "market_cap_b",
         "ai_revenue_est_b", "predicted_growth", "arf", "froth_flag",
     ]
@@ -475,7 +475,7 @@ with tab_marketscape:
         formatted_df["Froth Circuit"] = formatted_df["Froth Circuit"].apply(lambda x: "🔴 BREACHED" if x else "🟢 NORMAL")
     else:
         formatted_df.columns = [
-            "标的代码", "厂商名称", "区域", "层级", "IDC阵营分类",
+            "标的代码", "厂商名称", "区域", "层级", "象限分类",
             "交付质量", "战略动能", "市值 ($B)", "实质AI收入 ($B)",
             "预测增速", "ARF", "泡沫熔断",
         ]
@@ -493,8 +493,8 @@ with tab_deepdive:
     )
     st.caption(
         tr(
-            "供 IDC 分析师针对指定标的展开全景画像穿透：透视财务质量、逆向 DCF 增长预期、客户供应链拓扑与同业对标。",
-            "Authoritative deep-dive workspace for IDC analysts: financial viability, reverse-DCF implied growth, supply chain topology, and head-to-head peer benchmarking.",
+            "供分析师针对指定标的展开全景画像穿透：透视财务质量、逆向 DCF 增长预期、客户供应链拓扑与同业对标。",
+            "Authoritative deep-dive workspace for research analysts: financial viability, reverse-DCF implied growth, supply chain topology, and head-to-head peer benchmarking.",
         )
     )
 
@@ -522,11 +522,11 @@ with tab_deepdive:
 
     cat_badge = (
         ("🟢 Leader" if is_en else "🟢 领军者 (Leader)")
-        if v_primary["marketscape_category"] == "Leaders"
+        if v_primary["quadrant_category"] == "Leaders"
         else ("🔵 Major Player" if is_en else "🔵 主要厂商 (Major Player)")
-        if v_primary["marketscape_category"] == "Major Players"
+        if v_primary["quadrant_category"] == "Major Players"
         else ("🟠 Contender" if is_en else "🟠 挑战者 (Contender)")
-        if v_primary["marketscape_category"] == "Contenders"
+        if v_primary["quadrant_category"] == "Contenders"
         else ("⚪ Participant" if is_en else "⚪ 参与者 (Participant)")
     )
 
@@ -570,7 +570,7 @@ with tab_deepdive:
     )
     dim_lbl = "Dimension" if is_en else "指标维度"
     peer_metrics_table = [
-        {dim_lbl: tr("IDC MarketScape 阵营", "MarketScape Quadrant"), chosen_ticker: _cat(v_primary["marketscape_category"], is_en), peer_ticker: _cat(v_peer["marketscape_category"], is_en)},
+        {dim_lbl: tr("ARF Vendor Quadrant 阵营", "Vendor Quadrant Quadrant"), chosen_ticker: _cat(v_primary["quadrant_category"], is_en), peer_ticker: _cat(v_peer["quadrant_category"], is_en)},
         {dim_lbl: tr("Capabilities (交付与财务质量)", "Capabilities (Execution Quality)"), chosen_ticker: f"{v_primary['capabilities_score']:.1f}", peer_ticker: f"{v_peer['capabilities_score']:.1f}"},
         {dim_lbl: tr("Strategies (未来战略与增速)", "Strategies (Forward Momentum)"), chosen_ticker: f"{v_primary['strategies_score']:.1f}", peer_ticker: f"{v_peer['strategies_score']:.1f}"},
         {dim_lbl: tr("资本总市值 (USD)", "Equity Market Cap (USD)"), chosen_ticker: f"${v_primary['market_cap_b']:.1f}B", peer_ticker: f"${v_peer['market_cap_b']:.1f}B"},
@@ -693,7 +693,7 @@ with tab_sandbox:
     if is_en:
         st.markdown(
             """
-            > **IDC Proprietary Leontief Shock Sandbox**: Empowers analysts to simulate enterprise-wide impacts:
+            > **ARF Leontief Shock Sandbox**: Empowers analysts to simulate enterprise-wide impacts:
             > When hyperscalers (Microsoft, Google, Meta) revise compute CapEx, demand signals propagate across midstream hardware, optical transceivers, and foundries,
             > subject to physical capacity clamps (CoWoS advanced packaging and high-voltage electrical grid capacity).
             """
@@ -701,7 +701,7 @@ with tab_sandbox:
     else:
         st.markdown(
             """
-            > **IDC 独创 Leontief 传导沙盒**：供分析师向企业客户或投资者推演：
+            > **ARF Leontief 传导沙盒**：供分析师向企业客户或投资者推演：
             > 当下游云巨头 (Microsoft, Google, Meta) 调整 AI 算力资本开支时，需求拉动如何沿价值链逐级传导至中上游硬件制造、光模块与晶圆代工，
             > 并受制于 CoWoS 先进封装与高压电网的硬性产能瓶颈夹钳。
             """
@@ -797,22 +797,22 @@ with tab_sandbox:
     except Exception as exc:
         st.info(f"Scenario simulation note: {exc}" if is_en else f"情景模拟沙盘运算提示: {exc}")
 
-# ── TAB 4: Worldwide AI Spending Guide ────────────────────────────────────────
+# ── TAB 4: Global AI Spending Tracker ────────────────────────────────────────
 with tab_spending:
     st.subheader(
-        tr("📊 全球 AI 产业支出与泡沫乘数分布 (Worldwide AI Spending Guide)", "📊 Worldwide AI Spending Guide & Bubble Multipliers")
+        tr("📊 全球 AI 产业支出与泡沫乘数分布 (Global AI Spending Tracker)", "📊 Global AI Spending Tracker & Bubble Multipliers")
     )
     if is_en:
         st.markdown(
             """
-            > **IDC Macro Spending Intelligence**: Tracks the ratio of **Equity Market Cap** to **Annualized Economic AI Revenue** across the 5 stack layers.
+            > **ARF Macro Spending Intelligence**: Tracks the ratio of **Equity Market Cap** to **Annualized Economic AI Revenue** across the 5 stack layers.
             > A higher multiplier indicates that more speculative future narrative is embedded into current valuations.
             """
         )
     else:
         st.markdown(
             """
-            > **IDC 宏观支出指南**：追踪 5 层 AI 架构中**资本市值 (Equity Market Cap)** 与**实质年化 AI 支出/收入 (Annualized AI Spending)** 的比值；
+            > **ARF 宏观支出追踪**：追踪 5 层 AI 架构中**资本市值 (Equity Market Cap)** 与**实质年化 AI 支出/收入 (Annualized AI Spending)** 的比值；
             > 倍数越高，表明当前估值中注入的「未来增长叙事资本」越多。当物理基础设施增速无法承接下游算力扩张时，泡沫溢价最先发生均值回归。
             """
         )
@@ -920,7 +920,7 @@ with tab_press:
     if is_en:
         st.markdown(
             """
-            > **IDC Automated Financial Press Wire**: Continuously ingests and classifies live intelligence from **The Wall Street Journal** and **The New York Times** across Jensen Huang's 5-layer AI stack.
+            > **ARF Financial Press Wire**: Continuously ingests and classifies live intelligence from **The Wall Street Journal** and **The New York Times** across Jensen Huang's 5-layer AI stack.
             > 
             > **Grounding in Institutional Research**:
             > - **US vs. China Equity Valuation Spread**: Reconciling valuation multiples with corporate capital allocation (share buybacks vs. equity dilution) and cost-of-equity hurdles (*Reference: China vs. US Equity Markets*).
@@ -930,7 +930,7 @@ with tab_press:
     else:
         st.markdown(
             """
-            > **IDC 金融媒体智库前沿**：实时抓取并解析《华尔街日报》(WSJ) 与《纽约时报》(NYT) 权威报道，深度对齐黄仁勋 AI 产业链五层金字塔。
+            > **ARF 金融媒体智库前沿**：实时抓取并解析《华尔街日报》(WSJ) 与《纽约时报》(NYT) 权威报道，深度对齐黄仁勋 AI 产业链五层金字塔。
             > 
             > **学术与机构研报底座支撑**：
             > - **中美估值差与股东回报治理**：印证《China vs. US Equity Markets》研究结论，跟踪美股高估值背后的大规模股份回购与股本注销，对比中股在「新国九条」市值管理驱动下的分红与回购破冰。
@@ -1077,12 +1077,12 @@ with tab_press:
 # ── TAB 6: Analyst Drafting Studio ───────────────────────────────────────────
 with tab_studio:
     st.subheader(
-        tr("📝 IDC 分析师快报与研报起草台 (Analyst Drafting Studio)", "📝 IDC Analyst Drafting Studio & Research Notes")
+        tr("📝 分析师快报与研报起草台 (Analyst Drafting Studio)", "📝 Analyst Drafting Studio & Research Notes")
     )
     st.caption(
         tr(
-            "供 IDC 分析师一键生成官方格式的《IDC 厂商单页调研档案 (Vendor Profile)》或《IDC 全球宏观研究报告 (MarketScape Briefing)》。",
-            "Instant 1-click generator for official-format IDC Research Notes: Single-Vendor Profiles and Global MarketScape Briefings.",
+            "供分析师一键生成本台格式的《ARF 厂商单页调研档案 (Vendor Profile)》或《ARF 全球宏观研究简报 (Global Briefing)》。",
+            "Instant 1-click generator for ARF research notes: single-vendor profiles and global industry briefings.",
         )
     )
 
@@ -1091,9 +1091,9 @@ with tab_studio:
     recent_news_df = data.load_news_signals(days=30, limit=100, as_of=as_of)
 
     draft_opts = (
-        ["🔬 Single-Vendor Deep Dive Profile (IDC Format)", "🌐 Global AI Industry Overview & MarketScape Briefing"]
+        ["🔬 Single-Vendor Deep Dive Profile (ARF Format)", "🌐 Global AI Industry Overview & Vendor Quadrant Briefing"]
         if is_en
-        else ["🔬 指定厂商深度调研档案 (IDC Vendor Profile)", "🌐 IDC 全球 AI 竞争全景与支出宏观研报 (Global Briefing)"]
+        else ["🔬 指定厂商深度调研档案 (ARF Vendor Profile)", "🌐 ARF 全球 AI 竞争全景与支出宏观研报 (Global Briefing)"]
     )
     draft_mode = st.radio(
         tr("选择起草类型 (Drafting Template)", "Select Research Template"),
@@ -1111,7 +1111,7 @@ with tab_studio:
             key="studio_ticker_select",
         )
         analyst_notes_input = st.text_area(
-            tr("✍️ IDC 分析师独家洞察与买方采购指引 (可选自定义批注)", "✍️ IDC Analyst Custom Commentary & Buyer Guidance (Optional)"),
+            tr("✍️ 分析师独家洞察与买方采购指引 (可选自定义批注)", "✍️ Analyst Custom Commentary & Buyer Guidance (Optional)"),
             placeholder=tr(
                 "输入您对该厂商的实地调研结论、商业洽谈观察或核心护城河评估...",
                 "Enter field notes, commercial buyer observations, or proprietary moat assessments...",
@@ -1132,18 +1132,18 @@ with tab_studio:
         col_d1, col_d2 = st.columns([4, 2])
         with col_d1:
             st.download_button(
-                label=tr(f"📥 导出 IDC 厂商档案: {studio_ticker} (Markdown)", f"📥 Download IDC Vendor Profile: {studio_ticker} (Markdown)"),
+                label=tr(f"📥 导出 ARF 厂商档案: {studio_ticker} (Markdown)", f"📥 Download ARF Vendor Profile: {studio_ticker} (Markdown)"),
                 data=vendor_profile_md,
-                file_name=f"IDC_Vendor_Profile_{studio_ticker}_{as_of.isoformat()}.md",
+                file_name=f"ARF_Vendor_Profile_{studio_ticker}_{as_of.isoformat()}.md",
                 mime="text/markdown",
             )
         with st.expander(
-            tr(f"🔍 预览 IDC 厂商调研快报: {studio_ticker}", f"🔍 Preview IDC Vendor Profile: {studio_ticker}"),
+            tr(f"🔍 预览 ARF 厂商调研快报: {studio_ticker}", f"🔍 Preview ARF Vendor Profile: {studio_ticker}"),
             expanded=True,
         ):
             st.markdown(vendor_profile_md)
     else:
-        briefing_md = generate_idc_executive_briefing(
+        briefing_md = generate_research_briefing(
             as_of,
             snap_df,
             fc_df,
@@ -1151,13 +1151,13 @@ with tab_studio:
             lang=curr_lang,
         )
         st.download_button(
-            label=tr("📥 导出完整 IDC 行业全景研报 (Markdown)", "📥 Download Full IDC MarketScape Executive Briefing (Markdown)"),
+            label=tr("📥 导出完整 ARF 行业全景研报 (Markdown)", "📥 Download Full ARF Vendor Quadrant Executive Briefing (Markdown)"),
             data=briefing_md,
-            file_name=f"IDC_MarketScape_AI_Briefing_{as_of.isoformat()}.md",
+            file_name=f"ARF_Global_AI_Briefing_{as_of.isoformat()}.md",
             mime="text/markdown",
         )
         with st.expander(
-            tr("🔍 预览完整 IDC 行业研报", "🔍 Preview Full IDC MarketScape Briefing"),
+            tr("🔍 预览完整 ARF 行业研报", "🔍 Preview Full ARF Vendor Quadrant Briefing"),
             expanded=True,
         ):
             st.markdown(briefing_md)
