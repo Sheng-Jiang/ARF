@@ -182,6 +182,45 @@ Ask **2 to 3** of these at the end—prioritize based on whether your interviewe
 
 ---
 
+## Appendix A: China Regulatory Filings & Data Security Classification Cheat Sheet (2025–2026)
+
+### A1. The 5-Layer China Regulatory Filing Stack
+Launching an enterprise AI platform in Mainland China involves up to five filings across three regulators (**MIIT**, **MPS/PSB**, and **CAC**). Knowing which tracks are mandatory, which are simplified, and which can be avoided via clean architecture prevents costly multi-month delays:
+
+| # | Filing / License | Regulator | Trigger & Applicability | Lead Time & Execution Lever |
+| :--- | :--- | :--- | :--- | :--- |
+| **1** | **ICP Filing (`ICP备案`)** *(vs. ICP Commercial License)* | **MIIT** (via China cloud vendor) | Hosting any web UI, domain, or API on a Mainland China server. Must be filed under the **local onshore China legal entity** (e.g., IDC Beijing WFOE), never a foreign parent. | **2–4 weeks.** Hard technical gate: China cloud firewalls block HTTP/HTTPS on unfiled domains. |
+| **2** | **PSB Networking Filing (`公安联网备案`) + MLPS 2.0 (`等保2.0`)** | **MPS / Local Public Security Bureau (PSB)** | PSB networking filing within 30 days of launch; MLPS Level 2 or Level 3 grading & filing under **GB/T 22239-2019**. | **3–6 months** end-to-end (Scoping → Expert Review → PSB Filing Certificate → Remediation & Licensed Lab Testing `测评`). |
+| **3** | **CAC AI Application Registration (`大模型登记`) vs. Model Filing (`大模型备案`)** | **Provincial CAC** (registration) / **National CAC** (full filing) via **`beian.cac.gov.cn`** | • **Full Model Filing (`大模型备案`, 6–8+ mos):** Training, pre-training, or substantially fine-tuning a public model.<br>• **Application Registration (`大模型登记`, 1–3 mos):** Calling an **already-filed China commercial LLM API** (Qwen, DeepSeek, Ernie, Doubao) with no weight modifications; must display upstream model name + filing number in UI.<br>• **Internal-Only Exemption:** Strictly internal enterprise use (zero public `境内公众` access) is generally exempt from GenAI public filings (CSL/DSL/PIPL/MLPS still apply). | **Key Architectural Lever:** Consuming pre-filed commercial APIs behind a non-intrusive gateway avoids a 6–8 month national filing bottleneck. |
+| **4** | **Algorithm Filing (`算法备案`) + AI Content Labeling (`GB 45438-2025`)** | **CAC** (`beian.cac.gov.cn`) | Generative/synthesis or ranking algorithms with public-opinion / social-mobilization attributes. Under the **Sept 1, 2025** labeling rules + **GB 45438-2025**, public AI services must apply both **explicit** (visible UI notice) and **implicit** (file metadata) labels. | **1–3 months** (submitted alongside `大模型登记` on the consolidated CAC portal). Content-labeling headers/notices can be injected at the China Edge Gateway with zero core codebase changes. |
+| **5** | **Cross-Border Data Transfer (CBDT) Filing** | **CAC** | Only triggered if **Important Data** or **Personal Information (PI)** above statutory annual thresholds leaves Mainland China (e.g., telemetry, logs, user directories). | **Exempt** if designed cleanly under March 2024 thresholds (see A2 below). |
+
+### A2. China Data Security Classification Standards & Thresholds
+- **GB/T 43697-2024 (*Rules for Data Classification and Grading*, effective Oct 1, 2024):** Operationalizes Data Security Law (DSL) Art. 21 via a 3-step method (*Industry Sector → Business Attribute/Process → Compromise Impact Matrix*), classifying data into three tiers:
+  1. **Core Data (`核心数据`):** Direct political security, national security lifelines, or major public interest impact. Strictest prohibitions.
+  2. **Important Data (`重要数据`):** Sector/region-specific data impacting economic operations, social stability, or public health/safety—identified via regulator-issued **Important Data Catalogs**. *Critical exclusion:* data whose impact is limited solely to a single enterprise or individual is generally **not** Important Data.
+  3. **General Data (`一般数据`):** Everything outside Core and Important Data (routine commercial/enterprise data, typically sub-graded internally Levels 1–4 for access and encryption controls).
+- **Network Data Security Management Regulation (`《网络数据安全管理条例》`, State Council Decree No. 790, effective Jan 1, 2025):** Unifies execution of **CSL + DSL + PIPL**, requiring handlers of Important Data to maintain formal catalogs, appoint a dedicated data security officer, and run annual risk assessments.
+- **MLPS 2.0 (`GB/T 22239-2019` & `GB/T 22240`):**
+  - **Level 2:** General enterprise systems / limited-impact internal apps; PSB filing mandatory, typically reassessed every **2 years**.
+  - **Level 3:** Core business/commercial platforms or large user repositories; mandatory **pre-launch + annual** licensed lab evaluation (`测评机构`), expert review (`专家评审`), and *"One Center, Three Defenses"* (`一个中心，三重防护`: centralized audit/security ops + network, perimeter, and compute protection, WAF, DB audit, ≥6-month log retention).
+  - **Cloud Shared-Responsibility Caveat:** Hosting on Alibaba Cloud / Tencent Cloud (whose physical IaaS holds MLPS Level 3) **does not make the tenant compliant**—IDC remains the legal *"Network Operator"* for its VPC, servers, databases, identity federation, and app layer.
+- **Cross-Border Data Flow Thresholds (CAC Order No. 16 — March 22, 2024) + Beijing FTZ Negative List:**
+  - Calculated **cumulatively from January 1 of the calendar year** for non-CIIOs:
+    - **`< 100,000` non-sensitive PI individuals / year:** **Exempt** from CAC Security Assessment, Standard Contract (SCC), and certification.
+    - **`100,000 – 1,000,000` non-sensitive PI** (and `< 10,000` sensitive PI): Standard Contract (SCC) filing or PI certification.
+    - **`≥ 1,000,000` non-sensitive PI**, **`≥ 10,000` sensitive PI**, or **any Important Data**: Mandatory formal CAC Security Assessment.
+  - **Beijing Entity Advantage:** Entities registered inside the **China (Beijing) Pilot Free Trade Zone** follow the **Beijing FTZ Data Export Negative List** first—transfers outside negative-list scenarios use simplified export channels.
+- **Generative AI Safety & Labeling Standards (`GB/T 45654-2025` & `GB 45438-2025`):** **GB/T 45654-2025** (formalized from **TC260-003**) codifies testable security clauses (corpus IP/legality provenance, refusal benchmarks, safety moderation) used during CAC filing evaluations; **GB 45438-2025** governs explicit + implicit synthetic content labeling effective **Sept 1, 2025**.
+
+### A3. 4 Practitioner Soundbites for the US Interviewer
+1. **Architecture Drives Compliance Scope:** *"By calling already-filed China commercial model APIs via a non-intrusive gateway—with zero model weight fine-tuning—we stay out of the 6–8 month national `大模型备案` track and keep scope to provincial registration (or internal-use exemption if not public-facing)."*
+2. **No False Security from Cloud Vendor Badges:** *"Cloud IaaS MLPS Level 3 certificates cover Alibaba or Tencent's infrastructure, not our application. We still own tenant-level MLPS Level 2/3 scoping, PSB filing, and licensed testing on our VPC, WAF, DB audit, and 180-day logs."*
+3. **Engineering Below Cross-Border Filing Thresholds:** *"By pairing OIDC/SAML pseudonymized tokens with GB/T 43697-2024 classification showing zero Core or Important Data, routine cross-border operational telemetry stays comfortably under the March 2024 100,000 non-sensitive PI exemption."*
+4. **Zero Core Codebase Impact Even for Sept 2025 AI Labeling:** *"Explicit and implicit AI content labels required under GB 45438-2025 can be injected cleanly inside the China Edge Gateway/adapter layer—zero changes to the US core platform codebase."*
+
+---
+
 ## 7. Quick Pre-Call Checklist (Friday Night / Saturday Morning BJT)
 - [ ] Join 5 minutes early; quiet room, strong wired/fiber connection, clean lighting (US Friday evening calls appreciate crisp audio/video).
 - [ ] Open in two pinned browser tabs (ready only if invited):
