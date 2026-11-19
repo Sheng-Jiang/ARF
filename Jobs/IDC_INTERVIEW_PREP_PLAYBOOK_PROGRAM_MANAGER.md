@@ -221,6 +221,48 @@ Launching an enterprise AI platform in Mainland China involves up to five filing
 
 ---
 
+## Appendix B: Split-Plane China Architecture — Why Mainland China (and Not Hong Kong)
+
+### B1. What Lives Inside Mainland China vs. Stays Outside (Split-Plane Model)
+The JD constraints (*zero core platform codebase changes*, *supporting server build-out*, *encryption with keys held outside China*, and *zero raw data transmission to model providers*) point cleanly to a **Split-Plane Architecture**: a thin onshore **China Edge / Execution Plane** bridged via narrow contracts to an untouched **Global Core Plane**.
+
+| Plane | Components | Purpose |
+| :--- | :--- | :--- |
+| **Global Core Plane** *(Stays Outside China)* | • Core platform codebase (Java/Spring, core orchestration, zero forks)<br>• Master 60-year research & tracker corpus (read-only/cleared subset exposed via MCP/REST)<br>• **Root Encryption Keys (`KEKs` / Western KMS)** held offshore for cryptographic sovereignty & instant revocation<br>• Global billing & subscription entitlement truth | Zero global codebase fragmentation; strong IP protection; instant cryptographic kill switch. |
+| **China Edge / Execution Plane** *(Deployed Inside Mainland China)* | • **China-Approved LLM Gateway & Data-Protection Proxy:** Private VPC egress to Qwen / DeepSeek / Ernie / GLM with pre-inference sanitization<br>• **In-Country Customer Context Workspace ("Supporting Servers"):** Malware/prompt-injection scan, 90-day retention & wrapped DEKs for client uploads<br>• **Local IdP Bridge & China Surfaces:** SAML/OIDC pseudonymized SSO + **WeCom / Feishu / DingTalk** apps & ICP-filed web UI<br>• **Compliance Telemetry:** MLPS 2.0 WAF, DB audit, ≥180-day logs & `GB 45438-2025` edge content labeling | Meets PRC data residency, passes enterprise CISOs, removes GFW latency, and prevents raw data leakage to Chinese LLM APIs. |
+
+### B2. Why Hong Kong Fails (4 Hard Walls)
+Deploying into Hong Kong avoids ICP, MLPS 2.0, and CAC filings on paper, but breaks in practice across four barriers:
+1. **Anthropic / Claude Still Blocks Hong Kong — & Chinese-Owned Entities:** Hong Kong is **not** on Anthropic's Supported Regions list across Claude.ai, Claude API, Claude Code, or cloud resellers, and Anthropic restricts entities incorporated or majority-owned/controlled from China/HK. HK still forces a swap to domestic Chinese LLMs.
+2. **Hong Kong Is Legally "Overseas (`境外`)" Under PIPL & DSL:** Sending Mainland enterprise documents (budgets, RFPs, strategy files) from Beijing/Shanghai to a Hong Kong server constitutes an **outbound cross-border data transfer**—pushing CAC/CISO liability directly onto IDC's paying Chinese customers.
+3. **Great Firewall Jitter Breaks Embedded Workflows:** Streaming SSE/MCP interactions across the GFW suffer unpredictable packet loss and TLS resets, undermining real-time chat/email SLAs and reliable WeCom/Feishu/DingTalk webhooks.
+4. **CAC Extraterritorial Enforcement:** Under China's GenAI Measures and the Jan 2025 Network Data Security Management Regulation, an offshore AI platform targeting Mainland commercial users remains subject to CAC jurisdiction and GFW blocking risk.
+
+### B3. What a Mainland Deployment Buys IDC (Commercial & Technical)
+- **Commercial Upside & Churn Defense:** Retains major Chinese accounts (**Huawei, Alibaba, Tencent, Lenovo, ByteDance, ZTE, telcos, major banks/EVs**) transitioning away from static PDF portals when US/Claude tools cannot run onshore.
+- **Clearing Binary Enterprise RFP Gates:** Passes mandatory Chinese procurement checkboxes (*Mainland hosting, MLPS 2.0, registered Chinese LLM, zero offshore file uploads*).
+- **High-Margin "Contextual" Lock-In & Cloud Co-Selling:** Enables Chinese CIOs to upload sensitive project/architecture files onshore cleanly and opens procurement through **Alibaba / Tencent / Huawei Cloud** marketplaces (matching AWS Marketplace globally).
+- **Technical & Legal Firewall for IDC Global:** Isolates China workloads behind a dedicated VPC, offshore key custody, pre-inference sanitization, and government-disclosure contract clauses—giving US General Counsel and Export Control teams a clean, auditable boundary protecting global IP.
+
+### B4. Why Not Pure "Ecosystem Pass-Through" (Outsourcing Workspace to Tencent / Alibaba)?
+*What it genuinely solves:* Just as Global Quanta embeds via stateless MCP into **Microsoft 365 Copilot** (never indexing IDC content into M365), routing on-the-fly from the US into a Tencent or Alibaba workspace avoids storing Chinese customer uploads on IDC servers, leverages their upstream CAC `大模型备案`, and gives instant user distribution.
+
+**However, pure pass-through hits 5 structural blockers on Day 1:**
+1. **"Neutral Switzerland" Conflict:** IDC China's biggest Tech Supplier clients (**Huawei, Alibaba, Tencent, ByteDance, Baidu, Lenovo**) operate rival walled gardens. Huawei, Alibaba, and ByteDance CIOs will not upload confidential strategy files into a Tencent-owned workspace (and vice versa).
+2. **Protecting IDC's Own Crown-Jewel IP & Validation Contract:** In a vendor-owned workspace, the ecosystem host controls agent memory, prompt caching, and encryption keys—exposing IDC's 60-year research corpus and breaking IDC's multi-agent validation & mandatory citation guarantees (exactly why the JD mandates *no raw data transmission to model providers* and *keys held outside China*).
+3. **US-to-China Relay Latency & GFW Instability:** Quanta executes multi-step agent loops (intent → SQL tracker retrieval → citation cross-check). Bouncing sequential tool calls back and forth across the Pacific through the GFW triggers timeouts and TLS resets.
+4. **Commercial Disintermediation:** Handing over session state, workspace history, and billing UX turns IDC from an embedded *"intelligence layer"* into a commoditized RAG data pipe.
+5. **Remaining Onshore Obligations:** Even a pass-through relay under IDC's brand must still satisfy PIPL identity transfer rules, ICP-cleared endpoints for enterprise webhooks, Sept 2025 AI content labeling (`GB 45438-2025`), and US export-control auditability.
+
+**Phase 1 → Phase 2 Synthesis (Strongest Strategic Framing):**
+- **Phase 1 (Current PM Mandate — Neutral Onshore Foundation):** Stand up IDC's isolated, data-protected China VPC (offshore root `KEKs`, pre-inference sanitization, multi-LLM evaluation) to preserve vendor neutrality and protect global IP.
+- **Phase 2 (Multi-Ecosystem Stateless Connectors):** Once that sanitized gateway is live, expose stateless federated MCP connectors (mirroring M365 Copilot's *"pulled dynamically, never indexed"*) simultaneously across **WeCom, DingTalk, Feishu, and Huawei WeLink**—capturing ecosystem reach without surrendering workspace custody or locking into one rival giant.
+
+### B5. Peer-Level Interview Soundbite
+> *"What stands out cleanly in your design—keeping the core platform codebase and root encryption keys outside China while building an isolated onshore execution and domestic-LLM plane—is that it avoids both the Hong Kong trap and single-vendor ecosystem lock-in. Hong Kong still runs into Anthropic blocks, PIPL/DSL cross-border friction, and GFW jitter; meanwhile, outsourcing the whole workspace to Tencent or Alibaba on Day 1 creates neutrality conflicts across rival Chinese clients and exposes IDC's corpus and citation controls. Standing up a thin, neutral onshore plane in Phase 1 protects core IP while positioning us cleanly for Phase 2 stateless connectors across WeCom, DingTalk, and Feishu."*
+
+---
+
 ## 7. Quick Pre-Call Checklist (Friday Night / Saturday Morning BJT)
 - [ ] Join 5 minutes early; quiet room, strong wired/fiber connection, clean lighting (US Friday evening calls appreciate crisp audio/video).
 - [ ] Open in two pinned browser tabs (ready only if invited):
