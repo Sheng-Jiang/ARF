@@ -263,6 +263,36 @@ Deploying into Hong Kong avoids ICP, MLPS 2.0, and CAC filings on paper, but bre
 
 ---
 
+## Appendix C: China Cloud Provider Selection & Azure China (21Vianet) Reality Check
+
+### C1. First Principle — Audit Existing Hosting History First
+Before recommending any cloud vendor, the **Week 1 Discovery Step** is understanding how IDC's global intelligence services and any existing China footprint are currently hosted:
+- Confirm Global Quanta's primary hyperscaler (**AWS**, **Azure**, or **GCP**—noting IDC's global AWS Marketplace listing and Java/Spring + PostgreSQL + Frontegg stack), IaC tooling (Terraform/Bicep/CloudFormation), and existing commercial agreements.
+- Aligning the China cloud family with the global stack accelerates landing-zone stand-up while preserving the *"zero changes to core platform codebase"* boundary.
+
+### C2. Azure China (Operated by 21Vianet) — Strengths vs. Critical China Gotchas
+- **Genuine Strengths:**
+  - **Commercial Neutrality:** Like **AWS China (Sinnet/NWCD)**, Azure China sits outside the Alibaba / Tencent / Huawei / ByteDance rivalry—making competing Chinese Tech Suppliers far more willing to run competitive workloads there.
+  - **MLPS 2.0 Level 3 IaaS Baseline:** Operated locally by Shanghai Blue Cloud (**21Vianet**) with MLPS Level 3 underlying infrastructure certification (though IDC still owns tenant-level MLPS scoping & `测评` assessment).
+- **4 Sovereign Caveats to Call Out Up Front:**
+  1. **Physically & Logically Air-Gapped Tenant:** `portal.azure.cn`, `management.chinacloudapi.cn`, and `*.vault.azure.cn` run on a **separate Entra ID tenant** with no native global VNet peering and require a separate onshore **OSPA contract** with 21Vianet (+ `.cn` IaC refactoring and explicit SAML/OIDC federation).
+  2. **No Microsoft 365 Copilot / Azure Copilot in 21Vianet:** **M365 Copilot and Azure Copilot are NOT supported on 21Vianet sovereign tenants.** Do *not* pitch Azure China as reusing M365 Copilot onshore—its value is neutral IaaS/PaaS hosting for IDC's isolated VPC and domestic-LLM gateway.
+  3. **Standard BYOK Still Stores Keys Onshore:** Importing keys into `*.vault.azure.cn` puts active key material inside Mainland China HSMs. Meeting the JD mandate (*"keys held outside China"*) requires **HYOK / application-layer envelope encryption** keeping root `KEKs` offshore (evaluated with legal for latency & PRC cryptography rules).
+  4. **Statutory Limits on Disclosure Clauses:** PRC national security laws can constrain local operator prior-notification clauses—making defense-in-depth (**contract clauses + offshore `KEKs` + pre-inference sanitization**) essential.
+
+### C3. China Cloud Selection Matrix
+
+| Cloud Option | Best Fit When… | Key Watch-Outs |
+| :--- | :--- | :--- |
+| **Azure China (`21Vianet`)** | Global stack/identity leans Azure & Microsoft, and **neutrality across Chinese giants** is paramount. | Air-gapped `.cn` Entra/portal, separate 21Vianet OSPA, **no 21Vianet M365/Azure Copilot**, BYOK keys still sit onshore unless app-layer envelope/HYOK is added. |
+| **AWS China (`Sinnet` Beijing / `NWCD` Ningxia)** | Global platform runs primarily on **AWS** (strongest alignment with AWS Marketplace & Terraform reuse) + **vendor neutrality**. | Separate `amazonaws.com.cn` account/contract, separate KMS boundary, relies on external API egress to China-approved LLMs. |
+| **Alibaba Cloud / Tencent Cloud** | Top priority is **PrivateLink low latency to Qwen/Hunyuan/DeepSeek**, native DingTalk/WeCom hooks, or domestic cloud marketplace co-selling. | **Neutrality perception** among rival Tech Supplier accounts (Huawei, ByteDance, etc.); heavier US HQ security/legal review for gov-disclosure terms. |
+
+### C4. Ready-to-Use Interview Soundbite ("History First, Criteria-Driven Cloud Choice")
+> *"Before locking in a China cloud provider, my very first step is understanding how IDC's global intelligence services and any current China workloads are hosted—your IaC stack, Frontegg/IdP boundary, and existing AWS or Microsoft agreements. Matching the global cloud family—whether AWS China or Azure China operated by 21Vianet—gives us fast landing-zone reuse and commercial neutrality across competing Chinese giants. At the same time, we have to design around 21Vianet's real boundaries early: it runs an air-gapped `.cn` Entra tenant with a separate OSPA contract, M365 Copilot isn't supported on 21Vianet, and standard cloud BYOK keeps keys inside China HSMs—so offshore key custody must sit at the application-envelope layer."*
+
+---
+
 ## 7. Quick Pre-Call Checklist (Friday Night / Saturday Morning BJT)
 - [ ] Join 5 minutes early; quiet room, strong wired/fiber connection, clean lighting (US Friday evening calls appreciate crisp audio/video).
 - [ ] Open in two pinned browser tabs (ready only if invited):
