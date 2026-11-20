@@ -35,44 +35,6 @@ _PAGES = {
             {"path": "views/04_technical_backtest.py", "zh": "技术指标与回测", "en": "Technical Analysis & Backtest", "icon": "📈", "url_path": "technical-backtest"},
         ],
     ),
-    "analyst": (
-        {"zh": "研究台", "en": "Analyst Desk"},
-        [
-            {
-                "path": "views/11_analyst_desk.py",
-                "zh": "ARF 分析师工作台",
-                "en": "ARF Analyst Desk — Vendor Quadrant",
-                "icon": "🌐",
-                "url_path": "analyst-desk",
-            },
-            # Legacy deep links kept alive (hidden) so anything shared before the
-            # rename still resolves to the desk instead of a 404.
-            {
-                "path": "views/11_analyst_desk.py",
-                "zh": "分析师工作台 (旧链接)",
-                "en": "Analyst Desk (legacy link)",
-                "icon": "🌐",
-                "url_path": "IDC_MarketScape",
-                "visibility": "hidden",
-            },
-            {
-                "path": "views/11_analyst_desk.py",
-                "zh": "分析师工作台 (旧链接 2)",
-                "en": "Analyst Desk (legacy link 2)",
-                "icon": "🌐",
-                "url_path": "IDC_智库与厂商全景",
-                "visibility": "hidden",
-            },
-            {
-                "path": "views/11_analyst_desk.py",
-                "zh": "分析师工作台 (旧链接 3)",
-                "en": "Analyst Desk (legacy link 3)",
-                "icon": "🌐",
-                "url_path": "idc-marketscape",
-                "visibility": "hidden",
-            },
-        ],
-    ),
     "execution": (
         {"zh": "执行与模拟", "en": "Execution & Simulation"},
         [
@@ -87,11 +49,9 @@ _PAGES = {
     ),
 }
 
-# English keeps the analyst desk first for analyst-facing demos; Chinese mirrors
-# the historical ordering.
 _GROUP_ORDER = {
-    "en": ("analyst", "valuation", "research", "execution", "system"),
-    "zh": ("valuation", "research", "analyst", "execution", "system"),
+    "en": ("valuation", "research", "execution", "system"),
+    "zh": ("valuation", "research", "execution", "system"),
 }
 
 

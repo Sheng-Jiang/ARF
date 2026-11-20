@@ -240,9 +240,8 @@ def capex_to_customer_shocks(
     """Convert a multiplicative CapEx change into additive customer growth shocks.
 
     Each customer's base growth (consensus first, then the ARF forecast) is
-    scaled by the CapEx change. A single shared helper keeps every simulator
-    — the CIO cockpit and the analyst desk — producing the same delta for
-    the same user input.
+    scaled by the CapEx change so the simulator produces a consistent delta
+    for the same user input.
     """
     if not capex_change_pct:
         return {}

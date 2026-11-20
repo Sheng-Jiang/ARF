@@ -492,7 +492,7 @@ with tab_barometer:
         from arf.forecast import _num, capex_to_customer_shocks
 
         # Convert multiplicative CapEx slider (% change) into additive customer
-        # growth deltas. Shared with the analyst desk sandbox so both pages agree.
+        # growth deltas.
         cust_shocks = capex_to_customer_shocks(fc_df, capex_shock) or None
 
         clamp_param = (capacity_cap / 100.0) if capacity_cap < 100 else 0.80
